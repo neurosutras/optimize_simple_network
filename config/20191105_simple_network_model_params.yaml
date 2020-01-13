@@ -1,0 +1,24 @@
+20191105_H:
+  E_FF_mean_weight: 1.186153E+00
+  E_E_mean_weight: 7.565239E-01
+  E_I_mean_weight: 4.933992E-01
+  I_FF_mean_weight: 1.469741E+00
+  I_E_mean_weight: 1.228627E+00
+  I_I_mean_weight: 2.910859E+00
+  E_FF_weight_norm_sigma: 6.589013E-01
+  E_E_weight_norm_sigma: 7.034727E-01
+  E_I_weight_norm_sigma: 5.618293E-01
+  I_FF_weight_norm_sigma: 1.407380E-01
+  I_E_weight_norm_sigma: 4.309294E-01
+  I_I_weight_norm_sigma: 2.661832E-01
+  E_E_tau_offset: 8.279597E+00
+  E_I_tau_offset: 7.245314E+00
+  I_E_tau_offset: 1.731338E+01
+  I_I_tau_offset: 1.354424E+01
+  E_E_syn_proportion: 4.278232E-01
+  E_E_FF_syn_proportion: 5.188496E-01
+  I_E_syn_proportion: 4.935844E-01
+  I_E_FF_syn_proportion: 4.415774E-01
+  E_norm_syn_count: 1.886555E-01
+  I_norm_syn_count: 9.261309E-02
+  E_peak_delta_weight: 1.691708E+00

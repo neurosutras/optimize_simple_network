@@ -1,0 +1,57 @@
+20191213: TACC Frontera:
+
+idev -p development -N 1 -n 56 -m 60  # --tasks-per-node=56
+ibrun -n 56 python3 -m nested.optimize \
+    --config-file-path='config/optimize_simple_network_I_uniform_c_structured_w_gaussian_inp_config.yaml' --disp \
+    --analyze --procs_per_worker=56
+nested.optimize: worker initialization took 8.13 s
+NETWORK BUILD RUNTIME: 0.58 s
+NETWORK SIMULATION RUNTIME: 1.28 s
+NETWORK ANALYSIS RUNTIME: 2.91 s
+
+20190328_explore_Izkv_cell_properties.ipynb
+idev -p development -N 2 -n 56 -m 60  # --tasks-per-node=28
+ibrun -n 56 python3 -m nested.optimize \
+    --config-file-path='config/optimize_simple_network_I_uniform_c_structured_w_gaussian_inp_config.yaml' --disp \
+    --analyze --procs_per_worker=56
+nested.optimize: worker initialization took 7.39 s
+NETWORK BUILD RUNTIME: 0.24 s
+NETWORK SIMULATION RUNTIME: 2.13 s
+NETWORK ANALYSIS RUNTIME: 2.60 s
+
+
+idev -p development -N 2 -n 112 -m 60  # --tasks-per-node=56
+ibrun -n 112 python3 -m nested.optimize \
+    --config-file-path='config/optimize_simple_network_I_uniform_c_structured_w_gaussian_inp_config.yaml' --disp \
+    --analyze --procs_per_worker=112
+nested.optimize: worker initialization took 9.70 s
+NETWORK BUILD RUNTIME: 0.20 s
+NETWORK SIMULATION RUNTIME: 1.02 s
+NETWORK ANALYSIS RUNTIME: 2.56 s
+
+
+idev -p development -N 4 -n 112 -m 30  # --tasks-per-node=28
+ibrun -n 112 python3 -m nested.optimize \
+    --config-file-path='config/optimize_simple_network_I_uniform_c_structured_w_gaussian_inp_config.yaml' --disp \
+    --analyze --procs_per_worker=112
+nested.optimize: worker initialization took 7.84 s
+NETWORK BUILD RUNTIME: 0.16 s
+NETWORK SIMULATION RUNTIME: 0.72 s
+NETWORK ANALYSIS RUNTIME: 2.29 s
+
+
+idev -p development -N 4 -n 224 -m 30  # --tasks-per-node=56
+ibrun -n 224 python3 -m nested.optimize \
+    --config-file-path='config/optimize_simple_network_I_uniform_c_structured_w_gaussian_inp_config.yaml' --disp \
+    --analyze --procs_per_worker=224
+nested.optimize: worker initialization took 9.07 s
+NETWORK BUILD RUNTIME: 0.13 s
+NETWORK SIMULATION RUNTIME: 0.54 s
+NETWORK ANALYSIS RUNTIME: 2.28 s
+
+
+Larger model:
+idev -p development -N 10 -n 560 -m 60  # --tasks-per-node=56
+ibrun -n 560 python3 -m nested.optimize \
+    --config-file-path='config/optimize_simple_network_large_I_uniform_c_structured_w_gaussian_inp_config.yaml' \
+    --disp --analyze --procs_per_worker=560
