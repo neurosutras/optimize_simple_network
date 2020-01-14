@@ -50,8 +50,42 @@ NETWORK SIMULATION RUNTIME: 0.54 s
 NETWORK ANALYSIS RUNTIME: 2.28 s
 
 
+20200114: TACC Frontera:
+
+idev -p development -N 20 -n 1120 -m 120  # --tasks-per-node=56
+ibrun -n 112 python3 -m nested.optimize \
+    --config-file-path='config/optimize_simple_network_J_uniform_c_structured_w_gaussian_inp_config.yaml' --disp \
+    --analyze --procs_per_worker=112
+pid: 264385; worker initialization took 0.01 s
+pid: 264385; network initialization took 0.04 s
+pid: 264385; setting network input pattern took 0.27 s
+pid: 264385; building network connections took 0.06 s
+pid: 264385; network simulation took 1.08 s
+pid: 264385; analysis of network simulation results took 2.82 s
+nested.optimize: evaluating individual took 4.40 s
+
 Larger model:
-idev -p development -N 10 -n 560 -m 60  # --tasks-per-node=56
-ibrun -n 560 python3 -m nested.optimize \
-    --config-file-path='config/optimize_simple_network_large_I_uniform_c_structured_w_gaussian_inp_config.yaml' \
-    --disp --analyze --procs_per_worker=560
+idev -p development -N 20 -n 1120 -m 120  # --tasks-per-node=56
+ibrun -n 1120 python3 -m nested.optimize \
+    --config-file-path='config/optimize_simple_network_large_J_uniform_c_structured_w_gaussian_inp_config.yaml' \
+    --disp --analyze --procs_per_worker=1120
+pid: 265299; worker initialization took 0.09 s
+pid: 265299; network initialization took 0.01 s
+pid: 265299; setting network input pattern took 0.27 s
+pid: 265299; building network connections took 0.57 s
+pid: 265299; network simulation took 6.59 s
+nested: Exception occurred on process: 265299. Waiting for pending jobs to complete
+Traceback (most recent call last):
+  File "/scratch1/06441/aaronmil/src/nested/parallel.py", line 838, in parallel_execute_wrapper
+    result = func(*args, **kwargs)
+  File "/scratch1/06441/aaronmil/src/optimize_simple_network/optimize_simple_network.py", line 551, in compute_features
+    results = analyze_network_output(context.network, export=export, plot=context.plot)
+  File "/scratch1/06441/aaronmil/src/optimize_simple_network/optimize_simple_network.py", line 315, in analyze_network_output
+    voltage_rec_dict = context.comm.gather(voltage_rec_dict, root=0)
+  File "mpi4py/MPI/Comm.pyx", line 1262, in mpi4py.MPI.Comm.gather
+  File "mpi4py/MPI/msgpickle.pxi", line 680, in mpi4py.MPI.PyMPI_gather
+  File "mpi4py/MPI/msgpickle.pxi", line 685, in mpi4py.MPI.PyMPI_gather
+  File "mpi4py/MPI/msgpickle.pxi", line 148, in mpi4py.MPI.Pickle.allocv
+  File "mpi4py/MPI/msgpickle.pxi", line 139, in mpi4py.MPI.Pickle.alloc
+SystemError: Negative size passed to PyBytes_FromStringAndSize
+[c145-011:265299:0:265299] Caught signal 11 (Segmentation fault: kill(2) or raise(3) at address 0x2b974e622920)

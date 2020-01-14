@@ -158,7 +158,6 @@ class SimpleNetwork(object):
                 if i % nhost == rank:
                     if self.verbose > 1:
                         print('SimpleNetwork.mkcells: rank: %i got %s gid: %i' % (rank, pop_name, gid))
-                        sys.stdout.flush()
                     if cell_type == 'input':
                         cell = FFCell(pop_name, gid)
                     elif cell_type == 'minimal':
@@ -172,6 +171,7 @@ class SimpleNetwork(object):
                     self.pc.set_gid2node(gid, rank)
                     nc = cell.spike_detector
                     self.pc.cell(gid, nc)
+        sys.stdout.flush()
         self.pc.barrier()
 
     def verify_cell_types(self):
@@ -348,7 +348,7 @@ class SimpleNetwork(object):
                                   'source: %s; syn_count: %i' %
                                   (connectivity_type, rank, target_pop_name, target_gid, syn_type, source_pop_name,
                                    this_syn_count))
-                            sys.stdout.flush()
+        sys.stdout.flush()
         self.pc.barrier()
 
     def assign_connection_weights(self, default_weight_distribution_type='normal',
@@ -382,7 +382,6 @@ class SimpleNetwork(object):
                                   'dist_type: %s, mu: %.3f, norm_sigma: %.3f' %
                                   (rank, target_pop_name, source_pop_name, this_weight_distribution_type, mu,
                                    norm_sigma))
-                            sys.stdout.flush()
 
                         for source_gid in self.ncdict[target_pop_name][target_gid][source_pop_name]:
                             if this_weight_distribution_type == 'normal':
@@ -405,6 +404,7 @@ class SimpleNetwork(object):
                                                   syn_mech_names=self.syn_mech_names,
                                                   syn_mech_param_rules=self.syn_mech_param_rules,
                                                   weight=this_weight)
+        sys.stdout.flush()
         self.pc.barrier()
 
     def structure_connection_weights(self, structured_weight_params, tuning_peak_locs, wrap_around=True):
@@ -460,10 +460,10 @@ class SimpleNetwork(object):
                                           'updated weight: %.3f' %
                                           (rank, target_pop_name, target_gid, source_pop_name, source_gid,
                                            initial_weight, updated_weight))
-                                    sys.stdout.flush()
                                 config_connection(syn_type, syn=this_syn, nc=this_nc,
                                                   syn_mech_names=self.syn_mech_names,
                                                   syn_mech_param_rules=self.syn_mech_param_rules, weight=updated_weight)
+        sys.stdout.flush()
         self.pc.barrier()
 
     def get_connectivity_dict(self):
@@ -929,7 +929,7 @@ def get_binned_spike_count(spike_times, t):
             print(spike_times)
             print(t)
             sys.stdout.flush()
-            time.sleep(1.)
+            time.sleep(0.1)
             raise(e)
         binned_spikes[spike_indexes] = 1.
     return binned_spikes
@@ -1799,9 +1799,11 @@ def get_inhom_poisson_spike_times_by_thinning(rate, t, dt=0.02, refractory=3., g
     interp_t = np.arange(t[0], t[-1] + dt, dt)
     try:
         interp_rate = np.interp(interp_t, t, rate)
-    except Exception:
+    except Exception as e:
         print('t shape: %s rate shape: %s' % (str(t.shape), str(rate.shape)))
         sys.stdout.flush()
+        time.sleep(0.1)
+        raise(e)
     interp_rate /= 1000.
     spike_times = []
     non_zero = np.where(interp_rate > 1.e-100)[0]

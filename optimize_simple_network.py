@@ -312,6 +312,31 @@ def analyze_network_output(network, export=False, plot=False):
     connectivity_dict = network.get_connectivity_dict()
 
     # full_voltage_rec_dict = context.comm.gather(full_voltage_rec_dict, root=0)
+    gathered_voltage_rec_dict = dict()
+    gathered_voltage_rec_dict_keys_list = []
+    gathered_voltage_rec_dict_values_list = []
+    for pop_name in (pop_name for pop_name in context.pop_cell_types if context.pop_cell_types[pop_name] != 'input'):
+        if pop_name in voltage_rec_dict:
+            subset_voltage_rec_dict_keys = list(voltage_rec_dict[pop_name].keys())
+            subset_voltage_rec_dict_values = list(voltage_rec_dict[pop_name].values())
+        else:
+            subset_voltage_rec_dict_keys = []
+            subset_voltage_rec_dict_values = []
+        gathered_voltage_rec_dict_keys_list = context.comm.gather(subset_voltage_rec_dict_keys, root=0)
+        gathered_voltage_rec_dict_values_list = context.comm.gather(subset_voltage_rec_dict_values, root=0)
+        if context.comm.rank == 0:
+            gathered_voltage_rec_dict[pop_name] = dict()
+            for i, subset_voltage_rec_dict_keys in enumerate(gathered_voltage_rec_dict_keys_list):
+                subset_voltage_rec_dict_values = gathered_voltage_rec_dict_values_list[i]
+                for j, gid in enumerate(subset_voltage_rec_dict_keys):
+                    gathered_voltage_rec_dict[pop_name][gid] = subset_voltage_rec_dict_values[j]
+        context.comm.barrier()
+    if context.debug and context.comm.rank == 0:
+        for pop_name in gathered_voltage_rec_dict:
+            print('gathered voltage for %i %s cells' % (len(gathered_voltage_rec_dict[pop_name]), pop_name))
+        sys.stdout.flush()
+        return None
+
     voltage_rec_dict = context.comm.gather(voltage_rec_dict, root=0)
     full_spike_times_dict = context.comm.gather(full_spike_times_dict, root=0)
     spike_times_dict = context.comm.gather(spike_times_dict, root=0)
