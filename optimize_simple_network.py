@@ -111,7 +111,16 @@ def config_worker():
     total_cells = np.sum(list(context.pop_sizes.values()))
 
     pop_gid_ranges = get_pop_gid_ranges(context.pop_sizes)
-
+    
+    if 'input_mean_rates' not in context():
+        input_mean_rates = None
+    if 'input_min_rates' not in context():
+        input_min_rates = None
+    if 'input_max_rates' not in context():
+        input_max_rates = None
+    if 'input_norm_tuning_widths' not in context():
+        input_norm_tuning_widths = None
+    
     connection_weights_mean = defaultdict(dict)  # {'target_pop_name': {'source_pop_name': float} }
     connection_weights_norm_sigma = defaultdict(dict)  # {'target_pop_name': {'source_pop_name': float} }
     if 'connection_weight_distribution_types' not in context() or context.connection_weight_distribution_types is None:
@@ -151,84 +160,35 @@ def config_worker():
     filter_bands = {'Theta': [4., 10.], 'Gamma': [30., 100.]}
 
     if context.comm.rank == 0:
-        input_pop_t = dict()
-        input_pop_firing_rates = dict()
-        input_pop_spike_times = dict()
         tuning_peak_locs = dict()  # {'pop_name': {'gid': float} }
-        input_pop_name_to_pre_array = dict()  # {'pop_name' : 2d array}
-        if 'load_input_spike_times_path' in context():
-            with h5py.File(context.load_input_spike_times_path, 'r') as f:
-                for pop_name in context.input_types:
-                    if pop_name in f:
-                        if len(f[pop_name][:].shape) == 1:
-                            input_pop_name_to_pre_array[pop_name] = f[pop_name][:].reshape(1, -1)
-                        else:
-                            input_pop_name_to_pre_array[pop_name] = f[pop_name][:]
 
         for pop_name in context.input_types:
             if pop_name not in context.pop_cell_types or context.pop_cell_types[pop_name] != 'input':
                 raise RuntimeError('optimize_simple_network: %s not specified as an input population' % pop_name)
-            if pop_name not in input_pop_firing_rates:
-                input_pop_firing_rates[pop_name] = dict()
-            if pop_name not in tuning_peak_locs:
-                tuning_peak_locs[pop_name] = dict()
-            if context.input_types[pop_name] == 'constant':
-                try:
-                    this_mean_rate = context.input_mean_rates[pop_name]
-                except Exception:
-                    raise RuntimeError('optimize_simple_network: missing kwarg(s) required to specify %s input '
-                                       'population: %s' % (context.input_types[pop_name], pop_name))
-                if pop_name not in input_pop_t:
-                    input_pop_t[pop_name] = [0., tstop]
-                for gid in range(pop_gid_ranges[pop_name][0], pop_gid_ranges[pop_name][1]):
-                    input_pop_firing_rates[pop_name][gid] = [this_mean_rate, this_mean_rate]
-            elif context.input_types[pop_name] == 'gaussian':
-                try:
-                    this_min_rate = context.input_min_rates[pop_name]
-                    this_max_rate = context.input_max_rates[pop_name]
-                    this_norm_tuning_width = context.input_norm_tuning_widths[pop_name]
-                except Exception:
-                    raise RuntimeError('optimize_simple_network: missing kwarg(s) required to specify %s input '
-                                       'population: %s' % (context.input_types[pop_name], pop_name))
-
-                this_stim_t = np.arange(0., tstop + dt / 2., dt)
-                if pop_name not in input_pop_t:
-                    input_pop_t[pop_name] = this_stim_t
-
-                this_tuning_width = duration * this_norm_tuning_width
-                this_sigma = this_tuning_width / 3. / np.sqrt(2.)
+            if context.input_types[pop_name] == 'gaussian':
+                if pop_name not in tuning_peak_locs:
+                    tuning_peak_locs[pop_name] = dict()
                 peak_locs_array = \
                     np.linspace(0., duration, context.pop_sizes[pop_name], endpoint=False)
                 local_np_random.shuffle(peak_locs_array)
                 for peak_loc, gid in zip(peak_locs_array, range(pop_gid_ranges[pop_name][0],
                                                                 pop_gid_ranges[pop_name][1])):
                     tuning_peak_locs[pop_name][gid] = peak_loc
-                    input_pop_firing_rates[pop_name][gid] = \
-                        get_gaussian_rate(duration=duration, peak_loc=peak_loc, sigma=this_sigma,
-                                          min_rate=this_min_rate, max_rate=this_max_rate, dt=dt,
-                                          wrap_around=track_wrap_around, buffer=buffer)
 
-                if context.debug and context.plot:
-                    fig, axes = plt.subplots()
-                    for gid in range(pop_gid_ranges[pop_name][0],
-                                     pop_gid_ranges[pop_name][1])[::int(context.pop_sizes[pop_name] / 25)]:
-                        axes.plot(this_stim_t - buffer, input_pop_firing_rates[pop_name][gid])
-                    mean_input = np.mean(list(input_pop_firing_rates[pop_name].values()), axis=0)
-                    axes.plot(this_stim_t - buffer, mean_input, c='k', linewidth=2.)
-                    axes.set_ylabel('Firing rate (Hz)')
-                    axes.set_xlabel('Time (ms)')
-                    clean_axes(axes)
-                    fig.show()
-
-            if 'load_input_spike_times_path' in context():
-                # expected format: root -> pop_name (string) -> 2d array. the elements in the rows must be sorted!
-                # read from rows sequentially. if num rows < pop_size, keep reading again from the top
-                input_pop_spike_times[pop_name] = dict()
-                row = 0
-                num_rows = input_pop_name_to_pre_array[pop_name].shape[0]
-                for gid in range(pop_gid_ranges[pop_name][0], pop_gid_ranges[pop_name][1]):
-                    input_pop_spike_times[pop_name][gid] = input_pop_name_to_pre_array[pop_name][row]
-                    row = row + 1 if row < num_rows - 1 else 0
+        """
+        TODO: collect network.input_pop_firing_rates from each rank and plot on rank 0 
+        if context.debug and context.plot:
+            fig, axes = plt.subplots()
+            for gid in range(pop_gid_ranges[pop_name][0],
+                             pop_gid_ranges[pop_name][1])[::int(context.pop_sizes[pop_name] / 25)]:
+                axes.plot(this_stim_t - buffer, input_pop_firing_rates[pop_name][gid])
+            mean_input = np.mean(list(input_pop_firing_rates[pop_name].values()), axis=0)
+            axes.plot(this_stim_t - buffer, mean_input, c='k', linewidth=2.)
+            axes.set_ylabel('Firing rate (Hz)')
+            axes.set_xlabel('Time (ms)')
+            clean_axes(axes)
+            fig.show()
+        """
 
         for target_pop_name in context.structured_weight_params:
             if target_pop_name not in tuning_peak_locs:
@@ -245,13 +205,7 @@ def config_worker():
                                                   pop_gid_ranges[target_pop_name][1])):
                 tuning_peak_locs[target_pop_name][target_gid] = peak_loc
     else:
-        input_pop_t = None
-        input_pop_firing_rates = None
         tuning_peak_locs = None
-        input_pop_spike_times = None
-    input_pop_t = context.comm.bcast(input_pop_t, root=0)
-    input_pop_firing_rates = context.comm.bcast(input_pop_firing_rates, root=0)
-    input_pop_spike_times = context.comm.bcast(input_pop_spike_times, root=0)
     tuning_peak_locs = context.comm.bcast(tuning_peak_locs, root=0)
 
     if context.connectivity_type == 'gaussian':
@@ -277,7 +231,7 @@ def config_worker():
 
     context.update(locals())
     if int(context.pc.id()) == 0 and context.verbose > 0:
-        print('INITIALIZATION TIME: %.2f s' % (time.time() - start_time))
+        print('pid: %i; worker initialization took %.2f s' % (os.getpid(), time.time() - start_time))
         sys.stdout.flush()
 
 
@@ -539,10 +493,25 @@ def compute_features(x, export=False):
         pop_cell_types=context.pop_cell_types, pop_syn_counts=context.pop_syn_counts,
         pop_syn_proportions=context.pop_syn_proportions, connection_weights_mean=context.connection_weights_mean,
         connection_weights_norm_sigma=context.connection_weights_norm_sigma,
-        syn_mech_params=context.syn_mech_params, input_pop_t=context.input_pop_t,
-        input_pop_spike_times=context.input_pop_spike_times, input_pop_firing_rates=context.input_pop_firing_rates,
-        tstop=context.tstop,  duration=context.duration, buffer=context.buffer, dt=context.dt, delay=context.delay,
-        spikes_seed=context.spikes_seed, verbose=context.verbose, debug=context.debug)
+        syn_mech_params=context.syn_mech_params, tstop=context.tstop, duration=context.duration, buffer=context.buffer,
+        dt=context.dt, delay=context.delay, verbose=context.verbose, debug=context.debug)
+
+    if int(context.pc.id()) == 0 and context.verbose > 0:
+        print('pid: %i; network initialization took %.2f s' % (os.getpid(), time.time() - start_time))
+        sys.stdout.flush()
+    current_time = time.time()
+
+    context.network.set_input_pattern(context.input_types, input_mean_rates=context.input_mean_rates,
+                                      input_min_rates=context.input_min_rates,
+                                      input_max_rates=context.input_max_rates,
+                                      input_norm_tuning_widths=context.input_norm_tuning_widths,
+                                      tuning_peak_locs=context.tuning_peak_locs,
+                                      track_wrap_around=context.track_wrap_around, spikes_seed=context.spikes_seed)
+
+    if int(context.pc.id()) == 0 and context.verbose > 0:
+        print('pid: %i; setting network input pattern took %.2f s' % (os.getpid(), time.time() - current_time))
+        sys.stdout.flush()
+    current_time = time.time()
 
     if context.connectivity_type == 'uniform':
         context.network.connect_cells(connectivity_type=context.connectivity_type,
@@ -569,20 +538,21 @@ def compute_features(x, export=False):
     """
 
     if int(context.pc.id()) == 0 and context.verbose > 0:
-        print('NETWORK BUILD RUNTIME: %.2f s' % (time.time() - start_time))
+        print('pid: %i; building network connections took %.2f s' % (os.getpid(), time.time() - current_time))
         sys.stdout.flush()
     current_time = time.time()
 
     context.network.run()
     if int(context.pc.id()) == 0 and context.verbose > 0:
-        print('NETWORK SIMULATION RUNTIME: %.2f s' % (time.time() - current_time))
+        print('pid: %i; network simulation took %.2f s' % (os.getpid(), time.time() - current_time))
         sys.stdout.flush()
     current_time = time.time()
 
     results = analyze_network_output(context.network, export=export, plot=context.plot)
     if int(context.pc.id()) == 0:
         if context.verbose > 0:
-            print('NETWORK ANALYSIS RUNTIME: %.2f s' % (time.time() - current_time))
+            print('pid: %i; analysis of network simulation results took %.2f s' %
+                  (os.getpid(), time.time() - current_time))
             sys.stdout.flush()
         if results is None:
             return dict()

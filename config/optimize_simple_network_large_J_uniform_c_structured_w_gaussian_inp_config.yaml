@@ -123,6 +123,10 @@ kwargs:
   tuning_seed: 480000000
   connectivity_type: uniform
   default_weight_distribution_type: normal
+  connection_weight_distribution_types:
+    E:
+      FF: lognormal
+      E: lognormal
   input_types:
     FF: gaussian
   input_max_rates:
@@ -179,7 +183,7 @@ objective_names:
 - I_theta_tuning_index
 - E_gamma_tuning_index
 - I_gamma_tuning_index
-optimization_title: simple_network_I
+optimization_title: simple_network_large_J
 param_gen: PopulationAnnealing
 param_names:
 - E_FF_mean_weight

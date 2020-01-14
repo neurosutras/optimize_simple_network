@@ -1,9 +1,9 @@
 from nested.utils import *
 from neuron import h
-from dentate.utils import baks
+# from dentate.utils import baks
 from scipy.signal import butter, sosfiltfilt, sosfreqz, hilbert, periodogram
 from collections import namedtuple, defaultdict
-from dentate.stgen import get_inhom_poisson_spike_times_by_thinning
+# from dentate.stgen import get_inhom_poisson_spike_times_by_thinning
 
 
 # Based on http://modeldb.yale.edu/39948
@@ -66,9 +66,8 @@ class SimpleNetwork(object):
 
     def __init__(self, pc, pop_sizes, pop_gid_ranges, pop_cell_types, pop_syn_counts, pop_syn_proportions,
                  connection_weights_mean, connection_weights_norm_sigma, syn_mech_params, syn_mech_names=None,
-                 syn_mech_param_rules=None, syn_mech_param_defaults=None, input_pop_t=None,
-                 input_pop_firing_rates=None, input_pop_spike_times=None, tstop=2000, duration=1000.,
-                 buffer=500., dt=0.025, delay=1., spikes_seed=100000000, v_init=-65., verbose=1, debug=False):
+                 syn_mech_param_rules=None, syn_mech_param_defaults=None, tstop=2000, duration=1000., buffer=500.,
+                 dt=0.025, delay=1., v_init=-65., verbose=1, debug=False):
         """
 
         :param pc: ParallelContext object
@@ -86,15 +85,11 @@ class SimpleNetwork(object):
         :param syn_mech_names: dict: {syn_name (str): name of hoc point process (str)}
         :param syn_mech_param_rules: nested dict
         :param syn_mech_param_defaults: nested dict
-        :param input_pop_t: nested dict: {pop_name: array of times (float)}}
-        :param input_pop_firing_rates: nested dict: {pop_name: {gid: array of spike times (ms) (float)}}
-        :param input_pop_spike_times: nested dict: {pop_name : {gid: 1d array of spike times loaded from file}}
         :param tstop: int: full buffered simulation duration (ms)
         :param duration: float: simulation duration (ms)
         :param buffer: float: duration of simulation buffer at start and end (ms)
         :param dt: float: simulation timestep (ms)
         :param delay: float: netcon synaptic delay (ms)
-        :param spikes_seed: int: random seed for reproducible input spike trains
         :param v_init: float
         :param verbose: int: level for verbose print statements
         :param debug: bool: turn on for extra tests
@@ -137,18 +132,17 @@ class SimpleNetwork(object):
                             default_syn_type_mech_params[syn_type]
 
         self.spike_times_dict = defaultdict(dict)
-        self.input_pop_t = input_pop_t
-        self.input_pop_firing_rates = input_pop_firing_rates
-        self.input_pop_spike_times = input_pop_spike_times
+        self.input_pop_t = defaultdict(dict)
+        self.input_pop_firing_rates = defaultdict(dict)
 
         self.local_random = random.Random()
         self.local_np_random = np.random.RandomState()
-        self.spikes_seed = int(spikes_seed)
 
         self.cells = defaultdict(dict)
         self.mkcells()
         if self.debug:
             self.verify_cell_types()
+
         self.ncdict = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(list))))
         self.voltage_record()
         self.spike_record()
@@ -167,20 +161,6 @@ class SimpleNetwork(object):
                         sys.stdout.flush()
                     if cell_type == 'input':
                         cell = FFCell(pop_name, gid)
-                        if pop_name in self.input_pop_spike_times:
-                            cell.load_vecstim(self.input_pop_spike_times[pop_name][gid])
-                        elif self.input_pop_firing_rates is not None and pop_name in self.input_pop_firing_rates and \
-                                gid in self.input_pop_firing_rates[pop_name]:
-                            if self.input_pop_t is None or pop_name not in self.input_pop_t:
-                                raise RuntimeError('mkcells: time base not specified; cannot generate spikes for input '
-                                                   'population: %s' % pop_name)
-                            self.local_random.seed(self.spikes_seed + gid)
-                            this_spike_train = \
-                                get_inhom_poisson_spike_times_by_thinning(self.input_pop_firing_rates[pop_name][gid],
-                                                                          self.input_pop_t[pop_name], dt=self.dt,
-                                                                          generator=self.local_random)
-                            cell.load_vecstim(this_spike_train)
-
                     elif cell_type == 'minimal':
                         cell = MinimalCell(pop_name, gid)
                     elif cell_type in izhi_cell_type_param_dict:
@@ -192,6 +172,7 @@ class SimpleNetwork(object):
                     self.pc.set_gid2node(gid, rank)
                     nc = cell.spike_detector
                     self.pc.cell(gid, nc)
+        self.pc.barrier()
 
     def verify_cell_types(self):
         """
@@ -219,6 +200,70 @@ class SimpleNetwork(object):
                 else:
                     raise RuntimeError('SimpleNetwork.verify_cell_types: %s gid: %i is an unknown type: %s' %
                                        (pop_name, gid, type(this_cell)))
+
+    def set_input_pattern(self, input_types, input_mean_rates=None, input_min_rates=None, input_max_rates=None,
+                          input_norm_tuning_widths=None, tuning_peak_locs=None, track_wrap_around=False,
+                          spikes_seed=100000000):
+        """
+
+        :param input_types: dict
+        :param input_mean_rates: dict
+        :param input_min_rates: dict
+        :param input_max_rates: dict
+        :param input_norm_tuning_widths: dict
+        :param tuning_peak_locs:
+        :param track_wrap_around:
+        :param spikes_seed:
+        :return:
+        """
+        """
+        :param spikes_seed: int: random seed for reproducible input spike trains
+        """
+        spikes_seed = int(spikes_seed)
+        for pop_name in (pop_name for pop_name in input_types if pop_name in self.cells):
+            if input_types[pop_name] == 'constant':
+                if input_mean_rates is None or pop_name not in input_mean_rates:
+                    raise RuntimeError('SimpleNetwork.set_input_pattern: missing input_mean_rates required to specify '
+                                       '%s input population: %s' % (input_types[pop_name], pop_name))
+                this_mean_rate = input_mean_rates[pop_name]
+                if pop_name not in self.input_pop_t:
+                    self.input_pop_t[pop_name] = [0., self.tstop]
+                for gid in self.cells[pop_name]:
+                    self.input_pop_firing_rates[pop_name][gid] = [this_mean_rate, this_mean_rate]
+            elif input_types[pop_name] == 'gaussian':
+                if pop_name not in tuning_peak_locs:
+                    raise RuntimeError('SimpleNetwork.set_input_pattern: missing tuning_peak_locs required to specify '
+                                       '%s input population: %s' % (input_types[pop_name], pop_name))
+                try:
+                    this_min_rate = input_min_rates[pop_name]
+                    this_max_rate = input_max_rates[pop_name]
+                    this_norm_tuning_width = input_norm_tuning_widths[pop_name]
+                except Exception:
+                    raise RuntimeError('SimpleNetwork.set_input_pattern: missing kwarg(s) required to specify %s input '
+                                       'population: %s' % (input_types[pop_name], pop_name))
+
+                this_stim_t = np.arange(0., self.tstop + self.dt / 2., self.dt)
+                if pop_name not in self.input_pop_t:
+                    self.input_pop_t[pop_name] = this_stim_t
+
+                this_tuning_width = self.duration * this_norm_tuning_width
+                this_sigma = this_tuning_width / 3. / np.sqrt(2.)
+                for gid in self.cells[pop_name]:
+                    peak_loc = tuning_peak_locs[pop_name][gid]
+                    self.input_pop_firing_rates[pop_name][gid] = \
+                        get_gaussian_rate(duration=self.duration, peak_loc=peak_loc, sigma=this_sigma,
+                                          min_rate=this_min_rate, max_rate=this_max_rate, dt=self.dt,
+                                          wrap_around=track_wrap_around, buffer=self.buffer)
+
+        for pop_name in (pop_name for pop_name in input_types if pop_name in self.cells):
+            for gid in self.cells[pop_name]:
+                self.local_random.seed(spikes_seed + gid)
+                this_spike_train = \
+                    get_inhom_poisson_spike_times_by_thinning(self.input_pop_firing_rates[pop_name][gid],
+                                                              self.input_pop_t[pop_name], dt=self.dt,
+                                                              generator=self.local_random)
+                cell = self.cells[pop_name][gid]
+                cell.load_vecstim(this_spike_train)
 
     def get_prob_connection_uniform(self, potential_source_gids):
         """
@@ -304,6 +349,7 @@ class SimpleNetwork(object):
                                   (connectivity_type, rank, target_pop_name, target_gid, syn_type, source_pop_name,
                                    this_syn_count))
                             sys.stdout.flush()
+        self.pc.barrier()
 
     def assign_connection_weights(self, default_weight_distribution_type='normal',
                                   connection_weight_distribution_types=None, weights_seed=200000000):
@@ -313,6 +359,7 @@ class SimpleNetwork(object):
         :param connection_weight_distribution_types: nested dict: {target_pop_name: {source_pop_name: str}}
         :param weights_seed: int: random seed for reproducible connection weights
         """
+        rank = int(self.pc.id())
         weights_seed = int(weights_seed)
         for target_pop_name in self.ncdict:
             for target_gid in self.ncdict[target_pop_name]:
@@ -331,9 +378,10 @@ class SimpleNetwork(object):
                         mu = self.connection_weights_mean[target_pop_name][source_pop_name]
                         norm_sigma = self.connection_weights_norm_sigma[target_pop_name][source_pop_name]
                         if self.debug:
-                            print('SimpleNetwork.assign_connection_weights: target: %s, source: %s, dist_type: %s, '
-                                  'mu: %.3f, norm_sigma: %.3f' %
-                                  (target_pop_name, source_pop_name, this_weight_distribution_type, mu, norm_sigma))
+                            print('SimpleNetwork.assign_connection_weights: rank: %i, target: %s, source: %s, '
+                                  'dist_type: %s, mu: %.3f, norm_sigma: %.3f' %
+                                  (rank, target_pop_name, source_pop_name, this_weight_distribution_type, mu,
+                                   norm_sigma))
                             sys.stdout.flush()
 
                         for source_gid in self.ncdict[target_pop_name][target_gid][source_pop_name]:
@@ -357,6 +405,7 @@ class SimpleNetwork(object):
                                                   syn_mech_names=self.syn_mech_names,
                                                   syn_mech_param_rules=self.syn_mech_param_rules,
                                                   weight=this_weight)
+        self.pc.barrier()
 
     def structure_connection_weights(self, structured_weight_params, tuning_peak_locs, wrap_around=True):
         """
@@ -365,11 +414,12 @@ class SimpleNetwork(object):
         :param tuning_peak_locs: nested dict: {'pop_name': {'gid': float} }
         :param wrap_around: bool
         """
+        rank = int(self.pc.id())
         for target_pop_name in (target_pop_name for target_pop_name in structured_weight_params
                                 if target_pop_name in self.ncdict):
             if target_pop_name not in tuning_peak_locs:
-                raise RuntimeError('structure_connection_weights: spatial tuning locations not found for target '
-                                   'population: %s' % target_pop_name)
+                raise RuntimeError('SimpleNetwork.structure_connection_weights: spatial tuning locations not found for '
+                                   'target population: %s' % target_pop_name)
             this_tuning_type = structured_weight_params[target_pop_name]['tuning_type']
             this_peak_delta_weight = structured_weight_params[target_pop_name]['peak_delta_weight']
             this_norm_tuning_width = structured_weight_params[target_pop_name]['norm_tuning_width']
@@ -381,8 +431,8 @@ class SimpleNetwork(object):
                         (source_pop_name for source_pop_name in self.pop_syn_proportions[target_pop_name][syn_type]
                          if source_pop_name in structured_weight_params[target_pop_name]['source_pop_names']):
                     if source_pop_name not in tuning_peak_locs:
-                        raise RuntimeError('structure_connection_weights: spatial tuning locations not found for '
-                                           'source population: %s' % source_pop_name)
+                        raise RuntimeError('SimpleNetwork.structure_connection_weights: spatial tuning locations not '
+                                           'found for source population: %s' % source_pop_name)
                     for target_gid in (target_gid for target_gid in self.ncdict[target_pop_name]
                                        if source_pop_name in self.ncdict[target_pop_name][target_gid]):
                         target_cell = self.cells[target_pop_name][target_gid]
@@ -405,13 +455,16 @@ class SimpleNetwork(object):
                                 elif this_tuning_type == 'multiplicative':
                                     updated_weight = initial_weight * (1. + this_delta_weight)
                                 if self.debug and self.verbose:
-                                    print('target_pop_name: %s, target_gid: %i; source_pop_name: %s, source_gid: %i, '
-                                          'initial weight: %.3f, updated weight: %.3f' %
-                                          (target_pop_name, target_gid, source_pop_name, source_gid, initial_weight,
-                                           updated_weight))
+                                    print('SimpleNetwork.structure_connection_weights; rank: %i, target_pop_name: %s, '
+                                          'target_gid: %i; source_pop_name: %s, source_gid: %i, initial weight: %.3f, '
+                                          'updated weight: %.3f' %
+                                          (rank, target_pop_name, target_gid, source_pop_name, source_gid,
+                                           initial_weight, updated_weight))
+                                    sys.stdout.flush()
                                 config_connection(syn_type, syn=this_syn, nc=this_nc,
                                                   syn_mech_names=self.syn_mech_names,
                                                   syn_mech_param_rules=self.syn_mech_param_rules, weight=updated_weight)
+        self.pc.barrier()
 
     def get_connectivity_dict(self):
         connectivity_dict = dict()
@@ -1361,6 +1414,7 @@ def plot_inferred_spike_rates(spike_times_dict, firing_rates_dict, t, active_rat
             fig.show()
         else:
             print('plot_inferred_spike_rates: no active cells for population: %s' % pop_name)
+            sys.stdout.flush()
 
 
 def plot_voltage_traces(voltage_rec_dict, rec_t, spike_times_dict=None, rows=3, cols=4, pop_names=None):
@@ -1684,3 +1738,89 @@ def plot_simple_network_results_from_file(data_file_path, verbose=False):
     plot_firing_rate_heatmaps(firing_rates_dict, binned_t, tuning_peak_locs=tuning_peak_locs)
     if connectivity_type == 'gaussian':
         plot_2D_connection_distance(pop_syn_proportions, pop_cell_positions, connectivity_dict)
+
+
+def baks(spktimes, time, a=1.5, b=None):
+    """
+    Bayesian Adaptive Kernel Smoother (BAKS)
+    BAKS is a method for estimating firing rate from spike train data that uses kernel smoothing technique
+    with adaptive bandwidth determined using a Bayesian approach
+    ---------------INPUT---------------
+    - spktimes : spike event times [s]
+    - time : time points at which the firing rate is estimated [s]
+    - a : shape parameter (alpha)
+    - b : scale parameter (beta)
+    ---------------OUTPUT---------------
+    - rate : estimated firing rate [nTime x 1] (Hz)
+    - h : adaptive bandwidth [nTime x 1]
+
+    Based on "Estimation of neuronal firing rate using Bayesian adaptive kernel smoother (BAKS)"
+    https://github.com/nurahmadi/BAKS
+    """
+    from scipy.special import gamma
+
+    n = len(spktimes)
+    sumnum = 0
+    sumdenom = 0
+
+    if b is None:
+        b = 0.42
+    b = float(n) ** b
+
+    for i in range(n):
+        numerator = (((time - spktimes[i]) ** 2) / 2. + 1. / b) ** (-a)
+        denominator = (((time - spktimes[i]) ** 2) / 2. + 1. / b) ** (-a - 0.5)
+        sumnum = sumnum + numerator
+        sumdenom = sumdenom + denominator
+
+    h = (gamma(a) / gamma(a + 0.5)) * (sumnum / sumdenom)
+
+    rate = np.zeros((len(time),))
+    for j in range(n):
+        K = (1. / (np.sqrt(2. * np.pi) * h)) * np.exp(-((time - spktimes[j]) ** 2) / (2. * h ** 2))
+        rate = rate + K
+
+    return rate, h
+
+
+def get_inhom_poisson_spike_times_by_thinning(rate, t, dt=0.02, refractory=3., generator=None):
+    """
+    Given a time series of instantaneous spike rates in Hz, produce a spike train consistent with an inhomogeneous
+    Poisson process with a refractory period after each spike.
+    :param rate: instantaneous rates in time (Hz)
+    :param t: corresponding time values (ms)
+    :param dt: temporal resolution for spike times (ms)
+    :param refractory: absolute deadtime following a spike (ms)
+    :param generator: :class:'np.random.RandomState()'
+    :return: list of m spike times (ms)
+    """
+    if generator is None:
+        generator = random
+    interp_t = np.arange(t[0], t[-1] + dt, dt)
+    try:
+        interp_rate = np.interp(interp_t, t, rate)
+    except Exception:
+        print('t shape: %s rate shape: %s' % (str(t.shape), str(rate.shape)))
+        sys.stdout.flush()
+    interp_rate /= 1000.
+    spike_times = []
+    non_zero = np.where(interp_rate > 1.e-100)[0]
+    if len(non_zero) == 0:
+        return spike_times
+    interp_rate[non_zero] = 1. / (1. / interp_rate[non_zero] - refractory)
+    max_rate = np.max(interp_rate)
+    if not max_rate > 0.:
+        return spike_times
+    i = 0
+    ISI_memory = 0.
+    while i < len(interp_t):
+        x = generator.uniform(0.0, 1.0)
+        if x > 0.:
+            ISI = -np.log(x) / max_rate
+            i += int(ISI / dt)
+            ISI_memory += ISI
+            if (i < len(interp_t)) and (generator.uniform(0.0, 1.0) <= (interp_rate[i] / max_rate)) and \
+                    ISI_memory >= 0.:
+                spike_times.append(interp_t[i])
+                ISI_memory = -refractory
+    return spike_times
