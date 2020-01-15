@@ -299,6 +299,7 @@ def analyze_network_output(network, export=False, plot=False):
     :param plot: bool
     :return: dict
     """
+    start_time = time.time()
     full_rec_t = np.arange(-context.buffer, context.duration + context.buffer + context.dt / 2., context.dt)
     rec_t = np.arange(0., context.duration, context.dt)
     full_binned_t = np.arange(-context.buffer, context.duration + context.buffer + context.binned_dt / 2.,
@@ -343,6 +344,12 @@ def analyze_network_output(network, export=False, plot=False):
     gathered_connection_target_gid_dict_list = context.comm.gather(connection_target_gid_dict, root=0)
     gathered_connection_weights_dict_list = context.comm.gather(connection_weights_dict, root=0)
 
+    if context.debug and context.verbose > 0 and context.comm.rank == 0:
+        print('optimize_simple_network: pid: %i; gathering data across ranks took %.2f s' %
+              (os.getpid(), time.time() - start_time))
+        sys.stdout.flush()
+        current_time = time.time()
+
     if context.comm.rank == 0:
         spike_times_dict = merge_list_of_dict(gathered_spike_times_dict_list)
         full_spike_times_dict = merge_list_of_dict(gathered_full_spike_times_dict_list)
@@ -361,6 +368,12 @@ def analyze_network_output(network, export=False, plot=False):
             get_pop_bandpass_filtered_signal_stats(full_mean_rate_from_spike_count_dict, context.filter_bands,
                                                    input_t=full_binned_t, output_t=binned_t, plot=plot,
                                                    verbose=context.verbose > 1)
+
+        if context.debug and context.verbose > 0:
+            print('optimize_simple_network: pid: %i; merging data structures for analysis took %.2f s' %
+                  (os.getpid(), time.time() - current_time))
+            sys.stdout.flush()
+        
         if plot:
             plot_inferred_spike_rates(spike_times_dict, firing_rates_dict, binned_t, context.active_rate_threshold)
             plot_voltage_traces(subset_voltage_rec_dict, rec_t, spike_times_dict)
