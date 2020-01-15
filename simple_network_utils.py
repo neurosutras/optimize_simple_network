@@ -1846,14 +1846,15 @@ def merge_connection_weights(target_gid_dict_list, weights_dict_list):
             for source_pop_name in weights_dict[target_pop_name]:
                 if source_pop_name not in connection_weights_dict[target_pop_name]:
                     connection_weights_dict[target_pop_name][source_pop_name] = \
-                        np.array(weights_dict[target_pop_name][source_pop_name])
+                        [weights_dict[target_pop_name][source_pop_name]]
                 else:
-                    connection_weights_dict[target_pop_name][source_pop_name] = \
-                        np.vstack([connection_weights_dict[target_pop_name][source_pop_name],
-                                  weights_dict[target_pop_name][source_pop_name]])
+                    connection_weights_dict[target_pop_name][source_pop_name].append(
+                        weights_dict[target_pop_name][source_pop_name])
     for target_pop_name in unsorted_target_gid_dict:
         sorted_target_gid_indexes = np.argsort(unsorted_target_gid_dict[target_pop_name])
         for source_pop_name in connection_weights_dict[target_pop_name]:
+            connection_weights_dict[target_pop_name][source_pop_name] = \
+                np.concatenate(connection_weights_dict[target_pop_name][source_pop_name])
             connection_weights_dict[target_pop_name][source_pop_name][:] = \
                 connection_weights_dict[target_pop_name][source_pop_name][sorted_target_gid_indexes, :]
 
