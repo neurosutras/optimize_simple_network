@@ -359,6 +359,12 @@ def analyze_network_output(network, export=False, plot=False):
         connection_weights_dict = merge_connection_weights(gathered_connection_target_gid_dict_list,
                                                            gathered_connection_weights_dict_list)
 
+        if context.debug and context.verbose > 0:
+            print('optimize_simple_network: pid: %i; merging data structures for analysis took %.2f s' %
+                  (os.getpid(), time.time() - current_time))
+            current_time = time.time()
+            sys.stdout.flush()
+
         full_mean_rate_from_spike_count_dict = get_mean_rate_from_spike_count(full_spike_times_dict, full_binned_t)
         mean_min_rate_dict, mean_peak_rate_dict, mean_rate_active_cells_dict, pop_fraction_active_dict = \
             get_pop_activity_stats(firing_rates_dict, binned_t, threshold=context.active_rate_threshold, plot=plot)
@@ -370,10 +376,10 @@ def analyze_network_output(network, export=False, plot=False):
                                                    verbose=context.verbose > 1)
 
         if context.debug and context.verbose > 0:
-            print('optimize_simple_network: pid: %i; merging data structures for analysis took %.2f s' %
+            print('optimize_simple_network: pid: %i; additional data analysis took %.2f s' %
                   (os.getpid(), time.time() - current_time))
             sys.stdout.flush()
-        
+
         if plot:
             plot_inferred_spike_rates(spike_times_dict, firing_rates_dict, binned_t, context.active_rate_threshold)
             plot_voltage_traces(subset_voltage_rec_dict, rec_t, spike_times_dict)
