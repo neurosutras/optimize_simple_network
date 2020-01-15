@@ -377,7 +377,7 @@ class SimpleNetwork(object):
                                     connection_weight_distribution_types[target_pop_name][source_pop_name]
                         mu = self.connection_weights_mean[target_pop_name][source_pop_name]
                         norm_sigma = self.connection_weights_norm_sigma[target_pop_name][source_pop_name]
-                        if self.debug:
+                        if self.debug and self.verbose > 1:
                             print('SimpleNetwork.assign_connection_weights: rank: %i, target: %s, source: %s, '
                                   'dist_type: %s, mu: %.3f, norm_sigma: %.3f' %
                                   (rank, target_pop_name, source_pop_name, this_weight_distribution_type, mu,
@@ -454,7 +454,7 @@ class SimpleNetwork(object):
                                     updated_weight = initial_weight + this_delta_weight
                                 elif this_tuning_type == 'multiplicative':
                                     updated_weight = initial_weight * (1. + this_delta_weight)
-                                if self.debug and self.verbose:
+                                if self.debug and self.verbose > 1:
                                     print('SimpleNetwork.structure_connection_weights; rank: %i, target_pop_name: %s, '
                                           'target_gid: %i; source_pop_name: %s, source_gid: %i, initial weight: %.3f, '
                                           'updated weight: %.3f' %

@@ -60,11 +60,11 @@ bounds:
     - 0.01
     - 0.99
   E_norm_syn_count: !!python/tuple
-    - 0.1
-    - 1.
+    - 0.01
+    - 0.5
   I_norm_syn_count: !!python/tuple
-    - 0.1
-    - 1.
+    - 0.01
+    - 0.5
   E_peak_delta_weight: !!python/tuple
     - 1.
     - 5.0
@@ -266,6 +266,6 @@ x0:
   E_FF_mean_weight: 1.543887E+00
   I_E_mean_weight: 5.667242E-01
   I_I_tau_offset: 1.132949E+01
-  E_norm_syn_count: .1
-  I_norm_syn_count: .1
+  E_norm_syn_count: .01
+  I_norm_syn_count: .01
   E_peak_delta_weight: 2.

@@ -158,6 +158,7 @@ def config_worker():
     baks_wrap_around = False
     track_wrap_around = True
     filter_bands = {'Theta': [4., 10.], 'Gamma': [30., 100.]}
+    max_num_cells_export_voltage_rec = 1000
 
     if context.comm.rank == 0:
         tuning_peak_locs = dict()  # {'pop_name': {'gid': float} }
@@ -312,32 +313,33 @@ def analyze_network_output(network, export=False, plot=False):
     connectivity_dict = network.get_connectivity_dict()
 
     # full_voltage_rec_dict = context.comm.gather(full_voltage_rec_dict, root=0)
-    gathered_voltage_rec_dict = dict()
-    gathered_voltage_rec_dict_keys_list = []
-    gathered_voltage_rec_dict_values_list = []
-    for pop_name in (pop_name for pop_name in context.pop_cell_types if context.pop_cell_types[pop_name] != 'input'):
+    gather_voltage_rec_gids = dict()
+    if context.comm.rank == 0:
+        for pop_name in (pop_name for pop_name in context.pop_cell_types
+                         if context.pop_cell_types[pop_name] != 'input'):
+            gather_gids = random.sample(range(*context.pop_gid_ranges[pop_name]),
+                                        min(context.max_num_cells_export_voltage_rec, context.pop_sizes[pop_name]))
+            gather_voltage_rec_gids[pop_name] = set(gather_gids)
+    gather_voltage_rec_gids = context.comm.bcast(gather_voltage_rec_gids, root=0)
+
+    subset_voltage_rec_dict = dict()
+    for pop_name in gather_voltage_rec_gids:
         if pop_name in voltage_rec_dict:
-            subset_voltage_rec_dict_keys = list(voltage_rec_dict[pop_name].keys())
-            subset_voltage_rec_dict_values = list(voltage_rec_dict[pop_name].values())
-        else:
-            subset_voltage_rec_dict_keys = []
-            subset_voltage_rec_dict_values = []
-        gathered_voltage_rec_dict_keys_list = context.comm.gather(subset_voltage_rec_dict_keys, root=0)
-        gathered_voltage_rec_dict_values_list = context.comm.gather(subset_voltage_rec_dict_values, root=0)
-        if context.comm.rank == 0:
-            gathered_voltage_rec_dict[pop_name] = dict()
-            for i, subset_voltage_rec_dict_keys in enumerate(gathered_voltage_rec_dict_keys_list):
-                subset_voltage_rec_dict_values = gathered_voltage_rec_dict_values_list[i]
-                for j, gid in enumerate(subset_voltage_rec_dict_keys):
-                    gathered_voltage_rec_dict[pop_name][gid] = subset_voltage_rec_dict_values[j]
-        context.comm.barrier()
+            for gid in voltage_rec_dict[pop_name]:
+                if gid in gather_voltage_rec_gids[pop_name]:
+                    if pop_name not in subset_voltage_rec_dict:
+                        subset_voltage_rec_dict[pop_name] = dict()
+                    subset_voltage_rec_dict[pop_name][gid] = voltage_rec_dict[pop_name][gid]
+    subset_voltage_rec_dict = context.comm.gather(subset_voltage_rec_dict, root=0)
+
     if context.debug and context.comm.rank == 0:
-        for pop_name in gathered_voltage_rec_dict:
-            print('gathered voltage for %i %s cells' % (len(gathered_voltage_rec_dict[pop_name]), pop_name))
+        subset_voltage_rec_dict = merge_list_of_dict(subset_voltage_rec_dict)
+        for pop_name in subset_voltage_rec_dict:
+            print('gathered subset_voltage_rec for %i %s cells' % (len(subset_voltage_rec_dict[pop_name]), pop_name))
         sys.stdout.flush()
+        time.sleep(1.)
         return None
 
-    voltage_rec_dict = context.comm.gather(voltage_rec_dict, root=0)
     full_spike_times_dict = context.comm.gather(full_spike_times_dict, root=0)
     spike_times_dict = context.comm.gather(spike_times_dict, root=0)
     firing_rates_dict = context.comm.gather(firing_rates_dict, root=0)
