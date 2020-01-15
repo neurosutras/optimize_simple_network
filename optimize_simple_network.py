@@ -231,8 +231,9 @@ def config_worker():
         pop_cell_positions = dict()
 
     context.update(locals())
-    if int(context.pc.id()) == 0 and context.verbose > 0:
-        print('pid: %i; worker initialization took %.2f s' % (os.getpid(), time.time() - start_time))
+    if context.comm.rank == 0 and context.verbose > 0:
+        print('optimize_simple_network: pid: %i; worker initialization took %.2f s' %
+              (os.getpid(), time.time() - start_time))
         sys.stdout.flush()
 
 
@@ -303,68 +304,54 @@ def analyze_network_output(network, export=False, plot=False):
     full_binned_t = np.arange(-context.buffer, context.duration + context.buffer + context.binned_dt / 2.,
                               context.binned_dt)
     binned_t = np.arange(0., context.duration + context.binned_dt / 2., context.binned_dt)
+
     full_spike_times_dict, spike_times_dict = network.get_spike_times_dict()
-    full_voltage_rec_dict, voltage_rec_dict = network.get_voltage_rec_dict()
-    voltages_exceed_threshold = check_voltages_exceed_threshold(voltage_rec_dict, context.pop_cell_types)
     firing_rates_dict = infer_firing_rates(full_spike_times_dict, input_t=full_binned_t, output_t=binned_t,
                                            alpha=context.baks_alpha, beta=context.baks_beta,
                                            pad_dur=context.baks_pad_dur, wrap_around=context.baks_wrap_around)
-    connection_target_gids, connection_weights_dict = network.get_connection_weights()
-    connectivity_dict = network.get_connectivity_dict()
+    gathered_full_spike_times_dict_list = context.comm.gather(full_spike_times_dict, root=0)
+    gathered_spike_times_dict_list = context.comm.gather(spike_times_dict, root=0)
+    gathered_firing_rates_dict_list = context.comm.gather(firing_rates_dict, root=0)
 
-    # full_voltage_rec_dict = context.comm.gather(full_voltage_rec_dict, root=0)
-    gather_voltage_rec_gids = dict()
+    full_voltage_rec_dict, voltage_rec_dict = network.get_voltage_rec_dict()
+    voltages_exceed_threshold = check_voltages_exceed_threshold(voltage_rec_dict, context.pop_cell_types)
+    bcast_subset_voltage_rec_gids = dict()
     if context.comm.rank == 0:
         for pop_name in (pop_name for pop_name in context.pop_cell_types
                          if context.pop_cell_types[pop_name] != 'input'):
             gather_gids = random.sample(range(*context.pop_gid_ranges[pop_name]),
                                         min(context.max_num_cells_export_voltage_rec, context.pop_sizes[pop_name]))
-            gather_voltage_rec_gids[pop_name] = set(gather_gids)
-    gather_voltage_rec_gids = context.comm.bcast(gather_voltage_rec_gids, root=0)
+            bcast_subset_voltage_rec_gids[pop_name] = set(gather_gids)
+    bcast_subset_voltage_rec_gids = context.comm.bcast(bcast_subset_voltage_rec_gids, root=0)
 
     subset_voltage_rec_dict = dict()
-    for pop_name in gather_voltage_rec_gids:
+    for pop_name in bcast_subset_voltage_rec_gids:
         if pop_name in voltage_rec_dict:
             for gid in voltage_rec_dict[pop_name]:
-                if gid in gather_voltage_rec_gids[pop_name]:
+                if gid in bcast_subset_voltage_rec_gids[pop_name]:
                     if pop_name not in subset_voltage_rec_dict:
                         subset_voltage_rec_dict[pop_name] = dict()
                     subset_voltage_rec_dict[pop_name][gid] = voltage_rec_dict[pop_name][gid]
-    subset_voltage_rec_dict = context.comm.gather(subset_voltage_rec_dict, root=0)
+    gathered_subset_voltage_rec_dict_list = context.comm.gather(subset_voltage_rec_dict, root=0)
 
-    connection_target_gids = context.comm.gather(connection_target_gids, root=0)
-    connection_weights_dict = context.comm.gather(connection_weights_dict, root=0)
-
-    if context.debug and context.comm.rank == 0:
-        gathered_connection_target_gid_count = dict()
-        for this_connection_target_gids in connection_target_gids:
-            for pop_name in this_connection_target_gids:
-                if pop_name not in gathered_connection_target_gid_count:
-                    gathered_connection_target_gid_count[pop_name] = 0
-                gathered_connection_target_gid_count[pop_name] += len(this_connection_target_gids[pop_name])
-
-        for pop_name in gathered_connection_target_gid_count:
-            print('gathered %i connection_target_gids for pop_name: %s cells' %
-                  (gathered_connection_target_gid_count[pop_name], pop_name))
-        sys.stdout.flush()
-        time.sleep(1.)
-        return None
-
-    full_spike_times_dict = context.comm.gather(full_spike_times_dict, root=0)
-    spike_times_dict = context.comm.gather(spike_times_dict, root=0)
-    firing_rates_dict = context.comm.gather(firing_rates_dict, root=0)
-    connection_weights_dict = context.comm.gather(connection_weights_dict, root=0)
     voltages_exceed_threshold_list = context.comm.gather(voltages_exceed_threshold, root=0)
+
+    connectivity_dict = network.get_connectivity_dict()
     connectivity_dict = context.comm.gather(connectivity_dict, root=0)
 
+    connection_target_gid_dict, connection_weights_dict = network.get_connection_weights()
+    gathered_connection_target_gid_dict_list = context.comm.gather(connection_target_gid_dict, root=0)
+    gathered_connection_weights_dict_list = context.comm.gather(connection_weights_dict, root=0)
+
     if context.comm.rank == 0:
-        spike_times_dict = merge_list_of_dict(spike_times_dict)
-        full_spike_times_dict = merge_list_of_dict(full_spike_times_dict)
-        # full_voltage_rec_dict = merge_list_of_dict(full_voltage_rec_dict)
-        voltage_rec_dict = merge_list_of_dict(voltage_rec_dict)
-        firing_rates_dict = merge_list_of_dict(firing_rates_dict)
-        connection_weights_dict = merge_list_of_dict(connection_weights_dict)
+        spike_times_dict = merge_list_of_dict(gathered_spike_times_dict_list)
+        full_spike_times_dict = merge_list_of_dict(gathered_full_spike_times_dict_list)
+        firing_rates_dict = merge_list_of_dict(gathered_firing_rates_dict_list)
+        subset_voltage_rec_dict = merge_list_of_dict(gathered_subset_voltage_rec_dict_list)
         connectivity_dict = merge_list_of_dict(connectivity_dict)
+        connection_weights_dict = merge_connection_weights(gathered_connection_target_gid_dict_list,
+                                                           gathered_connection_weights_dict_list)
+
         full_mean_rate_from_spike_count_dict = get_mean_rate_from_spike_count(full_spike_times_dict, full_binned_t)
         mean_min_rate_dict, mean_peak_rate_dict, mean_rate_active_cells_dict, pop_fraction_active_dict = \
             get_pop_activity_stats(firing_rates_dict, binned_t, threshold=context.active_rate_threshold, plot=plot)
@@ -376,13 +363,15 @@ def analyze_network_output(network, export=False, plot=False):
                                                    verbose=context.verbose > 1)
         if plot:
             plot_inferred_spike_rates(spike_times_dict, firing_rates_dict, binned_t, context.active_rate_threshold)
-            plot_voltage_traces(voltage_rec_dict, rec_t, spike_times_dict)
-            plot_weight_matrix(connection_weights_dict, tuning_peak_locs=context.tuning_peak_locs)
+            plot_voltage_traces(subset_voltage_rec_dict, rec_t, spike_times_dict)
+            plot_weight_matrix(connection_weights_dict, pop_gid_ranges=context.pop_gid_ranges,
+                               tuning_peak_locs=context.tuning_peak_locs)
             plot_firing_rate_heatmaps(firing_rates_dict, binned_t, tuning_peak_locs=context.tuning_peak_locs)
             if context.connectivity_type == 'gaussian':
                 plot_2D_connection_distance(context.pop_syn_proportions, context.pop_cell_positions, connectivity_dict)
 
         if export:
+            current_time = time.time()
             with h5py.File(context.temp_output_path, 'a') as f:
                 exported_data_key = 'simple_network_exported_data'
                 if exported_data_key in f:
@@ -392,6 +381,9 @@ def analyze_network_output(network, export=False, plot=False):
                 group.attrs['enumerated'] = False
                 set_h5py_attr(group.attrs, 'connectivity_type', context.connectivity_type)
                 group.attrs['active_rate_threshold'] = context.active_rate_threshold
+                subgroup = group.create_group('pop_gid_ranges')
+                for pop_name in context.pop_gid_ranges:
+                    subgroup.create_dataset(pop_name, data=context.pop_gid_ranges[pop_name])
                 subgroup = group.create_group('full_spike_times')
                 for pop_name in full_spike_times_dict:
                     subgroup.create_group(pop_name)
@@ -416,25 +408,19 @@ def analyze_network_output(network, export=False, plot=False):
                 for filter, band in viewitems(context.filter_bands):
                     subgroup.create_dataset(filter, data=band)
                 subgroup = group.create_group('voltage_recs')
-                for pop_name in voltage_rec_dict:
+                for pop_name in subset_voltage_rec_dict:
                     subgroup.create_group(pop_name)
-                    for gid in voltage_rec_dict[pop_name]:
+                    for gid in subset_voltage_rec_dict[pop_name]:
                         subgroup[pop_name].create_dataset(
-                            str(gid), data=voltage_rec_dict[pop_name][gid], compression='gzip')
+                            str(gid), data=subset_voltage_rec_dict[pop_name][gid], compression='gzip')
                 group.create_dataset('rec_t', data=rec_t, compression='gzip')
                 subgroup = group.create_group('connection_weights')
                 for target_pop_name in connection_weights_dict:
                     subgroup.create_group(target_pop_name)
-                    for target_gid in connection_weights_dict[target_pop_name]:
-                        subgroup[target_pop_name].create_group(str(target_gid))
-                        for source_pop_name in connection_weights_dict[target_pop_name][target_gid]:
-                            data_group = subgroup[target_pop_name][str(target_gid)].create_group(source_pop_name)
-                            source_gids = np.array(list(connection_weights_dict[target_pop_name][target_gid][
-                                                            source_pop_name].keys()))
-                            weights = np.array(list(connection_weights_dict[target_pop_name][target_gid][
-                                                            source_pop_name].values()))
-                            data_group.create_dataset('source_gids', data=source_gids, compression='gzip')
-                            data_group.create_dataset('weights', data=weights, compression='gzip')
+                    for source_pop_name in connection_weights_dict[target_pop_name]:
+                        subgroup[target_pop_name].create_dataset(
+                            source_pop_name, data=connection_weights_dict[target_pop_name][source_pop_name],
+                            compression='gzip')
                 if len(context.tuning_peak_locs) > 0:
                     subgroup = group.create_group('tuning_peak_locs')
                     for pop_name in context.tuning_peak_locs:
@@ -471,7 +457,8 @@ def analyze_network_output(network, export=False, plot=False):
                     positions = np.array(list(context.pop_cell_positions[pop_name].values()))
                     data_group.create_dataset('gids', data=gids, compression='gzip')
                     data_group.create_dataset('positions', data=positions, compression='gzip')
-            print('optimize_simple_network: exported data to %s' % context.temp_output_path)
+            print('optimize_simple_network: pid: %i; exporting data to file: %s took %.2f s' %
+                  (os.getpid(), context.temp_output_path, time.time() - current_time))
             sys.stdout.flush()
 
         """
@@ -533,8 +520,9 @@ def compute_features(x, export=False):
         syn_mech_params=context.syn_mech_params, tstop=context.tstop, duration=context.duration, buffer=context.buffer,
         dt=context.dt, delay=context.delay, verbose=context.verbose, debug=context.debug)
 
-    if int(context.pc.id()) == 0 and context.verbose > 0:
-        print('pid: %i; network initialization took %.2f s' % (os.getpid(), time.time() - start_time))
+    if context.comm.rank == 0 and context.verbose > 0:
+        print('optimize_simple_network: pid: %i; network initialization took %.2f s' %
+              (os.getpid(), time.time() - start_time))
         sys.stdout.flush()
     current_time = time.time()
 
@@ -545,8 +533,9 @@ def compute_features(x, export=False):
                                       tuning_peak_locs=context.tuning_peak_locs,
                                       track_wrap_around=context.track_wrap_around, spikes_seed=context.spikes_seed)
 
-    if int(context.pc.id()) == 0 and context.verbose > 0:
-        print('pid: %i; setting network input pattern took %.2f s' % (os.getpid(), time.time() - current_time))
+    if context.comm.rank == 0 and context.verbose > 0:
+        print('optimize_simple_network: pid: %i; setting network input pattern took %.2f s' %
+              (os.getpid(), time.time() - current_time))
         sys.stdout.flush()
     current_time = time.time()
 
@@ -574,21 +563,23 @@ def compute_features(x, export=False):
         return dict()
     """
 
-    if int(context.pc.id()) == 0 and context.verbose > 0:
-        print('pid: %i; building network connections took %.2f s' % (os.getpid(), time.time() - current_time))
+    if context.comm.rank == 0 and context.verbose > 0:
+        print('optimize_simple_network: pid: %i; building network connections took %.2f s' %
+              (os.getpid(), time.time() - current_time))
         sys.stdout.flush()
     current_time = time.time()
 
     context.network.run()
-    if int(context.pc.id()) == 0 and context.verbose > 0:
-        print('pid: %i; network simulation took %.2f s' % (os.getpid(), time.time() - current_time))
+    if context.comm.rank == 0 and context.verbose > 0:
+        print('optimize_simple_network: pid: %i; network simulation took %.2f s' %
+              (os.getpid(), time.time() - current_time))
         sys.stdout.flush()
     current_time = time.time()
 
     results = analyze_network_output(context.network, export=export, plot=context.plot)
-    if int(context.pc.id()) == 0:
+    if context.comm.rank == 0:
         if context.verbose > 0:
-            print('pid: %i; analysis of network simulation results took %.2f s' %
+            print('optimize_simple_network: pid: %i; analysis of network simulation results took %.2f s' %
                   (os.getpid(), time.time() - current_time))
             sys.stdout.flush()
         if results is None:
@@ -603,7 +594,7 @@ def get_objectives(features, export=False):
     :param export: bool
     :return: tuple of dict
     """
-    if int(context.pc.id()) == 0:
+    if context.comm.rank == 0:
         objectives = {}
         for objective_name in context.objective_names:
             if objective_name.find('tuning_index') != -1 and \

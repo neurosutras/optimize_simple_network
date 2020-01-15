@@ -1455,63 +1455,63 @@ def plot_voltage_traces(voltage_rec_dict, rec_t, spike_times_dict=None, rows=3, 
         fig.show()
 
 
-def plot_weight_matrix(connection_weights_dict, tuning_peak_locs=None, pop_names=None):
+def plot_weight_matrix(connection_weights_dict, pop_gid_ranges, tuning_peak_locs=None, pop_names=None):
     """
     Plots heat maps of connection strengths across all connected cell populations. If input activity or input weights
     are spatially tuned, cell ids are also sorted by peak location.
     :param connection_weights_dict: nested dict: {'target_pop_name': {'target_gid': {'source_pop_name':
                                                     {'source_gid': float} } } }
+    :param pop_gid_ranges: dict: {'pop_name', tuple of int}
     :param tuning_peak_locs: nested dict: {'pop_name': {'gid': float} }
     :param pop_names: list of str
     """
+
     if pop_names is None:
         pop_names = list(connection_weights_dict.keys())
-    sorted_gids = dict()
-    sorted_populations = []
+    sorted_gid_indexes = dict()
     for target_pop_name in pop_names:
-        if target_pop_name not in sorted_gids:
-            if target_pop_name in tuning_peak_locs and len(tuning_peak_locs[target_pop_name]) > 0:
-                sorted_indexes = np.argsort(list(tuning_peak_locs[target_pop_name].values()))
-                sorted_gids[target_pop_name] = np.array(list(tuning_peak_locs[target_pop_name].keys()))[sorted_indexes]
-                sorted_populations.append(target_pop_name)
-            else:
-                sorted_gids[target_pop_name] = sorted(list(connection_weights_dict[target_pop_name].keys()))
-        first_target_gid = sorted_gids[target_pop_name][0]
-        source_pop_list = list(connection_weights_dict[target_pop_name][first_target_gid].keys())
-        cols = len(source_pop_list)
-        fig, axes = plt.subplots(1, cols, sharey=True, figsize=(5*cols, 5))
-        y_interval = max(2, len(sorted_gids[target_pop_name]) // 10)
-        yticks = list(range(0, len(sorted_gids[target_pop_name]), y_interval))
-        if target_pop_name in sorted_populations:
+        if target_pop_name not in connection_weights_dict:
+            raise RuntimeError('plot_weight_matrix: missing population: %s' % target_pop_name)
+        if target_pop_name not in sorted_gid_indexes and target_pop_name in tuning_peak_locs and \
+                len(tuning_peak_locs[target_pop_name]) > 0:
+            this_ordered_peak_locs = \
+                np.array([tuning_peak_locs[target_pop_name][gid] for gid in range(*pop_gid_ranges[target_pop_name])])
+            sorted_gid_indexes[target_pop_name] = np.argsort(this_ordered_peak_locs)
+        target_pop_size = pop_gid_ranges[target_pop_name][1] - pop_gid_ranges[target_pop_name][0]
+        cols = len(connection_weights_dict[target_pop_name])
+        fig, axes = plt.subplots(1, cols, sharey=True, figsize=(5 * cols, 5))
+        y_interval = max(2, target_pop_size // 10)
+        yticks = list(range(0, target_pop_size, y_interval))
+        if target_pop_name in sorted_gid_indexes:
             axes[0].set_ylabel('Target: %s\nSorted Cell ID' % target_pop_name)
             ylabels = yticks
         else:
             axes[0].set_ylabel('Target: %s\nCell ID' % target_pop_name)
-            ylabels = np.array(sorted_gids[target_pop_name])[yticks]
-        for col, source_pop_name in enumerate(source_pop_list):
-            if source_pop_name not in sorted_gids:
-                if source_pop_name in tuning_peak_locs  and len(tuning_peak_locs[source_pop_name]) > 0:
-                    sorted_indexes = np.argsort(list(tuning_peak_locs[source_pop_name].values()))
-                    sorted_gids[source_pop_name] = \
-                        np.array(list(tuning_peak_locs[source_pop_name].keys()))[sorted_indexes]
-                    sorted_populations.append(source_pop_name)
-                else:
-                    sorted_gids[source_pop_name] = sorted(list(
-                        connection_weights_dict[target_pop_name][first_target_gid][source_pop_name].keys()))
-            weight_matrix = np.empty((len(sorted_gids[target_pop_name]), len(sorted_gids[source_pop_name])),
-                                     dtype='float32')
-            for i, target_gid in enumerate(sorted_gids[target_pop_name]):
-                for j, source_gid in enumerate(sorted_gids[source_pop_name]):
-                    weight_matrix[i][j] = \
-                        connection_weights_dict[target_pop_name][target_gid][source_pop_name][source_gid]
-            x_interval = max(2, len(sorted_gids[source_pop_name]) // 10)
-            xticks = list(range(0, len(sorted_gids[source_pop_name]), x_interval))
-            if source_pop_name in sorted_populations:
+            ylabels = np.add(yticks, pop_gid_ranges[target_pop_name][0])
+
+        for col, source_pop_name in enumerate(connection_weights_dict[target_pop_name]):
+            if source_pop_name not in sorted_gid_indexes and source_pop_name in tuning_peak_locs and \
+                    len(tuning_peak_locs[source_pop_name]) > 0:
+                this_ordered_peak_locs = \
+                    np.array([tuning_peak_locs[source_pop_name][gid]
+                              for gid in range(*pop_gid_ranges[source_pop_name])])
+                sorted_gid_indexes[source_pop_name] = np.argsort(this_ordered_peak_locs)
+            weight_matrix = connection_weights_dict[target_pop_name][source_pop_name]
+            if target_pop_name in sorted_gid_indexes:
+                weight_matrix[:] = weight_matrix[sorted_gid_indexes[target_pop_name], :]
+            if source_pop_name in sorted_gid_indexes:
+                weight_matrix[:] = weight_matrix[:, sorted_gid_indexes[source_pop_name]]
+
+            source_pop_size = pop_gid_ranges[source_pop_name][1] - pop_gid_ranges[source_pop_name][0]
+            x_interval = max(2, source_pop_size // 10)
+            xticks = list(range(0, source_pop_size, x_interval))
+            if source_pop_name in sorted_gid_indexes:
                 xlabels = xticks
                 axes[col].set_xlabel('Sorted Cell ID\nSource: %s' % source_pop_name)
             else:
-                xlabels = np.array(sorted_gids[source_pop_name])[xticks]
+                xlabels = np.add(xticks, pop_gid_ranges[source_pop_name][0])
                 axes[col].set_xlabel('Cell ID\nSource: %s' % source_pop_name)
+
             plot_heatmap_from_matrix(weight_matrix, xticks=xticks, xtick_labels=xlabels, yticks=yticks,
                                      ytick_labels=ylabels, ax=axes[col], aspect='auto', cbar_label='Synaptic weight',
                                      vmin=0.)
@@ -1660,6 +1660,9 @@ def plot_simple_network_results_from_file(data_file_path, verbose=False):
         group = f[exported_data_key]
         connectivity_type = get_h5py_attr(group.attrs, 'connectivity_type')
         active_rate_threshold = group.attrs['active_rate_threshold']
+        pop_gid_ranges = dict()
+        for pop_name in group['pop_gid_ranges']:
+            pop_gid_ranges[pop_name] = tuple(group['pop_gid_ranges'][pop_name][:])
         subgroup = group['full_spike_times']
         for pop_name in subgroup:
             for gid_key in subgroup[pop_name]:
@@ -1685,14 +1688,9 @@ def plot_simple_network_results_from_file(data_file_path, verbose=False):
         subgroup = group['connection_weights']
         for target_pop_name in subgroup:
             connection_weights_dict[target_pop_name] = dict()
-            for target_gid_key in subgroup[target_pop_name]:
-                target_gid = int(target_gid_key)
-                connection_weights_dict[target_pop_name][target_gid] = dict()
-                for source_pop_name in subgroup[target_pop_name][target_gid_key]:
-                    connection_weights_dict[target_pop_name][target_gid][source_pop_name] = dict()
-                    data_group = subgroup[target_pop_name][target_gid_key][source_pop_name]
-                    for source_gid, weight in zip(data_group['source_gids'][:], data_group['weights'][:]):
-                        connection_weights_dict[target_pop_name][target_gid][source_pop_name][source_gid] = weight
+            for source_pop_name in subgroup[target_pop_name]:
+                connection_weights_dict[target_pop_name][source_pop_name] = \
+                    subgroup[target_pop_name][source_pop_name][:]
         if 'tuning_peak_locs' in group and len(group['tuning_peak_locs']) > 0:
             subgroup = group['tuning_peak_locs']
             for pop_name in subgroup:
@@ -1735,7 +1733,7 @@ def plot_simple_network_results_from_file(data_file_path, verbose=False):
 
     plot_inferred_spike_rates(spike_times_dict, firing_rates_dict, binned_t, active_rate_threshold)
     plot_voltage_traces(voltage_rec_dict, rec_t, spike_times_dict)
-    plot_weight_matrix(connection_weights_dict, tuning_peak_locs=tuning_peak_locs)
+    plot_weight_matrix(connection_weights_dict, pop_gid_ranges=pop_gid_ranges, tuning_peak_locs=tuning_peak_locs)
     plot_firing_rate_heatmaps(firing_rates_dict, binned_t, tuning_peak_locs=tuning_peak_locs)
     if connectivity_type == 'gaussian':
         plot_2D_connection_distance(pop_syn_proportions, pop_cell_positions, connectivity_dict)
@@ -1827,3 +1825,36 @@ def get_inhom_poisson_spike_times_by_thinning(rate, t, dt=0.02, refractory=3., g
                 spike_times.append(interp_t[i])
                 ISI_memory = -refractory
     return spike_times
+
+
+def merge_connection_weights(target_gid_dict_list, weights_dict_list):
+    """
+
+    :param target_gid_dict_list: list of dict: {'pop_name': array of int}
+    :param weights_dict_list: list of nested dict: {'target_pop_name': {'source_pop_name': 2D array of float} }
+    :return: nested dict
+    """
+    connection_weights_dict = dict()
+    unsorted_target_gid_dict = defaultdict(list)
+
+    for k, target_gid_dict in enumerate(target_gid_dict_list):
+        weights_dict = weights_dict_list[k]
+        for target_pop_name in target_gid_dict:
+            unsorted_target_gid_dict[target_pop_name].extend(target_gid_dict[target_pop_name])
+            if target_pop_name not in connection_weights_dict:
+                connection_weights_dict[target_pop_name] = dict()
+            for source_pop_name in weights_dict[target_pop_name]:
+                if source_pop_name not in connection_weights_dict[target_pop_name]:
+                    connection_weights_dict[target_pop_name][source_pop_name] = \
+                        np.array(weights_dict[target_pop_name][source_pop_name])
+                else:
+                    connection_weights_dict[target_pop_name][source_pop_name] = \
+                        np.vstack([connection_weights_dict[target_pop_name][source_pop_name],
+                                  weights_dict[target_pop_name][source_pop_name]])
+    for target_pop_name in unsorted_target_gid_dict:
+        sorted_target_gid_indexes = np.argsort(unsorted_target_gid_dict[target_pop_name])
+        for source_pop_name in connection_weights_dict[target_pop_name]:
+            connection_weights_dict[target_pop_name][source_pop_name][:] = \
+                connection_weights_dict[target_pop_name][source_pop_name][sorted_target_gid_indexes, :]
+
+    return connection_weights_dict
