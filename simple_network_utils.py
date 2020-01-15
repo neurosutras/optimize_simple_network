@@ -545,21 +545,24 @@ class SimpleNetwork(object):
 
     def get_connection_weights(self):
         weights = dict()
+        target_gids = dict()
         for target_pop_name in self.ncdict:
             weights[target_pop_name] = dict()
-            for target_gid in self.ncdict[target_pop_name]:
-                weights[target_pop_name][target_gid] = dict()
-                target_cell = self.cells[target_pop_name][target_gid]
-                for syn_type in self.pop_syn_proportions[target_pop_name]:
-                    for source_pop_name in self.pop_syn_proportions[target_pop_name][syn_type]:
+            target_gids[target_pop_name] = list(self.ncdict[target_pop_name].keys())
+            num_cells_target_pop = len(target_gids[target_pop_name])
+            for syn_type in self.pop_syn_proportions[target_pop_name]:
+                for source_pop_name in self.pop_syn_proportions[target_pop_name][syn_type]:
+                    weights[target_pop_name][source_pop_name] = \
+                        np.zeros([num_cells_target_pop, self.pop_sizes[source_pop_name]])
+                    for i, target_gid in enumerate(self.ncdict[target_pop_name]):
+                        target_cell = self.cells[target_pop_name][target_gid]
                         if syn_type in target_cell.syns and source_pop_name in target_cell.syns[syn_type]:
                             this_syn = target_cell.syns[syn_type][source_pop_name]
                         else:
                             this_syn = None
-                        weights[target_pop_name][target_gid][source_pop_name] = dict()
                         start_gid = self.pop_gid_ranges[source_pop_name][0]
                         stop_gid = self.pop_gid_ranges[source_pop_name][1]
-                        for source_gid in range(start_gid, stop_gid):
+                        for j, source_gid in enumerate(range(start_gid, stop_gid)):
                             if source_gid in self.ncdict[target_pop_name][target_gid][source_pop_name]:
                                 this_weight_list = []
                                 for this_nc in self.ncdict[target_pop_name][target_gid][source_pop_name][source_gid]:
@@ -567,12 +570,10 @@ class SimpleNetwork(object):
                                         get_connection_param(syn_type, 'weight', syn=this_syn, nc=this_nc,
                                                              syn_mech_names=self.syn_mech_names,
                                                              syn_mech_param_rules=self.syn_mech_param_rules))
-                                weights[target_pop_name][target_gid][source_pop_name][source_gid] = \
-                                    np.mean(this_weight_list)
-                            else:
-                                weights[target_pop_name][target_gid][source_pop_name][source_gid] = 0.
+                                this_weight = np.mean(this_weight_list)
+                                weights[target_pop_name][source_pop_name][i][j] = this_weight
 
-        return weights
+        return target_gids, weights
 
 
 def get_connection_param(syn_type, syn_mech_param, syn=None, nc=None, delay=None, syn_mech_names=None,

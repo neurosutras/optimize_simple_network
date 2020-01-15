@@ -309,7 +309,7 @@ def analyze_network_output(network, export=False, plot=False):
     firing_rates_dict = infer_firing_rates(full_spike_times_dict, input_t=full_binned_t, output_t=binned_t,
                                            alpha=context.baks_alpha, beta=context.baks_beta,
                                            pad_dur=context.baks_pad_dur, wrap_around=context.baks_wrap_around)
-    connection_weights_dict = network.get_connection_weights()
+    connection_target_gids, connection_weights_dict = network.get_connection_weights()
     connectivity_dict = network.get_connectivity_dict()
 
     # full_voltage_rec_dict = context.comm.gather(full_voltage_rec_dict, root=0)
@@ -332,10 +332,20 @@ def analyze_network_output(network, export=False, plot=False):
                     subset_voltage_rec_dict[pop_name][gid] = voltage_rec_dict[pop_name][gid]
     subset_voltage_rec_dict = context.comm.gather(subset_voltage_rec_dict, root=0)
 
+    connection_target_gids = context.comm.gather(connection_target_gids, root=0)
+    connection_weights_dict = context.comm.gather(connection_weights_dict, root=0)
+
     if context.debug and context.comm.rank == 0:
-        subset_voltage_rec_dict = merge_list_of_dict(subset_voltage_rec_dict)
-        for pop_name in subset_voltage_rec_dict:
-            print('gathered subset_voltage_rec for %i %s cells' % (len(subset_voltage_rec_dict[pop_name]), pop_name))
+        gathered_connection_target_gid_count = dict()
+        for this_connection_target_gids in connection_target_gids:
+            for pop_name in this_connection_target_gids:
+                if pop_name not in gathered_connection_target_gid_count:
+                    gathered_connection_target_gid_count[pop_name] = 0
+                gathered_connection_target_gid_count[pop_name] += len(this_connection_target_gids[pop_name])
+
+        for pop_name in gathered_connection_target_gid_count:
+            print('gathered %i connection_target_gids for pop_name: %s cells' %
+                  (gathered_connection_target_gid_count[pop_name], pop_name))
         sys.stdout.flush()
         time.sleep(1.)
         return None
