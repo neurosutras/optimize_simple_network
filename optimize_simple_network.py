@@ -316,33 +316,35 @@ def analyze_network_output(network, export=False, plot=False):
 
     full_voltage_rec_dict, voltage_rec_dict = network.get_voltage_rec_dict()
     voltages_exceed_threshold = check_voltages_exceed_threshold(voltage_rec_dict, context.pop_cell_types)
-    bcast_subset_voltage_rec_gids = dict()
-    if context.comm.rank == 0:
-        for pop_name in (pop_name for pop_name in context.pop_cell_types
-                         if context.pop_cell_types[pop_name] != 'input'):
-            gather_gids = random.sample(range(*context.pop_gid_ranges[pop_name]),
-                                        min(context.max_num_cells_export_voltage_rec, context.pop_sizes[pop_name]))
-            bcast_subset_voltage_rec_gids[pop_name] = set(gather_gids)
-    bcast_subset_voltage_rec_gids = context.comm.bcast(bcast_subset_voltage_rec_gids, root=0)
-
-    subset_voltage_rec_dict = dict()
-    for pop_name in bcast_subset_voltage_rec_gids:
-        if pop_name in voltage_rec_dict:
-            for gid in voltage_rec_dict[pop_name]:
-                if gid in bcast_subset_voltage_rec_gids[pop_name]:
-                    if pop_name not in subset_voltage_rec_dict:
-                        subset_voltage_rec_dict[pop_name] = dict()
-                    subset_voltage_rec_dict[pop_name][gid] = voltage_rec_dict[pop_name][gid]
-    gathered_subset_voltage_rec_dict_list = context.comm.gather(subset_voltage_rec_dict, root=0)
 
     voltages_exceed_threshold_list = context.comm.gather(voltages_exceed_threshold, root=0)
 
-    connectivity_dict = network.get_connectivity_dict()
-    connectivity_dict = context.comm.gather(connectivity_dict, root=0)
+    if plot or export:
+        bcast_subset_voltage_rec_gids = dict()
+        if context.comm.rank == 0:
+            for pop_name in (pop_name for pop_name in context.pop_cell_types
+                             if context.pop_cell_types[pop_name] != 'input'):
+                gather_gids = random.sample(range(*context.pop_gid_ranges[pop_name]),
+                                            min(context.max_num_cells_export_voltage_rec, context.pop_sizes[pop_name]))
+                bcast_subset_voltage_rec_gids[pop_name] = set(gather_gids)
+        bcast_subset_voltage_rec_gids = context.comm.bcast(bcast_subset_voltage_rec_gids, root=0)
 
-    connection_target_gid_dict, connection_weights_dict = network.get_connection_weights()
-    gathered_connection_target_gid_dict_list = context.comm.gather(connection_target_gid_dict, root=0)
-    gathered_connection_weights_dict_list = context.comm.gather(connection_weights_dict, root=0)
+        subset_voltage_rec_dict = dict()
+        for pop_name in bcast_subset_voltage_rec_gids:
+            if pop_name in voltage_rec_dict:
+                for gid in voltage_rec_dict[pop_name]:
+                    if gid in bcast_subset_voltage_rec_gids[pop_name]:
+                        if pop_name not in subset_voltage_rec_dict:
+                            subset_voltage_rec_dict[pop_name] = dict()
+                        subset_voltage_rec_dict[pop_name][gid] = voltage_rec_dict[pop_name][gid]
+        gathered_subset_voltage_rec_dict_list = context.comm.gather(subset_voltage_rec_dict, root=0)
+
+        connectivity_dict = network.get_connectivity_dict()
+        connectivity_dict = context.comm.gather(connectivity_dict, root=0)
+
+        connection_target_gid_dict, connection_weights_dict = network.get_connection_weights()
+        gathered_connection_target_gid_dict_list = context.comm.gather(connection_target_gid_dict, root=0)
+        gathered_connection_weights_dict_list = context.comm.gather(connection_weights_dict, root=0)
 
     if context.debug and context.verbose > 0 and context.comm.rank == 0:
         print('optimize_simple_network: pid: %i; gathering data across ranks took %.2f s' %
@@ -354,10 +356,12 @@ def analyze_network_output(network, export=False, plot=False):
         spike_times_dict = merge_list_of_dict(gathered_spike_times_dict_list)
         full_spike_times_dict = merge_list_of_dict(gathered_full_spike_times_dict_list)
         firing_rates_dict = merge_list_of_dict(gathered_firing_rates_dict_list)
-        subset_voltage_rec_dict = merge_list_of_dict(gathered_subset_voltage_rec_dict_list)
-        connectivity_dict = merge_list_of_dict(connectivity_dict)
-        connection_weights_dict = merge_connection_weights(gathered_connection_target_gid_dict_list,
-                                                           gathered_connection_weights_dict_list)
+
+        if plot or export:
+            subset_voltage_rec_dict = merge_list_of_dict(gathered_subset_voltage_rec_dict_list)
+            connectivity_dict = merge_list_of_dict(connectivity_dict)
+            connection_weights_dict = merge_connection_weights(gathered_connection_target_gid_dict_list,
+                                                               gathered_connection_weights_dict_list)
 
         if context.debug and context.verbose > 0:
             print('optimize_simple_network: pid: %i; merging data structures for analysis took %.2f s' %
