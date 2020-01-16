@@ -10,7 +10,7 @@ sbatch <<EOT
 #SBATCH -p normal
 #SBATCH -N 400
 #SBATCH -n 22400
-#SBATCH -t 6:00:00
+#SBATCH -t 1:00:00
 #SBATCH --mail-user=aaronmil@stanford.edu
 #SBATCH --mail-type=BEGIN,END,FAIL
 
@@ -19,5 +19,5 @@ set -x
 cd $SCRATCH/src/optimize_simple_network
 
 ibrun -n 22400 python3 -m nested.optimize --config-file-path=config/$CONFIG_FILE \
-    --output-dir=data --pop_size=200 --max_iter=50 --path_length=3 --disp --procs_per_worker=112 --export
+    --output-dir=data --pop_size=200 --max_iter=1 --path_length=1 --disp --procs_per_worker=112
 EOT

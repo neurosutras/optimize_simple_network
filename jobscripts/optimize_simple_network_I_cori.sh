@@ -1,8 +1,8 @@
 #!/bin/bash -l
 
 #SBATCH -J optimize_simple_network_I_20191107
-#SBATCH -o /global/cscratch1/sd/aaronmil/optimize_cells/optimize_simple_network_I_20191107.%j.o
-#SBATCH -e /global/cscratch1/sd/aaronmil/optimize_cells/optimize_simple_network_I_20191107.%j.e
+#SBATCH -o /global/cscratch1/sd/aaronmil/optimize_simple_network/optimize_simple_network_I_20191107.%j.o
+#SBATCH -e /global/cscratch1/sd/aaronmil/optimize_simple_network/optimize_simple_network_I_20191107.%j.e
 #SBATCH -q premium
 #SBATCH -N 400 -n 12800
 #SBATCH -L SCRATCH
@@ -13,6 +13,6 @@
 
 set -x
 
-cd $HOME/optimize_cells
+cd $HOME/optimize_simple_network
 
-srun -n 12800 -c 2 python -m nested.optimize --config-file-path=config/optimize_simple_network_I_uniform_c_structured_w_gaussian_inp_config.yaml --output-dir=$SCRATCH/optimize_cells --pop_size=200 --max_iter=50 --path_length=3 --disp --procs_per_worker=64 --export
+srun -n 12800 -c 2 python -m nested.optimize --config-file-path=config/optimize_simple_network_I_uniform_c_structured_w_gaussian_inp_config.yaml --output-dir=$SCRATCH/optimize_simple_network --pop_size=200 --max_iter=50 --path_length=3 --disp --procs_per_worker=64 --export
