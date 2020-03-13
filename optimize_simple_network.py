@@ -60,19 +60,28 @@ def main(cli, config_file_path, export, output_dir, export_file_path, label, int
 
 
 def run_tests():
-    features = context.interface.execute(compute_features, context.x0_array, context.export)
+
+    model_id = 0
+    if 'model_key' in context() and context.model_key is not None:
+        model_label = context.model_key
+    else:
+        model_label = 'test'
+
+    features = context.interface.execute(compute_features, context.x0_array, model_id, context.export)
     sys.stdout.flush()
     time.sleep(1.)
     if len(features) > 0:
-        features, objectives = context.interface.execute(get_objectives, features)
+        features, objectives = context.interface.execute(get_objectives, features, model_id, context.export)
     else:
         objectives = dict()
-    sys.stdout.flush()
-    time.sleep(1.)
+
     if context.export:
-        collect_and_merge_temp_output(context.interface, context.export_file_path, verbose=context.disp)
+        merge_exported_data(context, param_arrays=[context.x0_array],
+                            model_ids=[model_id], model_labels=[model_label], features=[features],
+                            objectives=[objectives], export_file_path=context.export_file_path,
+                            verbose=context.verbose > 1)
     sys.stdout.flush()
-    time.sleep(1.)
+    print('model_id: %i; model_labels: %s' % (model_id, model_label))
     print('params:')
     pprint.pprint(context.x0_dict)
     print('features:')
@@ -80,7 +89,8 @@ def run_tests():
     print('objectives:')
     pprint.pprint(objectives)
     sys.stdout.flush()
-    time.sleep(1.)
+    time.sleep(.1)
+
     context.update(locals())
 
 
@@ -291,7 +301,7 @@ def update_context(x, local_context=None):
                     x_dict[peak_delta_weight_param_name]
 
 
-def analyze_network_output(network, export=False, plot=False):
+def analyze_network_output(network, model_id=None, export=False, plot=False):
     """
 
     :param network: :class:'SimpleNetwork'
@@ -360,7 +370,7 @@ def analyze_network_output(network, export=False, plot=False):
         if plot or export:
             subset_voltage_rec_dict = merge_list_of_dict(gathered_subset_voltage_rec_dict_list)
             connectivity_dict = merge_list_of_dict(connectivity_dict)
-            connection_weights_dict = merge_connection_weights(gathered_connection_target_gid_dict_list,
+            connection_weights_dict = merge_connection_weights_dicts(gathered_connection_target_gid_dict_list,
                                                                gathered_connection_weights_dict_list)
 
         if context.debug and context.verbose > 0:
@@ -397,11 +407,7 @@ def analyze_network_output(network, export=False, plot=False):
             current_time = time.time()
             with h5py.File(context.temp_output_path, 'a') as f:
                 exported_data_key = 'simple_network_exported_data'
-                if exported_data_key in f:
-                    raise RuntimeError('optimize_simple_network: data has already been exported to file at path: '
-                                       '%s' % context.temp_output_path)
-                group = f.create_group(exported_data_key)
-                group.attrs['enumerated'] = False
+                group = get_h5py_group(f, [model_id, exported_data_key], create=True)
                 set_h5py_attr(group.attrs, 'connectivity_type', context.connectivity_type)
                 group.attrs['active_rate_threshold'] = context.active_rate_threshold
                 subgroup = group.create_group('pop_gid_ranges')
@@ -525,10 +531,11 @@ def analyze_network_output(network, export=False, plot=False):
         return result
 
 
-def compute_features(x, export=False):
+def compute_features(x, model_id=None, export=False):
     """
 
     :param x: array
+    :param model_id: int
     :param export: bool
     :return: dict
     """
@@ -599,7 +606,7 @@ def compute_features(x, export=False):
         sys.stdout.flush()
     current_time = time.time()
 
-    results = analyze_network_output(context.network, export=export, plot=context.plot)
+    results = analyze_network_output(context.network, model_id=model_id, export=export, plot=context.plot)
     if context.comm.rank == 0:
         if context.verbose > 0:
             print('optimize_simple_network: pid: %i; analysis of network simulation results took %.2f s' %
@@ -610,10 +617,11 @@ def compute_features(x, export=False):
         return results
 
 
-def get_objectives(features, export=False):
+def get_objectives(features, model_id=None, export=False):
     """
 
     :param features: dict
+    :param model_id: int
     :param export: bool
     :return: tuple of dict
     """

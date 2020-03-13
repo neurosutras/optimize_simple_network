@@ -1,9 +1,7 @@
 from nested.utils import *
 from neuron import h
-# from dentate.utils import baks
 from scipy.signal import butter, sosfiltfilt, sosfreqz, hilbert, periodogram
 from collections import namedtuple, defaultdict
-# from dentate.stgen import get_inhom_poisson_spike_times_by_thinning
 
 
 # Based on http://modeldb.yale.edu/39948
@@ -1633,10 +1631,11 @@ def plot_2D_connection_distance(pop_syn_proportions, pop_cell_positions, connect
                 fig.show()
 
 
-def plot_simple_network_results_from_file(data_file_path, verbose=False):
+def plot_simple_network_results_from_file(data_file_path, model_label=None, verbose=False):
     """
 
     :param data_file_path: str (path)
+    :param model_label: int or str
     :param verbose: bool
     """
     if not os.path.isfile(data_file_path):
@@ -1655,9 +1654,7 @@ def plot_simple_network_results_from_file(data_file_path, verbose=False):
 
     exported_data_key = 'simple_network_exported_data'
     with h5py.File(data_file_path, 'r') as f:
-        if exported_data_key not in f:
-            raise RuntimeError('plot_simple_network_results_from_file: provided file is missing required data')
-        group = f[exported_data_key]
+        group = get_h5py_group(f, [model_label, exported_data_key])
         connectivity_type = get_h5py_attr(group.attrs, 'connectivity_type')
         active_rate_threshold = group.attrs['active_rate_threshold']
         pop_gid_ranges = dict()
@@ -1827,7 +1824,7 @@ def get_inhom_poisson_spike_times_by_thinning(rate, t, dt=0.02, refractory=3., g
     return spike_times
 
 
-def merge_connection_weights(target_gid_dict_list, weights_dict_list):
+def merge_connection_weights_dicts(target_gid_dict_list, weights_dict_list):
     """
 
     :param target_gid_dict_list: list of dict: {'pop_name': array of int}
