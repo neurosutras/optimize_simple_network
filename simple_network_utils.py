@@ -277,29 +277,36 @@ class SimpleNetwork(object):
                 cell = self.cells[pop_name][gid]
                 cell.load_vecstim(this_spike_train)
 
-    def set_offline_input_pattern(self, input_types, input_offline_mean_rates=None, input_offline_fraction_active=None,
-                                  tuning_peak_locs=None, track_wrap_around=False, stim_edge_duration=25.,
-                                  selection_seed=1000000000, spikes_seed=100000000, tuning_duration=None):
+    def set_offline_input_pattern(self, input_types, input_offline_min_rates=None, input_offline_mean_rates=None,
+                                  input_offline_fraction_active=None, tuning_peak_locs=None, track_wrap_around=False,
+                                  stim_edge_duration=(0., 0.), selection_seed=1000000000, spikes_seed=100000000,
+                                  tuning_duration=None):
         """
 
         :param input_types: dict
+        :param input_offline_min_rates: dict
         :param input_offline_mean_rates: dict
         :param input_offline_fraction_active: dict
         :param tuning_peak_locs: dict
         :param track_wrap_around: bool
-        :param stim_edge_duration: float
+        :param stim_edge_duration: tuple of float
         :param selection_seed: int: random seed for reproducible input cell selection
         :param spikes_seed: int: random seed for reproducible input spike trains
         :param tuning_duration: float
         """
-        if stim_edge_duration > 0.:
-            stim_edge_len = int(stim_edge_duration/self.dt)
-            stim_onset = hann(int(stim_edge_duration * 2. / self.dt))[:stim_edge_len]
-            stim_offset = hann(int(stim_edge_duration * 2. / self.dt))[-stim_edge_len:]
+        if stim_edge_duration[0] > 0.:
+            stim_onset_len = int(stim_edge_duration[0]/self.dt)
+            stim_onset = hann(int(stim_edge_duration[0] * 2. / self.dt))[:stim_onset_len]
+        if stim_edge_duration[1] > 0.:
+            stim_offset_len = int(stim_edge_duration[1] / self.dt)
+            stim_offset = hann(int(stim_edge_duration[1] * 2. / self.dt))[-stim_offset_len:]
         spikes_seed = int(spikes_seed)
         selection_seed = int(selection_seed)
         self.local_random.seed(selection_seed)
         for pop_name in (pop_name for pop_name in input_types if pop_name in self.cells):
+            if input_offline_min_rates is None or pop_name not in input_offline_min_rates:
+                raise RuntimeError('SimpleNetwork.set_input_pattern: missing input_offline_min_rates required to '
+                                   'specify %s input population: %s' % (input_types[pop_name], pop_name))
             if input_offline_mean_rates is None or pop_name not in input_offline_mean_rates:
                 raise RuntimeError('SimpleNetwork.set_input_pattern: missing input_offline_mean_rates required to '
                                    'specify %s input population: %s' % (input_types[pop_name], pop_name))
@@ -308,35 +315,32 @@ class SimpleNetwork(object):
                                    'required to specify %s input population: %s' %
                                    (input_types[pop_name], pop_name))
             if input_types[pop_name] in ['constant', 'gaussian']:
+                this_min_rate = input_offline_min_rates[pop_name]
                 this_mean_rate = input_offline_mean_rates[pop_name]
                 if pop_name not in self.input_pop_t:
-                    if stim_edge_duration > 0.:
-                        self.input_pop_t[pop_name] = np.concatenate((
-                            [0., self.buffer + self.equilibrate],
-                            np.arange(self.buffer + self.equilibrate,
-                                      self.buffer + self.equilibrate + stim_edge_duration, self.dt),
-                            [self.buffer + self.equilibrate + stim_edge_duration,
-                             self.buffer + self.equilibrate + self.duration - stim_edge_duration],
-                            np.arange(self.buffer + self.equilibrate + self.duration - stim_edge_duration,
-                                      self.buffer + self.equilibrate + self.duration, self.dt),
-                             [self.buffer + self.equilibrate + self.duration, self.tstop]))
-                    else:
-                        self.input_pop_t[pop_name] = \
-                            [0., self.buffer + self.equilibrate,
-                             self.buffer + self.equilibrate, self.buffer + self.equilibrate + self.duration,
-                             self.buffer + self.equilibrate + self.duration, self.tstop]
+                    self.input_pop_t[pop_name] = np.concatenate((
+                        [0., self.buffer + self.equilibrate],
+                        np.arange(self.buffer + self.equilibrate,
+                                  self.buffer + self.equilibrate + stim_edge_duration[0], self.dt),
+                        [self.buffer + self.equilibrate + stim_edge_duration[0],
+                         self.buffer + self.equilibrate + self.duration - stim_edge_duration[1]],
+                        np.arange(self.buffer + self.equilibrate + self.duration - stim_edge_duration[1],
+                                  self.buffer + self.equilibrate + self.duration, self.dt),
+                        [self.buffer + self.equilibrate + self.duration, self.tstop]))
                 this_fraction_active = input_offline_fraction_active[pop_name]
                 for gid in self.cells[pop_name]:
                     if self.local_random.random() <= this_fraction_active:
-                        if stim_edge_duration > 0.:
-                            self.input_pop_firing_rates[pop_name][gid] = \
-                                np.concatenate(([0., 0.], this_mean_rate * stim_onset, [this_mean_rate, this_mean_rate],
-                                               this_mean_rate * stim_offset, [0., 0.]))
-                        else:
-                            self.input_pop_firing_rates[pop_name][gid] = \
-                                [0., 0., this_mean_rate, this_mean_rate, 0., 0.]
+                        components = [[this_min_rate, this_min_rate]]
+                        if stim_edge_duration[0] > 0.:
+                            components.append((this_mean_rate - this_min_rate) * stim_onset + this_min_rate)
+                        components.append([this_mean_rate, this_mean_rate])
+                        if stim_edge_duration[1] > 0.:
+                            components.append((this_mean_rate - this_min_rate) * stim_offset + this_min_rate)
+                        components.append([this_min_rate, this_min_rate])
+                        self.input_pop_firing_rates[pop_name][gid] = np.concatenate(components)
                     else:
-                        self.input_pop_firing_rates[pop_name][gid] = np.zeros_like(self.input_pop_t[pop_name])
+                        self.input_pop_firing_rates[pop_name][gid] = \
+                            np.ones_like(self.input_pop_t[pop_name]) * this_min_rate
 
         for pop_name in (pop_name for pop_name in input_types if pop_name in self.cells):
             for gid in self.cells[pop_name]:
@@ -2006,16 +2010,18 @@ def plot_2D_connection_distance(pop_syn_proportions, pop_cell_positions, connect
                 fig.show()
 
 
-def plot_simple_network_results_from_file(data_file_path, model_label=None, verbose=False, return_context=False):
+def analyze_simple_network_results_from_file(data_file_path, model_label=None, verbose=False, return_context=False,
+                                             plot=True):
     """
 
     :param data_file_path: str (path)
     :param model_label: int or str
     :param verbose: bool
     :param return_context: bool
+    :param plot: bool
     """
     if not os.path.isfile(data_file_path):
-        raise IOError('plot_simple_network_results_from_file: invalid data file path: %s' % data_file_path)
+        raise IOError('analyze_simple_network_results_from_file: invalid data file path: %s' % data_file_path)
 
     full_spike_times_dict = defaultdict(dict)
     buffered_firing_rates_dict = defaultdict(dict)
@@ -2107,19 +2113,20 @@ def plot_simple_network_results_from_file(data_file_path, model_label=None, verb
     full_pop_mean_rate_from_binned_spike_count_dict = \
         get_pop_mean_rate_from_binned_spike_count(full_binned_spike_count_dict, dt=binned_dt)
     _ = get_pop_activity_stats(buffered_firing_rates_dict, input_t=buffered_binned_t, valid_t=binned_t,
-                               threshold=active_rate_threshold, plot=True)
+                               threshold=active_rate_threshold, plot=plot)
     _ = get_pop_bandpass_filtered_signal_stats(full_pop_mean_rate_from_binned_spike_count_dict, filter_bands,
                                                input_t=full_binned_t, valid_t=buffered_binned_t, output_t=binned_t,
-                                               plot=True, verbose=verbose)
-
-    plot_inferred_spike_rates(full_spike_times_dict, buffered_firing_rates_dict, input_t=buffered_binned_t,
-                              valid_t=binned_t, active_rate_threshold=active_rate_threshold)
-    plot_voltage_traces(subset_full_voltage_rec_dict, full_rec_t, valid_t=rec_t, spike_times_dict=full_spike_times_dict)
-    plot_weight_matrix(connection_weights_dict, pop_gid_ranges=pop_gid_ranges, tuning_peak_locs=tuning_peak_locs)
-    plot_firing_rate_heatmaps(buffered_firing_rates_dict, input_t=buffered_binned_t, valid_t=binned_t,
-                              tuning_peak_locs=tuning_peak_locs)
-    if connectivity_type == 'gaussian':
-        plot_2D_connection_distance(pop_syn_proportions, pop_cell_positions, connectivity_dict)
+                                               plot=plot, verbose=verbose)
+    if plot:
+        plot_inferred_spike_rates(full_spike_times_dict, buffered_firing_rates_dict, input_t=buffered_binned_t,
+                                  valid_t=binned_t, active_rate_threshold=active_rate_threshold)
+        plot_voltage_traces(subset_full_voltage_rec_dict, full_rec_t, valid_t=rec_t,
+                            spike_times_dict=full_spike_times_dict)
+        plot_weight_matrix(connection_weights_dict, pop_gid_ranges=pop_gid_ranges, tuning_peak_locs=tuning_peak_locs)
+        plot_firing_rate_heatmaps(buffered_firing_rates_dict, input_t=buffered_binned_t, valid_t=binned_t,
+                                  tuning_peak_locs=tuning_peak_locs)
+        if connectivity_type == 'gaussian':
+            plot_2D_connection_distance(pop_syn_proportions, pop_cell_positions, connectivity_dict)
 
     if return_context:
         context = Context()
@@ -2127,16 +2134,18 @@ def plot_simple_network_results_from_file(data_file_path, model_label=None, verb
         return context
 
 
-def plot_simple_network_replay_results_from_file(data_file_path, model_label=None, verbose=False, return_context=False):
+def analyze_simple_network_replay_results_from_file(data_file_path, model_label=None, verbose=False, return_context=False,
+                                                 plot=True):
     """
 
     :param data_file_path: str (path)
     :param model_label: int or str
     :param verbose: bool
     :param return_context: bool
+    :param plot: bool
     """
     if not os.path.isfile(data_file_path):
-        raise IOError('plot_simple_network_replay_results_from_file: invalid data file path: %s' % data_file_path)
+        raise IOError('analyze_simple_network_replay_results_from_file: invalid data file path: %s' % data_file_path)
 
     full_spike_times_dict = defaultdict(dict)
     buffered_firing_rates_dict = defaultdict(dict)
@@ -2152,39 +2161,18 @@ def plot_simple_network_replay_results_from_file(data_file_path, model_label=Non
 
     exported_data_key = 'simple_network_exported_data'
     with h5py.File(data_file_path, 'r') as f:
-        group = get_h5py_group(f, [model_label, exported_data_key])
+        group = get_h5py_group(f, ['shared_context'])
         connectivity_type = get_h5py_attr(group.attrs, 'connectivity_type')
         active_rate_threshold = group.attrs['active_rate_threshold']
         pop_gid_ranges = dict()
         for pop_name in group['pop_gid_ranges']:
             pop_gid_ranges[pop_name] = tuple(group['pop_gid_ranges'][pop_name][:])
-        subgroup = group['full_spike_times']
-        for pop_name in subgroup:
-            for gid_key in subgroup[pop_name]:
-                full_spike_times_dict[pop_name][int(gid_key)] = subgroup[pop_name][gid_key][:]
-        subgroup = group['buffered_firing_rates']
-        for pop_name in subgroup:
-            for gid_key in subgroup[pop_name]:
-                buffered_firing_rates_dict[pop_name][int(gid_key)] = subgroup[pop_name][gid_key][:]
-        subgroup = group['buffered_firing_rates_from_binned_spike_count']
-        for pop_name in subgroup:
-            for gid_key in subgroup[pop_name]:
-                buffered_firing_rates_from_binned_spike_count_dict[pop_name][int(gid_key)] = \
-                    subgroup[pop_name][gid_key][:]
-        subgroup = group['full_binned_spike_count']
-        for pop_name in subgroup:
-            for gid_key in subgroup[pop_name]:
-                full_binned_spike_count_dict[pop_name][int(gid_key)] = subgroup[pop_name][gid_key][:]
         full_binned_t = group['full_binned_t'][:]
         buffered_binned_t = group['buffered_binned_t'][:]
         binned_t = group['binned_t'][:]
         subgroup = group['filter_bands']
         for filter in subgroup:
             filter_bands[filter] = subgroup[filter][:]
-        subgroup = group['subset_full_voltage_recs']
-        for pop_name in subgroup:
-            for gid_key in subgroup[pop_name]:
-                subset_full_voltage_rec_dict[pop_name][int(gid_key)] = subgroup[pop_name][gid_key][:]
         full_rec_t = group['full_rec_t'][:]
         buffered_rec_t = group['buffered_rec_t'][:]
         rec_t = group['rec_t'][:]
@@ -2223,25 +2211,50 @@ def plot_simple_network_replay_results_from_file(data_file_path, model_label=Non
             pop_cell_positions[pop_name] = dict()
             for gid, position in zip(subgroup[pop_name]['gids'][:], subgroup[pop_name]['positions'][:]):
                 pop_cell_positions[pop_name][gid] = position
+        group = get_h5py_group(f, [model_label, exported_data_key])
+        subgroup = group['full_spike_times']
+        for pop_name in subgroup:
+            for gid_key in subgroup[pop_name]:
+                full_spike_times_dict[pop_name][int(gid_key)] = subgroup[pop_name][gid_key][:]
+        subgroup = group['buffered_firing_rates']
+        for pop_name in subgroup:
+            for gid_key in subgroup[pop_name]:
+                buffered_firing_rates_dict[pop_name][int(gid_key)] = subgroup[pop_name][gid_key][:]
+        subgroup = group['buffered_firing_rates_from_binned_spike_count']
+        for pop_name in subgroup:
+            for gid_key in subgroup[pop_name]:
+                buffered_firing_rates_from_binned_spike_count_dict[pop_name][int(gid_key)] = \
+                    subgroup[pop_name][gid_key][:]
+        subgroup = group['full_binned_spike_count']
+        for pop_name in subgroup:
+            for gid_key in subgroup[pop_name]:
+                full_binned_spike_count_dict[pop_name][int(gid_key)] = subgroup[pop_name][gid_key][:]
+        subgroup = group['subset_full_voltage_recs']
+        for pop_name in subgroup:
+            for gid_key in subgroup[pop_name]:
+                subset_full_voltage_rec_dict[pop_name][int(gid_key)] = subgroup[pop_name][gid_key][:]
 
     binned_dt = binned_t[1] - binned_t[0]
     full_pop_mean_rate_from_binned_spike_count_dict = \
         get_pop_mean_rate_from_binned_spike_count(full_binned_spike_count_dict, dt=binned_dt)
     _ = get_pop_activity_stats(buffered_firing_rates_from_binned_spike_count_dict, input_t=buffered_binned_t,
-                               valid_t=buffered_binned_t, threshold=active_rate_threshold, plot=True)
+                               valid_t=buffered_binned_t, threshold=active_rate_threshold, plot=plot)
     _ = get_pop_bandpass_filtered_signal_stats(full_pop_mean_rate_from_binned_spike_count_dict, filter_bands,
-                                               input_t=full_binned_t, valid_t=buffered_binned_t, output_t=binned_t,
-                                               plot=True, verbose=verbose)
-
-    plot_inferred_spike_rates(full_spike_times_dict, buffered_firing_rates_from_binned_spike_count_dict,
-                              input_t=buffered_binned_t, valid_t=buffered_binned_t,
-                              active_rate_threshold=active_rate_threshold)
-    plot_voltage_traces(subset_full_voltage_rec_dict, full_rec_t, valid_t=rec_t, spike_times_dict=full_spike_times_dict)
-    plot_weight_matrix(connection_weights_dict, pop_gid_ranges=pop_gid_ranges, tuning_peak_locs=tuning_peak_locs)
-    plot_firing_rate_heatmaps(buffered_firing_rates_from_binned_spike_count_dict, input_t=buffered_binned_t,
-                              valid_t=buffered_binned_t, tuning_peak_locs=tuning_peak_locs)
-    if connectivity_type == 'gaussian':
-        plot_2D_connection_distance(pop_syn_proportions, pop_cell_positions, connectivity_dict)
+                                               input_t=full_binned_t, valid_t=binned_t, output_t=binned_t,
+                                               plot=plot, verbose=verbose)
+    if plot:
+        plot_inferred_spike_rates(full_spike_times_dict, buffered_firing_rates_from_binned_spike_count_dict,
+                                  input_t=buffered_binned_t, valid_t=buffered_binned_t,
+                                  active_rate_threshold=active_rate_threshold)
+        plot_voltage_traces(subset_full_voltage_rec_dict, full_rec_t, valid_t=rec_t,
+                            spike_times_dict=full_spike_times_dict)
+        plot_weight_matrix(connection_weights_dict, pop_gid_ranges=pop_gid_ranges, tuning_peak_locs=tuning_peak_locs)
+        plot_firing_rate_heatmaps(buffered_firing_rates_from_binned_spike_count_dict, input_t=buffered_binned_t,
+                                  valid_t=buffered_binned_t, tuning_peak_locs=tuning_peak_locs)
+        plot_firing_rate_heatmaps(full_binned_spike_count_dict, input_t=full_binned_t,
+                                  valid_t=buffered_binned_t, tuning_peak_locs=tuning_peak_locs)
+        if connectivity_type == 'gaussian':
+            plot_2D_connection_distance(pop_syn_proportions, pop_cell_positions, connectivity_dict)
 
     if return_context:
         context = Context()

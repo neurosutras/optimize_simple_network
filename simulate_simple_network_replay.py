@@ -8,7 +8,7 @@ context = Context()
 
 @click.command(context_settings=dict(ignore_unknown_options=True, allow_extra_args=True, ))
 @click.option("--config-file-path", type=click.Path(exists=True, file_okay=True, dir_okay=False),
-              default='config/optimize_simple_network_replay_J_uniform_c_structured_w_gaussian_inp_config.yaml')
+              default='config/simulate_simple_network_replay_J_uniform_c_structured_w_gaussian_inp_config.yaml')
 @click.option("--export", is_flag=True)
 @click.option("--output-dir", type=str, default='data')
 @click.option("--export-file-path", type=str, default=None)
@@ -46,52 +46,33 @@ def main(cli, config_file_path, export, output_dir, export_file_path, label, int
     context.interface = get_parallel_interface(source_file=__file__, source_package=__package__, **kwargs)
     context.interface.start(disp=context.disp)
     context.interface.ensure_controller()
-    config_optimize_interactive(__file__, config_file_path=config_file_path, output_dir=output_dir, export=export,
-                                export_file_path=export_file_path, label=label, disp=context.disp,
-                                interface=context.interface, verbose=verbose, plot=plot, debug=debug, **kwargs)
+
+    config_parallel_interface(__file__, config_file_path=config_file_path, output_dir=output_dir, export=export,
+                              export_file_path=export_file_path, label=label, disp=context.disp,
+                              interface=context.interface, verbose=verbose, plot=plot, debug=debug, **kwargs)
+
     if simulate:
-        run_tests()
+        args = context.interface.execute(get_args_static_offline_stimulus)
+        sequences = args + [list(range(context.num_input_patterns))] + [[context.export] * context.num_input_patterns]
+        context.interface.map(simulate_network_replay, *sequences)
+
+        if context.export:
+            merge_exported_data(context, export_file_path=context.export_file_path, verbose=context.verbose > 0)
+        sys.stdout.flush()
+        time.sleep(.1)
 
     if context.plot:
         context.interface.apply(plt.show)
 
     if not interactive:
         context.interface.stop()
-
-
-def run_tests():
-
-    model_id = 0
-    if 'model_key' in context() and context.model_key is not None:
-        model_label = context.model_key
     else:
-        model_label = 'test'
+        context.update(locals())
 
-    features = context.interface.execute(compute_features, context.x0_array, model_id, context.export)
-    sys.stdout.flush()
-    time.sleep(1.)
-    if len(features) > 0:
-        features, objectives = context.interface.execute(get_objectives, features, model_id, context.export)
-    else:
-        objectives = dict()
 
-    if context.export:
-        merge_exported_data(context, param_arrays=[context.x0_array],
-                            model_ids=[model_id], model_labels=[model_label], features=[features],
-                            objectives=[objectives], export_file_path=context.export_file_path,
-                            verbose=context.verbose > 1)
-    sys.stdout.flush()
-    print('model_id: %i; model_labels: %s' % (model_id, model_label))
-    print('params:')
-    pprint.pprint(context.x0_dict)
-    print('features:')
-    pprint.pprint(features)
-    print('objectives:')
-    pprint.pprint(objectives)
-    sys.stdout.flush()
-    time.sleep(.1)
+def get_args_static_offline_stimulus():
 
-    context.update(locals())
+    return [[context.spikes_seed + 1000000 * i for i in range(context.num_input_patterns)]]
 
 
 def config_worker():
@@ -131,6 +112,7 @@ def config_worker():
         input_max_rates = None
     if 'input_norm_tuning_widths' not in context():
         input_norm_tuning_widths = None
+    context.num_input_patterns = int(context.num_input_patterns)
     
     connection_weights_mean = defaultdict(dict)  # {'target_pop_name': {'source_pop_name': float} }
     connection_weights_norm_sigma = defaultdict(dict)  # {'target_pop_name': {'source_pop_name': float} }
@@ -158,8 +140,8 @@ def config_worker():
     delay = 1.  # ms
     equilibrate = 250.  # ms
     buffer = 100.  # ms
-    duration = 150.  # ms
-    stim_edge_duration = 25.  # ms
+    duration = 250.  # ms
+    stim_edge_duration = (150., 25.)  # ms
     tuning_duration = 3000.  # ms
     tstop = int(equilibrate + duration + 2. * buffer)  # ms
     dt = 0.025
@@ -245,9 +227,52 @@ def config_worker():
         pop_cell_positions = dict()
 
     context.update(locals())
+
+    context.x0_array = param_dict_to_array(context.x0, context.param_names)
+    update_context(context.x0_array)
+
+    if context.debug:
+        context.update(locals())
+        return
+
+    context.network = SimpleNetwork(
+        pc=context.pc, pop_sizes=context.pop_sizes, pop_gid_ranges=context.pop_gid_ranges,
+        pop_cell_types=context.pop_cell_types, pop_syn_counts=context.pop_syn_counts,
+        pop_syn_proportions=context.pop_syn_proportions, connection_weights_mean=context.connection_weights_mean,
+        connection_weights_norm_sigma=context.connection_weights_norm_sigma,
+        syn_mech_params=context.syn_mech_params, tstop=context.tstop, duration=context.duration, buffer=context.buffer,
+        equilibrate=context.equilibrate, dt=context.dt, delay=context.delay, verbose=context.verbose,
+        debug=context.debug)
+
     if context.comm.rank == 0 and context.verbose > 0:
-        print('optimize_simple_network: pid: %i; worker initialization took %.2f s' %
+        print('optimize_simple_network: pid: %i; network initialization took %.2f s' %
               (os.getpid(), time.time() - start_time))
+        sys.stdout.flush()
+    current_time = time.time()
+
+    if context.connectivity_type == 'uniform':
+        context.network.connect_cells(connectivity_type=context.connectivity_type,
+                                      connection_seed=context.connection_seed)
+    elif context.connectivity_type == 'gaussian':
+        context.network.connect_cells(connectivity_type=context.connectivity_type,
+                                      connection_seed=context.connection_seed,
+                                      pop_axon_extents=context.pop_axon_extents,
+                                      pop_cell_positions=context.pop_cell_positions)
+
+    context.network.assign_connection_weights(
+        default_weight_distribution_type=context.default_weight_distribution_type,
+        connection_weight_distribution_types=context.connection_weight_distribution_types,
+        weights_seed=context.weights_seed)
+
+    if context.structured_weights:
+        context.network.structure_connection_weights(structured_weight_params=context.structured_weight_params,
+                                                     tuning_peak_locs=context.tuning_peak_locs,
+                                                     wrap_around=context.track_wrap_around,
+                                                     tuning_duration=context.tuning_duration)
+
+    if context.comm.rank == 0 and context.verbose > 0:
+        print('optimize_simple_network: pid: %i; building network connections took %.2f s' %
+              (os.getpid(), time.time() - current_time))
         sys.stdout.flush()
 
 
@@ -409,7 +434,7 @@ def analyze_network_output(network, model_id=None, export=False, plot=False):
             freq_tuning_index_dict = \
             get_pop_bandpass_filtered_signal_stats(full_pop_mean_rate_from_binned_spike_count_dict,
                                                    context.filter_bands, input_t=full_binned_t,
-                                                   valid_t=buffered_binned_t, output_t=binned_t,
+                                                   valid_t=binned_t, output_t=binned_t,
                                                    plot=plot, verbose=context.verbose > 1)
 
         if context.debug and context.verbose > 0:
@@ -418,6 +443,7 @@ def analyze_network_output(network, model_id=None, export=False, plot=False):
             sys.stdout.flush()
 
         if plot:
+            """
             plot_inferred_spike_rates(full_spike_times_dict, buffered_firing_rates_from_binned_spike_count_dict,
                                       input_t=buffered_binned_t, valid_t=buffered_binned_t,
                                       active_rate_threshold=context.active_rate_threshold)
@@ -425,21 +451,92 @@ def analyze_network_output(network, model_id=None, export=False, plot=False):
                                 spike_times_dict=full_spike_times_dict)
             plot_weight_matrix(connection_weights_dict, pop_gid_ranges=context.pop_gid_ranges,
                                tuning_peak_locs=context.tuning_peak_locs)
+            """
             plot_firing_rate_heatmaps(buffered_firing_rates_from_binned_spike_count_dict, input_t=buffered_binned_t,
+                                      valid_t=buffered_binned_t, tuning_peak_locs=context.tuning_peak_locs)
+            plot_firing_rate_heatmaps(full_binned_spike_count_dict, input_t=full_binned_t,
                                       valid_t=buffered_binned_t, tuning_peak_locs=context.tuning_peak_locs)
             if context.connectivity_type == 'gaussian':
                 plot_2D_connection_distance(context.pop_syn_proportions, context.pop_cell_positions, connectivity_dict)
 
+        if any(voltages_exceed_threshold_list):
+            voltages_exceed_threshold = True
+            if context.verbose > 0:
+                print('optimize_simple_network: pid: %i; model_id: %i; model failed - mean membrane voltage in some '
+                      'Izhi cells exceeds spike threshold' % (os.getpid(), model_id))
+                sys.stdout.flush()
+        else:
+            voltages_exceed_threshold = False
+
         if export:
             current_time = time.time()
             with h5py.File(context.temp_output_path, 'a') as f:
+                shared_context_key = 'shared_context'
+                if 'shared_context' not in f:
+                    group = f.create_group('shared_context')
+                    group.create_dataset('param_names', data=np.array(context.param_names, dtype='S'),
+                                         compression='gzip')
+                    group.create_dataset('x0', data=context.x0_array, compression='gzip')
+                    set_h5py_attr(group.attrs, 'connectivity_type', context.connectivity_type)
+                    group.attrs['active_rate_threshold'] = context.active_rate_threshold
+                    subgroup = group.create_group('pop_gid_ranges')
+                    for pop_name in context.pop_gid_ranges:
+                        subgroup.create_dataset(pop_name, data=context.pop_gid_ranges[pop_name])
+                    group.create_dataset('full_binned_t', data=full_binned_t, compression='gzip')
+                    group.create_dataset('buffered_binned_t', data=buffered_binned_t, compression='gzip')
+                    group.create_dataset('binned_t', data=binned_t, compression='gzip')
+                    subgroup = group.create_group('filter_bands')
+                    for filter, band in viewitems(context.filter_bands):
+                        subgroup.create_dataset(filter, data=band)
+                    group.create_dataset('full_rec_t', data=full_rec_t, compression='gzip')
+                    group.create_dataset('buffered_rec_t', data=buffered_rec_t, compression='gzip')
+                    group.create_dataset('rec_t', data=rec_t, compression='gzip')
+                    subgroup = group.create_group('connection_weights')
+                    for target_pop_name in connection_weights_dict:
+                        subgroup.create_group(target_pop_name)
+                        for source_pop_name in connection_weights_dict[target_pop_name]:
+                            subgroup[target_pop_name].create_dataset(
+                                source_pop_name, data=connection_weights_dict[target_pop_name][source_pop_name],
+                                compression='gzip')
+                    if len(context.tuning_peak_locs) > 0:
+                        subgroup = group.create_group('tuning_peak_locs')
+                        for pop_name in context.tuning_peak_locs:
+                            if len(context.tuning_peak_locs[pop_name]) > 0:
+                                data_group = subgroup.create_group(pop_name)
+                                target_gids = np.array(list(context.tuning_peak_locs[pop_name].keys()))
+                                peak_locs = np.array(list(context.tuning_peak_locs[pop_name].values()))
+                                data_group.create_dataset('target_gids', data=target_gids, compression='gzip')
+                                data_group.create_dataset('peak_locs', data=peak_locs, compression='gzip')
+                    subgroup = group.create_group('connectivity')
+                    for target_pop_name in connectivity_dict:
+                        subgroup.create_group(target_pop_name)
+                        for target_gid in connectivity_dict[target_pop_name]:
+                            data_group = subgroup[target_pop_name].create_group(str(target_gid))
+                            for source_pop_name in connectivity_dict[target_pop_name][target_gid]:
+                                data_group.create_dataset(source_pop_name,
+                                                          data=connectivity_dict[target_pop_name][target_gid][
+                                                              source_pop_name])
+                    subgroup = group.create_group('pop_syn_proportions')
+                    for target_pop_name in context.pop_syn_proportions:
+                        subgroup.create_group(target_pop_name)
+                        for syn_type in context.pop_syn_proportions[target_pop_name]:
+                            data_group = subgroup[target_pop_name].create_group(syn_type)
+                            source_pop_names = \
+                                np.array(list(context.pop_syn_proportions[target_pop_name][syn_type].keys()), dtype='S')
+                            syn_proportions = \
+                                np.array(list(context.pop_syn_proportions[target_pop_name][syn_type].values()))
+                            data_group.create_dataset('source_pop_names', data=source_pop_names)
+                            data_group.create_dataset('syn_proportions', data=syn_proportions)
+                    subgroup = group.create_group('pop_cell_positions')
+                    for pop_name in context.pop_cell_positions:
+                        data_group = subgroup.create_group(pop_name)
+                        gids = np.array(list(context.pop_cell_positions[pop_name].keys()))
+                        positions = np.array(list(context.pop_cell_positions[pop_name].values()))
+                        data_group.create_dataset('gids', data=gids, compression='gzip')
+                        data_group.create_dataset('positions', data=positions, compression='gzip')
                 exported_data_key = 'simple_network_exported_data'
                 group = get_h5py_group(f, [model_id, exported_data_key], create=True)
-                set_h5py_attr(group.attrs, 'connectivity_type', context.connectivity_type)
-                group.attrs['active_rate_threshold'] = context.active_rate_threshold
-                subgroup = group.create_group('pop_gid_ranges')
-                for pop_name in context.pop_gid_ranges:
-                    subgroup.create_dataset(pop_name, data=context.pop_gid_ranges[pop_name])
+                set_h5py_attr(group.attrs, 'voltages_exceed_threshold', voltages_exceed_threshold)
                 subgroup = group.create_group('full_spike_times')
                 for pop_name in full_spike_times_dict:
                     subgroup.create_group(pop_name)
@@ -465,214 +562,61 @@ def analyze_network_output(network, model_id=None, export=False, plot=False):
                     for gid in full_binned_spike_count_dict[pop_name]:
                         subgroup[pop_name].create_dataset(
                             str(gid), data=full_binned_spike_count_dict[pop_name][gid], compression='gzip')
-                group.create_dataset('full_binned_t', data=full_binned_t, compression='gzip')
-                group.create_dataset('buffered_binned_t', data=buffered_binned_t, compression='gzip')
-                group.create_dataset('binned_t', data=binned_t, compression='gzip')
-                subgroup = group.create_group('filter_bands')
-                for filter, band in viewitems(context.filter_bands):
-                    subgroup.create_dataset(filter, data=band)
                 subgroup = group.create_group('subset_full_voltage_recs')
                 for pop_name in subset_full_voltage_rec_dict:
                     subgroup.create_group(pop_name)
                     for gid in subset_full_voltage_rec_dict[pop_name]:
                         subgroup[pop_name].create_dataset(
                             str(gid), data=subset_full_voltage_rec_dict[pop_name][gid], compression='gzip')
-                group.create_dataset('full_rec_t', data=full_rec_t, compression='gzip')
-                group.create_dataset('buffered_rec_t', data=buffered_rec_t, compression='gzip')
-                group.create_dataset('rec_t', data=rec_t, compression='gzip')
-                subgroup = group.create_group('connection_weights')
-                for target_pop_name in connection_weights_dict:
-                    subgroup.create_group(target_pop_name)
-                    for source_pop_name in connection_weights_dict[target_pop_name]:
-                        subgroup[target_pop_name].create_dataset(
-                            source_pop_name, data=connection_weights_dict[target_pop_name][source_pop_name],
-                            compression='gzip')
-                if len(context.tuning_peak_locs) > 0:
-                    subgroup = group.create_group('tuning_peak_locs')
-                    for pop_name in context.tuning_peak_locs:
-                        if len(context.tuning_peak_locs[pop_name]) > 0:
-                            data_group = subgroup.create_group(pop_name)
-                            target_gids = np.array(list(context.tuning_peak_locs[pop_name].keys()))
-                            peak_locs = np.array(list(context.tuning_peak_locs[pop_name].values()))
-                            data_group.create_dataset('target_gids', data=target_gids, compression='gzip')
-                            data_group.create_dataset('peak_locs', data=peak_locs, compression='gzip')
-                subgroup = group.create_group('connectivity')
-                for target_pop_name in connectivity_dict:
-                    subgroup.create_group(target_pop_name)
-                    for target_gid in connectivity_dict[target_pop_name]:
-                        data_group = subgroup[target_pop_name].create_group(str(target_gid))
-                        for source_pop_name in connectivity_dict[target_pop_name][target_gid]:
-                            data_group.create_dataset(source_pop_name,
-                                                      data=connectivity_dict[target_pop_name][target_gid][
-                                                          source_pop_name])
-                subgroup = group.create_group('pop_syn_proportions')
-                for target_pop_name in context.pop_syn_proportions:
-                    subgroup.create_group(target_pop_name)
-                    for syn_type in context.pop_syn_proportions[target_pop_name]:
-                        data_group = subgroup[target_pop_name].create_group(syn_type)
-                        source_pop_names = \
-                            np.array(list(context.pop_syn_proportions[target_pop_name][syn_type].keys()), dtype='S')
-                        syn_proportions = \
-                            np.array(list(context.pop_syn_proportions[target_pop_name][syn_type].values()))
-                        data_group.create_dataset('source_pop_names', data=source_pop_names)
-                        data_group.create_dataset('syn_proportions', data=syn_proportions)
-                subgroup = group.create_group('pop_cell_positions')
-                for pop_name in context.pop_cell_positions:
-                    data_group = subgroup.create_group(pop_name)
-                    gids = np.array(list(context.pop_cell_positions[pop_name].keys()))
-                    positions = np.array(list(context.pop_cell_positions[pop_name].values()))
-                    data_group.create_dataset('gids', data=gids, compression='gzip')
-                    data_group.create_dataset('positions', data=positions, compression='gzip')
-            print('optimize_simple_network: pid: %i; exporting data to file: %s took %.2f s' %
-                  (os.getpid(), context.temp_output_path, time.time() - current_time))
+
+            print('optimize_simple_network: pid: %i; model_id: %i; exporting data to file: %s took %.2f s' %
+                  (os.getpid(), model_id, context.temp_output_path, time.time() - current_time))
             sys.stdout.flush()
-
-        """
-        if context.debug:
-            context.update(locals())
-            return dict()
-        """
-
-        result = dict()
-
-        result['E_mean_min_rate'] = mean_min_rate_dict['E']
-        result['E_mean_peak_rate'] = mean_peak_rate_dict['E']
-        result['I_mean_active_rate'] = np.mean(mean_rate_active_cells_dict['I'])
-        result['FF_frac_active'] = np.mean(pop_fraction_active_dict['FF'])
-        result['E_frac_active'] = np.mean(pop_fraction_active_dict['E'])
-        result['I_frac_active'] = np.mean(pop_fraction_active_dict['I'])
-        result['FF_theta_envelope_ratio'] = filter_envelope_ratio_dict['Theta']['FF']
-        result['E_theta_envelope_ratio'] = filter_envelope_ratio_dict['Theta']['E']
-        result['I_theta_envelope_ratio'] = filter_envelope_ratio_dict['Theta']['I']
-        result['FF_gamma_envelope_ratio'] = filter_envelope_ratio_dict['Gamma']['FF']
-        result['E_gamma_envelope_ratio'] = filter_envelope_ratio_dict['Gamma']['E']
-        result['I_gamma_envelope_ratio'] = filter_envelope_ratio_dict['Gamma']['I']
-        result['E_centroid_theta_freq'] = centroid_freq_dict['Theta']['E']
-        result['I_centroid_theta_freq'] = centroid_freq_dict['Theta']['I']
-        result['E_centroid_gamma_freq'] = centroid_freq_dict['Gamma']['E']
-        result['I_centroid_gamma_freq'] = centroid_freq_dict['Gamma']['I']
-        result['E_theta_tuning_index'] = freq_tuning_index_dict['Theta']['E']
-        result['I_theta_tuning_index'] = freq_tuning_index_dict['Theta']['I']
-        result['E_gamma_tuning_index'] = freq_tuning_index_dict['Gamma']['E']
-        result['I_gamma_tuning_index'] = freq_tuning_index_dict['Gamma']['I']
-
-        if any(voltages_exceed_threshold_list):
-            if context.verbose > 0:
-                print('optimize_simple_network: pid: %i; model failed - mean membrane voltage in some Izhi cells '
-                      'exceeds spike threshold' % os.getpid())
-                sys.stdout.flush()
-            result['failed'] = True
 
         if context.interactive:
             context.update(locals())
-        return result
 
 
-def compute_features(x, model_id=None, export=False):
+def simulate_network_replay(spikes_seed, model_id=None, export=False):
     """
 
-    :param x: array
+    :param spikes_seed: int
     :param model_id: int
     :param export: bool
-    :return: dict
     """
-    update_source_contexts(x, context)
-    context.pc.gid_clear()
     start_time = time.time()
-    context.network = SimpleNetwork(
-        pc=context.pc, pop_sizes=context.pop_sizes, pop_gid_ranges=context.pop_gid_ranges,
-        pop_cell_types=context.pop_cell_types, pop_syn_counts=context.pop_syn_counts,
-        pop_syn_proportions=context.pop_syn_proportions, connection_weights_mean=context.connection_weights_mean,
-        connection_weights_norm_sigma=context.connection_weights_norm_sigma,
-        syn_mech_params=context.syn_mech_params, tstop=context.tstop, duration=context.duration, buffer=context.buffer,
-        equilibrate=context.equilibrate, dt=context.dt, delay=context.delay, verbose=context.verbose,
-        debug=context.debug)
-
-    if context.comm.rank == 0 and context.verbose > 0:
-        print('optimize_simple_network: pid: %i; network initialization took %.2f s' %
-              (os.getpid(), time.time() - start_time))
-        sys.stdout.flush()
-    current_time = time.time()
 
     context.network.set_offline_input_pattern(
-        context.input_types, input_offline_mean_rates={'FF': 20.}, input_offline_fraction_active={'FF': 0.2},
-        tuning_peak_locs=context.tuning_peak_locs, track_wrap_around=context.track_wrap_around,
-        stim_edge_duration=context.stim_edge_duration, spikes_seed=context.spikes_seed,
-        tuning_duration=context.tuning_duration)
+        context.input_types, input_offline_min_rates=context.input_offline_min_rates,
+        input_offline_mean_rates=context.input_offline_mean_rates,
+        input_offline_fraction_active=context.input_offline_fraction_active, tuning_peak_locs=context.tuning_peak_locs,
+        track_wrap_around=context.track_wrap_around,stim_edge_duration=context.stim_edge_duration,
+        spikes_seed=int(spikes_seed), tuning_duration=context.tuning_duration)
 
     if context.comm.rank == 0 and context.verbose > 0:
-        print('optimize_simple_network: pid: %i; setting network input pattern took %.2f s' %
-              (os.getpid(), time.time() - current_time))
+        print('optimize_simple_network: pid: %i; model_id: %i; setting network input pattern took %.2f s' %
+              (os.getpid(), model_id, time.time() - start_time))
         sys.stdout.flush()
     current_time = time.time()
 
-    if context.connectivity_type == 'uniform':
-        context.network.connect_cells(connectivity_type=context.connectivity_type,
-                                      connection_seed=context.connection_seed)
-    elif context.connectivity_type == 'gaussian':
-        context.network.connect_cells(connectivity_type=context.connectivity_type,
-                                      connection_seed=context.connection_seed,
-                                      pop_axon_extents=context.pop_axon_extents,
-                                      pop_cell_positions=context.pop_cell_positions)
-
-    context.network.assign_connection_weights(
-        default_weight_distribution_type=context.default_weight_distribution_type,
-        connection_weight_distribution_types=context.connection_weight_distribution_types,
-        weights_seed=context.weights_seed)
-
-    if context.structured_weights:
-        context.network.structure_connection_weights(structured_weight_params=context.structured_weight_params,
-                                                     tuning_peak_locs=context.tuning_peak_locs,
-                                                     wrap_around=context.track_wrap_around,
-                                                     tuning_duration=context.tuning_duration)
     """
     if context.debug:
         context.update(locals())
         return dict()
     """
 
-    if context.comm.rank == 0 and context.verbose > 0:
-        print('optimize_simple_network: pid: %i; building network connections took %.2f s' %
-              (os.getpid(), time.time() - current_time))
-        sys.stdout.flush()
-    current_time = time.time()
-
     context.network.run()
     if context.comm.rank == 0 and context.verbose > 0:
-        print('optimize_simple_network: pid: %i; network simulation took %.2f s' %
-              (os.getpid(), time.time() - current_time))
+        print('optimize_simple_network: pid: %i; model_id: %i; network simulation took %.2f s' %
+              (os.getpid(), model_id, time.time() - current_time))
         sys.stdout.flush()
     current_time = time.time()
 
-    results = analyze_network_output(context.network, model_id=model_id, export=export, plot=context.plot)
-    if context.comm.rank == 0:
-        if context.verbose > 0:
-            print('optimize_simple_network: pid: %i; analysis of network simulation results took %.2f s' %
-                  (os.getpid(), time.time() - current_time))
-            sys.stdout.flush()
-        if results is None:
-            return dict()
-        return results
-
-
-def get_objectives(features, model_id=None, export=False):
-    """
-
-    :param features: dict
-    :param model_id: int
-    :param export: bool
-    :return: tuple of dict
-    """
-    if context.comm.rank == 0:
-        objectives = {}
-        for objective_name in context.objective_names:
-            if objective_name.find('tuning_index') != -1 and \
-                    features[objective_name] >= context.target_val[objective_name]:
-                objectives[objective_name] = 0.
-            else:
-                objectives[objective_name] = ((context.target_val[objective_name] - features[objective_name]) /
-                                              context.target_range[objective_name]) ** 2.
-        return features, objectives
+    analyze_network_output(context.network, model_id=model_id, export=export, plot=context.plot)
+    if context.comm.rank == 0 and context.verbose > 0:
+        print('optimize_simple_network: pid: %i; model_id: %i; analysis of network simulation results took %.2f s' %
+              (os.getpid(), model_id, time.time() - current_time))
+        sys.stdout.flush()
 
 
 if __name__ == '__main__':
