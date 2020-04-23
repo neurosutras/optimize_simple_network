@@ -1018,7 +1018,7 @@ def infer_firing_rates_from_spike_count(binned_spike_count_dict, input_t, output
                 plot_count += 1
                 fig = plt.figure()
                 active_indexes = np.where(this_binned_spike_count > 0.)[0]
-                plt.plot(input_t[active_indexes], np.ones(active_indexes), '.')
+                plt.plot(input_t[active_indexes], np.ones_like(active_indexes), '.')
                 plt.plot(binned_t, this_inferred_rate)
                 plt.plot(output_t, this_interp_rate)
                 plt.plot(output_t, this_smoothed_rate)

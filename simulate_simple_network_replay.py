@@ -231,9 +231,11 @@ def config_worker():
     context.x0_array = param_dict_to_array(context.x0, context.param_names)
     update_context(context.x0_array)
 
+    """
     if context.debug:
         context.update(locals())
         return
+    """
 
     context.network = SimpleNetwork(
         pc=context.pc, pop_sizes=context.pop_sizes, pop_gid_ranges=context.pop_gid_ranges,
