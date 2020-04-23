@@ -18,9 +18,10 @@ context = Context()
 @click.option("--plot", is_flag=True)
 @click.option("--debug", is_flag=True)
 @click.option("--simulate", type=bool, default=True)
+@click.option("--merge_output_files", is_flag=True)
 @click.pass_context
 def main(cli, config_file_path, export, output_dir, export_file_path, label, interactive, verbose, plot, debug,
-         simulate):
+         simulate, merge_output_files):
     """
 
     :param cli: contains unrecognized args as list of str
@@ -34,6 +35,7 @@ def main(cli, config_file_path, export, output_dir, export_file_path, label, int
     :param plot: bool
     :param debug: bool
     :param simulate: bool
+    :param merge_output_files: bool
     """
     # requires a global variable context: :class:'Context'
     context.update(locals())
@@ -57,7 +59,12 @@ def main(cli, config_file_path, export, output_dir, export_file_path, label, int
         context.interface.map(simulate_network_replay, *sequences)
 
         if context.export:
-            merge_exported_data(context, export_file_path=context.export_file_path, verbose=context.verbose > 0)
+            if merge_output_files:
+                merge_exported_data(context, export_file_path=context.export_file_path,
+                                    output_dir=context.output_dir, verbose=context.verbose > 0)
+            else:
+                write_merge_path_list_to_yaml(context, export_file_path=context.export_file_path,
+                                              output_dir=context.output_dir, verbose=context.verbose > 0)
         sys.stdout.flush()
         time.sleep(.1)
 
