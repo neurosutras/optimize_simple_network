@@ -481,7 +481,7 @@ def analyze_network_output(network, model_id=None, export=False, plot=False):
             current_time = time.time()
             with h5py.File(context.temp_output_path, 'a') as f:
                 shared_context_key = 'shared_context'
-                if 'shared_context' not in f:
+                if model_id == 0 and 'shared_context' not in f:
                     group = f.create_group('shared_context')
                     group.create_dataset('param_names', data=np.array(context.param_names, dtype='S'),
                                          compression='gzip')

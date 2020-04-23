@@ -2262,6 +2262,139 @@ def analyze_simple_network_replay_results_from_file(data_file_path, model_label=
         return context
 
 
+def decode_position_from_offline_replay(run_data_file_path, replay_data_file_path, run_model_key='0',
+                                        replay_model_keys=None, window_dur = 40., step_dur = 20., verbose=False):
+    """
+
+    :param run_data_file_path: str (path)
+    :param replay_data_file_path: str (path)
+    :param run_model_key: str
+    :param replay_model_keys: list of str
+    :param window_dur: float (ms)
+    :param step_dur: float (ms)
+    :param verbose: bool
+    :return: nested dict
+    """
+    import numpy.matlib
+    run_context = analyze_simple_network_results_from_file(run_data_file_path, run_model_key, return_context=True,
+                                                           plot=False)
+    run_binned_t = run_context.binned_t
+    run_buffered_binned_t = run_context.buffered_binned_t
+    valid_indexes = np.where((run_buffered_binned_t >= run_binned_t[0]) &
+                             (run_buffered_binned_t <= run_binned_t[-1]))[0]
+
+    run_firing_rates_dict = defaultdict(dict)
+    sorted_gid_dict = defaultdict(dict)
+    for pop_name in run_context.buffered_firing_rates_dict:
+        for gid_key in run_context.buffered_firing_rates_dict[pop_name]:
+            run_firing_rates_dict[pop_name][int(gid_key)] = \
+                run_context.buffered_firing_rates_dict[pop_name][gid_key][valid_indexes]
+        if pop_name in run_context.tuning_peak_locs:
+            this_target_gids = np.array(list(run_context.tuning_peak_locs[pop_name].keys()))
+            this_peak_locs = np.array(list(run_context.tuning_peak_locs[pop_name].values()))
+            indexes = np.argsort(this_peak_locs)
+            sorted_gid_dict[pop_name] = this_target_gids[indexes]
+        else:
+            this_target_gids = [int(gid_key) for gid_key in run_context.buffered_firing_rates_dict[pop_name]]
+            sorted_gid_dict[pop_name] = np.array(sorted(this_target_gids), dtype='int')
+
+    with h5py.File(replay_data_file_path, 'r') as f:
+        replay_input_t = f['shared_context']['full_binned_t'][:]
+        replay_valid_t = f['shared_context']['buffered_binned_t'][:]
+        binned_dt = replay_input_t[1] - replay_input_t[0]
+        if replay_model_keys is None:
+            replay_model_keys = []
+            for model_key in f:
+                if model_key != 'shared_context' and 'simple_network_exported_data' in f[model_key]:
+                    replay_model_keys.append(model_key)
+        else:
+            for model_key in replay_model_keys:
+                if model_key not in f:
+                    raise RuntimeError('decode_position_from_offline_replay: model_key: %s not found in '
+                                       'replay_data_file: %s' % (model_key, replay_data_file_path))
+
+    valid_indexes = np.where((replay_input_t >= replay_valid_t[0]) & (replay_input_t <= replay_valid_t[-1]))[0]
+    align_to_t = 0.
+
+    half_window_bins = int(window_dur // binned_dt // 2)
+    window_bins = int(2 * half_window_bins + 1)
+    window_dur = window_bins * binned_dt
+
+    step_bins = step_dur // binned_dt
+    step_dur = step_bins * binned_dt
+    half_step_dur = step_dur / 2.
+
+    # if possible, include a bin centered on time zero.
+    binned_t_center_indexes = []
+    this_center_index = np.where(replay_valid_t >= align_to_t)[0]
+    if len(this_center_index) > 0:
+        this_center_index = this_center_index[0]
+        if this_center_index < half_window_bins:
+            this_center_index = half_window_bins
+            binned_t_center_indexes.append(this_center_index)
+        else:
+            while this_center_index > half_window_bins:
+                binned_t_center_indexes.append(this_center_index)
+                this_center_index -= step_bins
+            binned_t_center_indexes.reverse()
+    else:
+        this_center_index = half_window_bins
+        binned_t_center_indexes.append(this_center_index)
+    this_center_index = binned_t_center_indexes[-1] + step_bins
+    while this_center_index < len(replay_valid_t) - half_window_bins:
+        binned_t_center_indexes.append(this_center_index)
+        this_center_index += step_bins
+
+    binned_t_center_indexes = np.array(binned_t_center_indexes, dtype='int')
+    decode_binned_t = replay_valid_t[binned_t_center_indexes]
+    replay_x_mesh, replay_y_mesh = np.meshgrid(decode_binned_t - half_step_dur, run_binned_t)
+
+    p_pos_dict = defaultdict(dict)
+    binned_spike_count_matrix_dict = defaultdict(dict)
+    for model_key in replay_model_keys:
+        replay_context = analyze_simple_network_replay_results_from_file(replay_data_file_path, model_key,
+                                                                         return_context=True, plot=False)
+        full_binned_spike_count_dict = replay_context.full_binned_spike_count_dict
+
+        for pop_name in full_binned_spike_count_dict:
+            if len(full_binned_spike_count_dict[pop_name]) != len(run_firing_rates_dict[pop_name]):
+                raise RuntimeError('decode_position_from_offline_replay: population: %s; mismatched number of cells to'
+                                   ' decode')
+            binned_spike_count = np.empty((len(full_binned_spike_count_dict[pop_name]), len(replay_valid_t)))
+            run_firing_rates = np.empty((len(run_firing_rates_dict[pop_name]), len(run_binned_t)))
+            for i, gid in enumerate(sorted_gid_dict[pop_name]):
+                binned_spike_count[i, :] = full_binned_spike_count_dict[pop_name][gid][valid_indexes]
+                run_firing_rates[i, :] = run_firing_rates_dict[pop_name][gid]
+
+            p_pos = np.empty((len(run_binned_t), len(decode_binned_t)))
+            p_pos.fill(np.nan)
+
+            population_rate_discount = np.exp(-window_dur / 1000. * np.sum(run_firing_rates, axis=0, dtype='float128'))
+            for p_pos_index, t_center_index in enumerate(binned_t_center_indexes):
+                t_start_index = t_center_index - half_window_bins
+                t_end_index = t_center_index + half_window_bins + 1
+                local_spike_count_array = np.sum(binned_spike_count[:, t_start_index:t_end_index], axis=1,
+                                                 dtype='float128')
+                if len(np.where(local_spike_count_array > 0)[0]) > 1:
+                    n = np.matlib.repmat(local_spike_count_array, len(run_binned_t), 1).T
+                    this_p_pos = (run_firing_rates ** n).prod(axis=0) * population_rate_discount
+                    this_p_sum = np.nansum(this_p_pos)
+                    if np.isnan(this_p_sum):
+                        p_pos[:, p_pos_index] = np.nan
+                    elif this_p_sum > 0.:
+                        p_pos[:, p_pos_index] = this_p_pos / this_p_sum
+                    else:
+                        p_pos[:, p_pos_index] = np.nan
+            p_pos_dict[model_key][pop_name] = p_pos
+            binned_spike_count_matrix_dict[model_key][pop_name] = binned_spike_count
+        if verbose:
+            print('decode_position_from_offline_replay: processed model: %s from replay_file_path: %s' %
+                  (model_key, replay_data_file_path))
+            sys.stdout.flush()
+
+    return replay_valid_t, binned_spike_count_matrix_dict, replay_x_mesh, replay_y_mesh, decode_binned_t, p_pos_dict
+
+
 def baks(spktimes, time, a=1.5, b=None):
     """
     Bayesian Adaptive Kernel Smoother (BAKS)
