@@ -203,7 +203,7 @@ class SimpleNetwork(object):
 
     def set_input_pattern(self, input_types, input_mean_rates=None, input_min_rates=None, input_max_rates=None,
                           input_norm_tuning_widths=None, tuning_peak_locs=None, track_wrap_around=False,
-                          spikes_seed=100000000, tuning_duration=None):
+                          spikes_seed=None, tuning_duration=None):
         """
 
         :param input_types: dict
@@ -213,14 +213,16 @@ class SimpleNetwork(object):
         :param input_norm_tuning_widths: dict
         :param tuning_peak_locs: dict
         :param track_wrap_around: bool
-        :param spikes_seed: int: random seed for reproducible input spike trains
+        :param spikes_seed: list of int: random seed for reproducible input spike trains
         :param tuning_duration: float
         :param equilibrate: float
         """
+        if spikes_seed is None:
+            raise RuntimeError('SimpleNetwork.set_input_pattern: missing spikes_seed required to generate reproducible'
+                               ' spike trains')
         if self.equilibrate > 0.:
             equilibrate_len = int(self.equilibrate/self.dt)
             equilibrate_rate_array = hann(int(self.equilibrate * 2. / self.dt))[:equilibrate_len]
-        spikes_seed = int(spikes_seed)
         for pop_name in (pop_name for pop_name in input_types if pop_name in self.cells):
             if input_types[pop_name] == 'constant':
                 if input_mean_rates is None or pop_name not in input_mean_rates:
@@ -269,17 +271,17 @@ class SimpleNetwork(object):
 
         for pop_name in (pop_name for pop_name in input_types if pop_name in self.cells):
             for gid in self.cells[pop_name]:
-                self.local_random.seed(spikes_seed + gid)
+                self.local_np_random.seed(spikes_seed + [gid])
                 this_spike_train = \
                     get_inhom_poisson_spike_times_by_thinning(self.input_pop_firing_rates[pop_name][gid],
                                                               self.input_pop_t[pop_name], dt=self.dt,
-                                                              generator=self.local_random)
+                                                              generator=self.local_np_random)
                 cell = self.cells[pop_name][gid]
                 cell.load_vecstim(this_spike_train)
 
     def set_offline_input_pattern(self, input_types, input_offline_min_rates=None, input_offline_mean_rates=None,
                                   input_offline_fraction_active=None, tuning_peak_locs=None, track_wrap_around=False,
-                                  stim_edge_duration=(0., 0.), selection_seed=1000000000, spikes_seed=100000000,
+                                  stim_edge_duration=(0., 0.), selection_seed=None, spikes_seed=None,
                                   tuning_duration=None):
         """
 
@@ -294,15 +296,19 @@ class SimpleNetwork(object):
         :param spikes_seed: int: random seed for reproducible input spike trains
         :param tuning_duration: float
         """
+        if spikes_seed is None:
+            raise RuntimeError('SimpleNetwork.set_offline_input_pattern: missing spikes_seed required to generate '
+                               'reproducible spike trains')
+        if selection_seed is None:
+            raise RuntimeError('SimpleNetwork.set_offline_input_pattern: missing selection_seed required to select '
+                               'reproducible ensembles of active inputs')
         if stim_edge_duration[0] > 0.:
             stim_onset_len = int(stim_edge_duration[0]/self.dt)
             stim_onset = hann(int(stim_edge_duration[0] * 2. / self.dt))[:stim_onset_len]
         if stim_edge_duration[1] > 0.:
             stim_offset_len = int(stim_edge_duration[1] / self.dt)
             stim_offset = hann(int(stim_edge_duration[1] * 2. / self.dt))[-stim_offset_len:]
-        spikes_seed = int(spikes_seed)
-        selection_seed = int(selection_seed)
-        self.local_random.seed(selection_seed)
+
         for pop_name in (pop_name for pop_name in input_types if pop_name in self.cells):
             if input_offline_min_rates is None or pop_name not in input_offline_min_rates:
                 raise RuntimeError('SimpleNetwork.set_input_pattern: missing input_offline_min_rates required to '
@@ -329,7 +335,8 @@ class SimpleNetwork(object):
                         [self.buffer + self.equilibrate + self.duration, self.tstop]))
                 this_fraction_active = input_offline_fraction_active[pop_name]
                 for gid in self.cells[pop_name]:
-                    if self.local_random.random() <= this_fraction_active:
+                    self.local_np_random.seed(selection_seed + [gid])
+                    if self.local_np_random.random_sample() <= this_fraction_active:
                         components = [[this_min_rate, this_min_rate]]
                         if stim_edge_duration[0] > 0.:
                             components.append((this_mean_rate - this_min_rate) * stim_onset + this_min_rate)
@@ -344,11 +351,11 @@ class SimpleNetwork(object):
 
         for pop_name in (pop_name for pop_name in input_types if pop_name in self.cells):
             for gid in self.cells[pop_name]:
-                self.local_random.seed(spikes_seed + gid)
+                self.local_np_random.seed(spikes_seed + [gid])
                 this_spike_train = \
                     get_inhom_poisson_spike_times_by_thinning(self.input_pop_firing_rates[pop_name][gid],
                                                               self.input_pop_t[pop_name], dt=self.dt,
-                                                              generator=self.local_random)
+                                                              generator=self.local_np_random)
                 cell = self.cells[pop_name][gid]
                 cell.load_vecstim(this_spike_train)
 
@@ -390,18 +397,20 @@ class SimpleNetwork(object):
         prob_connection /= prob_sum
         return prob_connection
 
-    def connect_cells(self, connectivity_type='uniform', connection_seed=0, **kwargs):
+    def connect_cells(self, connectivity_type='uniform', connection_seed=None, **kwargs):
         """
 
         :param connectivity_type: str
         :param connection_seed: int: random seed for reproducible connections
         """
-        connection_seed = int(connection_seed)
+        if connection_seed is None:
+            raise RuntimeError('SimpleNetwork.connect_cells: missing connection_seed required to generate reproducible'
+                               ' connections')
         rank = int(self.pc.id())
         for target_pop_name in self.pop_syn_proportions:
             total_syn_count = self.pop_syn_counts[target_pop_name]
             for target_gid in self.cells[target_pop_name]:
-                self.local_np_random.seed(connection_seed + target_gid)
+                self.local_np_random.seed(connection_seed + [target_gid])
                 target_cell = self.cells[target_pop_name][target_gid]
                 for syn_type in self.pop_syn_proportions[target_pop_name]:
                     for source_pop_name in self.pop_syn_proportions[target_pop_name][syn_type]:
@@ -439,18 +448,20 @@ class SimpleNetwork(object):
         self.pc.barrier()
 
     def assign_connection_weights(self, default_weight_distribution_type='normal',
-                                  connection_weight_distribution_types=None, weights_seed=200000000):
+                                  connection_weight_distribution_types=None, weights_seed=None):
         """
 
         :param default_weight_distribution_type: str
         :param connection_weight_distribution_types: nested dict: {target_pop_name: {source_pop_name: str}}
         :param weights_seed: int: random seed for reproducible connection weights
         """
+        if weights_seed is None:
+            raise RuntimeError('SimpleNetwork.set_input_pattern: missing weights_seed required to assign reproducible'
+                               ' synaptic weights')
         rank = int(self.pc.id())
-        weights_seed = int(weights_seed)
         for target_pop_name in self.ncdict:
             for target_gid in self.ncdict[target_pop_name]:
-                self.local_np_random.seed(weights_seed + target_gid)
+                self.local_np_random.seed(weights_seed + [target_gid])
                 target_cell = self.cells[target_pop_name][target_gid]
                 for syn_type in self.pop_syn_proportions[target_pop_name]:
                     for source_pop_name in self.pop_syn_proportions[target_pop_name][syn_type]:
@@ -2263,7 +2274,7 @@ def analyze_simple_network_replay_results_from_file(data_file_path, model_label=
 
 
 def decode_position_from_offline_replay(run_data_file_path, replay_data_file_path, run_model_key='0',
-                                        replay_model_keys=None, window_dur = 40., step_dur = 20., verbose=False):
+                                        replay_model_keys=None, window_dur = 20., step_dur = 20., verbose=False):
     """
 
     :param run_data_file_path: str (path)
@@ -2392,7 +2403,8 @@ def decode_position_from_offline_replay(run_data_file_path, replay_data_file_pat
                   (model_key, replay_data_file_path))
             sys.stdout.flush()
 
-    return replay_valid_t, binned_spike_count_matrix_dict, replay_x_mesh, replay_y_mesh, decode_binned_t, p_pos_dict
+    return replay_valid_t, binned_spike_count_matrix_dict, decode_binned_t, run_binned_t, replay_x_mesh, \
+           replay_y_mesh, p_pos_dict
 
 
 def baks(spktimes, time, a=1.5, b=None):

@@ -79,7 +79,7 @@ def main(cli, config_file_path, export, output_dir, export_file_path, label, int
 
 def get_args_static_offline_stimulus():
 
-    return [[context.spikes_seed + 1000000 * i for i in range(context.num_input_patterns)]]
+    return [list(range(context.num_input_patterns)), list(range(context.num_input_patterns))]
 
 
 def config_worker():
@@ -121,6 +121,22 @@ def config_worker():
         input_norm_tuning_widths = None
     context.num_input_patterns = int(context.num_input_patterns)
     
+    if 'network_id' not in context():
+        context.network_id = 0
+    else:
+        context.network_id = int(context.network_id)
+    if 'trial_offset' not in context():
+        context.trial_offset = 0
+    else:
+        context.trial_offset = int(context.trial_offset)
+
+    context.connection_seed = [context.network_id]
+    context.spikes_seed = [context.network_id, 1, context.trial_offset]
+    context.weights_seed = [context.network_id, 2]
+    context.location_seed = [context.network_id, 3]
+    context.tuning_seed = [context.network_id, 4]
+    context.selection_seed = [context.network_id, 5]
+
     connection_weights_mean = defaultdict(dict)  # {'target_pop_name': {'source_pop_name': float} }
     connection_weights_norm_sigma = defaultdict(dict)  # {'target_pop_name': {'source_pop_name': float} }
     if 'connection_weight_distribution_types' not in context() or context.connection_weight_distribution_types is None:
@@ -131,10 +147,6 @@ def config_worker():
     else:
         structured_weights = True
     local_np_random = np.random.RandomState()
-    if any([this_input_type == 'gaussian' for this_input_type in context.input_types.values()]) or structured_weights:
-        if 'tuning_seed' not in context() or context.tuning_seed is None:
-            raise RuntimeError('optimize_simple_network: config_file missing required parameter: tuning_seed')
-        local_np_random.seed(int(context.tuning_seed))
 
     syn_mech_params = defaultdict(lambda: defaultdict(dict))
     if 'default_syn_mech_params' in context() and context.default_syn_mech_params is not None:
@@ -164,6 +176,9 @@ def config_worker():
     max_num_cells_export_voltage_rec = 500
 
     if context.comm.rank == 0:
+        if any([this_input_type == 'gaussian' for this_input_type in
+                context.input_types.values()]) or structured_weights:
+            local_np_random.seed(context.tuning_seed)
         tuning_peak_locs = dict()  # {'pop_name': {'gid': float} }
 
         for pop_name in context.input_types:
@@ -214,16 +229,15 @@ def config_worker():
 
     if context.connectivity_type == 'gaussian':
         pop_axon_extents = {'FF': 1., 'E': 1., 'I': 1.}
-        for param_name in ['spatial_dim', 'location_seed']:
-            if param_name not in context():
-                raise RuntimeError('optimize_simple_network: parameter required for gaussian connectivity not found: '
-                                   '%s' % param_name)
+        if 'spatial_dim' not in context():
+            raise RuntimeError('optimize_simple_network: missing spatial_dim parameter required for gaussian '
+                               'connectivity not found')
 
         if context.comm.rank == 0:
             pop_cell_positions = dict()
             for pop_name in pop_gid_ranges:
                 for gid in range(pop_gid_ranges[pop_name][0], pop_gid_ranges[pop_name][1]):
-                    local_np_random.seed(int(context.location_seed) + gid)
+                    local_np_random.seed(context.location_seed.append(gid))
                     if pop_name not in pop_cell_positions:
                         pop_cell_positions[pop_name] = dict()
                     pop_cell_positions[pop_name][gid] = local_np_random.uniform(-1., 1., size=context.spatial_dim)
@@ -586,21 +600,24 @@ def analyze_network_output(network, model_id=None, export=False, plot=False):
             context.update(locals())
 
 
-def simulate_network_replay(spikes_seed, model_id=None, export=False):
+def simulate_network_replay(ensemble_seed, trial, model_id=None, export=False):
     """
 
-    :param spikes_seed: int
+    :param ensemble_seed: int
+    :param trial: int
     :param model_id: int
     :param export: bool
     """
     start_time = time.time()
+    this_selection_seed = context.selection_seed + [int(ensemble_seed)]
+    this_spikes_seed = context.spikes_seed + [int(trial)]
 
     context.network.set_offline_input_pattern(
         context.input_types, input_offline_min_rates=context.input_offline_min_rates,
         input_offline_mean_rates=context.input_offline_mean_rates,
         input_offline_fraction_active=context.input_offline_fraction_active, tuning_peak_locs=context.tuning_peak_locs,
-        track_wrap_around=context.track_wrap_around,stim_edge_duration=context.stim_edge_duration,
-        spikes_seed=int(spikes_seed), tuning_duration=context.tuning_duration)
+        track_wrap_around=context.track_wrap_around, stim_edge_duration=context.stim_edge_duration,
+        selection_seed=this_selection_seed, spikes_seed=this_spikes_seed, tuning_duration=context.tuning_duration)
 
     if context.comm.rank == 0 and context.verbose > 0:
         print('optimize_simple_network: pid: %i; model_id: %i; setting network input pattern took %.2f s' %

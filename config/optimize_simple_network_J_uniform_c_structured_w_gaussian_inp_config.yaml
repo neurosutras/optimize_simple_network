@@ -116,11 +116,8 @@ get_objectives:
   optimize_simple_network: get_objectives
 kwargs:
   verbose: 1
-  connection_seed: 80000000
-  spikes_seed: 180000000
-  weights_seed: 280000000
-  location_seed: 380000000
-  tuning_seed: 480000000
+  trial: 0
+  network_id: 8
   connectivity_type: uniform
   default_weight_distribution_type: normal
   connection_weight_distribution_types:

@@ -131,7 +131,22 @@ def config_worker():
         input_max_rates = None
     if 'input_norm_tuning_widths' not in context():
         input_norm_tuning_widths = None
-    
+
+    if 'network_id' not in context():
+        context.network_id = 0
+    else:
+        context.network_id = int(context.network_id)
+    if 'trial' not in context():
+        context.trial = 0
+    else:
+        context.trial = int(context.trial)
+
+    context.connection_seed = [context.network_id]
+    context.spikes_seed = [context.network_id, 1, context.trial]
+    context.weights_seed = [context.network_id, 2]
+    context.location_seed = [context.network_id, 3]
+    context.tuning_seed = [context.network_id, 4]
+
     connection_weights_mean = defaultdict(dict)  # {'target_pop_name': {'source_pop_name': float} }
     connection_weights_norm_sigma = defaultdict(dict)  # {'target_pop_name': {'source_pop_name': float} }
     if 'connection_weight_distribution_types' not in context() or context.connection_weight_distribution_types is None:
@@ -142,10 +157,6 @@ def config_worker():
     else:
         structured_weights = True
     local_np_random = np.random.RandomState()
-    if any([this_input_type == 'gaussian' for this_input_type in context.input_types.values()]) or structured_weights:
-        if 'tuning_seed' not in context() or context.tuning_seed is None:
-            raise RuntimeError('optimize_simple_network: config_file missing required parameter: tuning_seed')
-        local_np_random.seed(int(context.tuning_seed))
 
     syn_mech_params = defaultdict(lambda: defaultdict(dict))
     if 'default_syn_mech_params' in context() and context.default_syn_mech_params is not None:
@@ -174,6 +185,9 @@ def config_worker():
     max_num_cells_export_voltage_rec = 500
 
     if context.comm.rank == 0:
+        if any([this_input_type == 'gaussian' for this_input_type in
+                context.input_types.values()]) or structured_weights:
+            local_np_random.seed(context.tuning_seed)
         tuning_peak_locs = dict()  # {'pop_name': {'gid': float} }
 
         for pop_name in context.input_types:
@@ -224,16 +238,15 @@ def config_worker():
 
     if context.connectivity_type == 'gaussian':
         pop_axon_extents = {'FF': 1., 'E': 1., 'I': 1.}
-        for param_name in ['spatial_dim', 'location_seed']:
-            if param_name not in context():
-                raise RuntimeError('optimize_simple_network: parameter required for gaussian connectivity not found: '
-                                   '%s' % param_name)
+        if 'spatial_dim' not in context():
+            raise RuntimeError('optimize_simple_network: missing spatial_dim parameter required for gaussian '
+                               'connectivity not found')
 
         if context.comm.rank == 0:
             pop_cell_positions = dict()
             for pop_name in pop_gid_ranges:
                 for gid in range(pop_gid_ranges[pop_name][0], pop_gid_ranges[pop_name][1]):
-                    local_np_random.seed(int(context.location_seed) + gid)
+                    local_np_random.seed(context.location_seed.append(gid))
                     if pop_name not in pop_cell_positions:
                         pop_cell_positions[pop_name] = dict()
                     pop_cell_positions[pop_name][gid] = local_np_random.uniform(-1., 1., size=context.spatial_dim)
@@ -639,16 +652,16 @@ def compute_features(x, model_id=None, export=False):
 
     context.network.run()
     if context.comm.rank == 0 and context.verbose > 0:
-        print('optimize_simple_network: pid: %i; network simulation took %.2f s' %
-              (os.getpid(), time.time() - current_time))
+        print('optimize_simple_network: pid: %i; model_id: %i; network simulation took %.2f s' %
+              (os.getpid(), model_id, time.time() - current_time))
         sys.stdout.flush()
     current_time = time.time()
 
     results = analyze_network_output(context.network, model_id=model_id, export=export, plot=context.plot)
     if context.comm.rank == 0:
         if context.verbose > 0:
-            print('optimize_simple_network: pid: %i; analysis of network simulation results took %.2f s' %
-                  (os.getpid(), time.time() - current_time))
+            print('optimize_simple_network: pid: %i; model_id: %i; analysis of network simulation results took %.2f s' %
+                  (os.getpid(), model_id, time.time() - current_time))
             sys.stdout.flush()
         if results is None:
             return dict()
