@@ -1063,6 +1063,8 @@ def padded_baks(spike_times, t, alpha, beta, pad_dur=500., wrap_around=False, pl
     valid_spike_times = np.array(spike_times)
     valid_indexes = np.where((valid_spike_times >= t[0]) & (valid_spike_times <= t[-1]))[0]
     valid_spike_times = valid_spike_times[valid_indexes]
+    if len(valid_spike_times) < 1:
+        return np.zeros_like(t)
     if pad_len > 0:
         padded_spike_times = valid_spike_times
         r_pad_indexes = np.where((spike_times > t[0]) & (spike_times <= t[pad_len]))[0]
@@ -2425,8 +2427,12 @@ def baks(spktimes, time, a=1.5, b=None):
     https://github.com/nurahmadi/BAKS
     """
     from scipy.special import gamma
+    rate = np.zeros((len(time),))
 
     n = len(spktimes)
+    if n < 1:
+        return rate, None
+
     sumnum = 0
     sumdenom = 0
 
@@ -2442,7 +2448,6 @@ def baks(spktimes, time, a=1.5, b=None):
 
     h = (gamma(a) / gamma(a + 0.5)) * (sumnum / sumdenom)
 
-    rate = np.zeros((len(time),))
     for j in range(n):
         K = (1. / (np.sqrt(2. * np.pi) * h)) * np.exp(-((time - spktimes[j]) ** 2) / (2. * h ** 2))
         rate = rate + K
