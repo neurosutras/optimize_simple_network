@@ -2147,8 +2147,8 @@ def analyze_simple_network_results_from_file(data_file_path, model_label=None, v
         return context
 
 
-def analyze_simple_network_replay_results_from_file(data_file_path, model_label=None, verbose=False, return_context=False,
-                                                 plot=True):
+def analyze_simple_network_replay_results_from_file(data_file_path, model_label=None, verbose=False,
+                                                    return_context=False, plot=True):
     """
 
     :param data_file_path: str (path)
@@ -2310,7 +2310,16 @@ def decode_position_from_offline_replay(run_data_file_path, replay_data_file_pat
         else:
             this_target_gids = [int(gid_key) for gid_key in run_context.buffered_firing_rates_dict[pop_name]]
             sorted_gid_dict[pop_name] = np.array(sorted(this_target_gids), dtype='int')
+    run_firing_rates_matrix_dict = dict()
+    for pop_name in run_firing_rates_dict:
+        run_firing_rates_matrix_dict[pop_name] = np.empty((len(run_firing_rates_dict[pop_name]), len(run_binned_t)))
+        for i, gid in enumerate(sorted_gid_dict[pop_name]):
+            run_firing_rates_matrix_dict[pop_name][i, :] = run_firing_rates_dict[pop_name][gid]
 
+    if not os.path.isfile(replay_data_file_path):
+        raise IOError('decode_position_from_offline_replay: invalid data file path: %s' % replay_data_file_path)
+
+    exported_data_key = 'simple_network_exported_data'
     with h5py.File(replay_data_file_path, 'r') as f:
         replay_input_t = f['shared_context']['full_binned_t'][:]
         replay_valid_t = f['shared_context']['buffered_binned_t'][:]
@@ -2365,19 +2374,23 @@ def decode_position_from_offline_replay(run_data_file_path, replay_data_file_pat
     p_pos_dict = defaultdict(dict)
     binned_spike_count_matrix_dict = defaultdict(dict)
     for model_key in replay_model_keys:
-        replay_context = analyze_simple_network_replay_results_from_file(replay_data_file_path, model_key,
-                                                                         return_context=True, plot=False)
-        full_binned_spike_count_dict = replay_context.full_binned_spike_count_dict
+        full_binned_spike_count_dict = defaultdict(dict)
+        with h5py.File(replay_data_file_path, 'r') as f:
+            group = get_h5py_group(f, [model_key, exported_data_key])
+            subgroup = group['full_binned_spike_count']
+            for pop_name in subgroup:
+                for gid_key in subgroup[pop_name]:
+                    full_binned_spike_count_dict[pop_name][int(gid_key)] = subgroup[pop_name][gid_key][:]
 
         for pop_name in full_binned_spike_count_dict:
             if len(full_binned_spike_count_dict[pop_name]) != len(run_firing_rates_dict[pop_name]):
                 raise RuntimeError('decode_position_from_offline_replay: population: %s; mismatched number of cells to'
                                    ' decode')
             binned_spike_count = np.empty((len(full_binned_spike_count_dict[pop_name]), len(replay_valid_t)))
-            run_firing_rates = np.empty((len(run_firing_rates_dict[pop_name]), len(run_binned_t)))
             for i, gid in enumerate(sorted_gid_dict[pop_name]):
                 binned_spike_count[i, :] = full_binned_spike_count_dict[pop_name][gid][valid_indexes]
-                run_firing_rates[i, :] = run_firing_rates_dict[pop_name][gid]
+
+            run_firing_rates = run_firing_rates_matrix_dict[pop_name]
 
             p_pos = np.empty((len(run_binned_t), len(decode_binned_t)))
             p_pos.fill(np.nan)

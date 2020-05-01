@@ -18,7 +18,7 @@ context = Context()
 @click.option("--plot", is_flag=True)
 @click.option("--debug", is_flag=True)
 @click.option("--simulate", type=bool, default=True)
-@click.option("--merge_output_files", is_flag=True)
+@click.option("--merge-output-files", is_flag=True)
 @click.pass_context
 def main(cli, config_file_path, export, output_dir, export_file_path, label, interactive, verbose, plot, debug,
          simulate, merge_output_files):
