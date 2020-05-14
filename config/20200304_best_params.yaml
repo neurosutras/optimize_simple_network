@@ -22,3 +22,27 @@ J:
   I_I_tau_offset: 7.914728E+00
   I_I_weight_norm_sigma: 7.016509E-01
   I_norm_syn_count: 3.172796E-01
+K:
+  E_E_FF_syn_proportion: 8.246580E-01
+  E_E_mean_weight: 1.948872E+00
+  E_E_syn_proportion: 6.839078E-01
+  E_E_tau_offset: 4.231120E+00
+  E_E_weight_norm_sigma: 9.187609E-01
+  E_FF_mean_weight: 2.530381E+00
+  E_FF_weight_norm_sigma: 3.635368E-01
+  E_I_mean_weight: 1.389592E+00
+  E_I_tau_offset: 3.252171E+00
+  E_I_weight_norm_sigma: 6.222285E-01
+  E_norm_syn_count: 1.956207E-01
+  E_peak_delta_weight: 2.546268E+00
+  I_E_FF_syn_proportion: 7.968854E-01
+  I_E_mean_weight: 5.492608E-01
+  I_E_syn_proportion: 8.631385E-01
+  I_E_tau_offset: 1.689774E+01
+  I_E_weight_norm_sigma: 1.059672E-01
+  I_FF_mean_weight: 5.344464E-01
+  I_FF_weight_norm_sigma: 4.143443E-01
+  I_I_mean_weight: 1.698864E+00
+  I_I_tau_offset: 5.739075E+00
+  I_I_weight_norm_sigma: 2.305590E-01
+  I_norm_syn_count: 1.389087E-01

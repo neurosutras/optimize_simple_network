@@ -2356,129 +2356,90 @@ def get_run_data_from_file(run_data_file_path, run_data_key='0'):
     return run_binned_t, run_firing_rates_matrix_dict, sorted_gid_dict
 
 
-def decode_position_from_offline_replay(run_data_file_path, replay_data_file_path, run_data_key='0',
-                                        replay_data_keys=None, window_dur=20., step_dur=20., verbose=False,
-                                        plot=False):
+def get_replay_data_from_file(replay_data_file_path, replay_binned_t, replay_valid_binned_t_indexes, sorted_gid_dict,
+                              replay_data_key='0'):
     """
 
-    :param run_data_file_path: str (path)
     :param replay_data_file_path: str (path)
-    :param run_data_key: str
-    :param replay_data_keys: list of str
-    :param window_dur: float (ms)
-    :param step_dur: float (ms)
-    :param verbose: bool
-    :param plot: bool
+    :param replay_binned_t: array
+    :param replay_valid_binned_t_indexes: array
+    :param sorted_gid_dict: dict {str: list of int}
+    :param replay_data_key: str
+    :return: tuple ()
+    """
+    if not os.path.isfile(replay_data_file_path):
+        raise IOError('get_replay_data_from_file: invalid data file path: %s' % replay_data_file_path)
+
+    replay_full_binned_spike_count_dict = defaultdict(dict)
+    replay_binned_spike_count_matrix_dict = dict()
+    replay_data_group_key = 'simple_network_exported_data'
+    with h5py.File(replay_data_file_path, 'r') as f:
+        group = get_h5py_group(f, [replay_data_key, replay_data_group_key, 'full_binned_spike_count'])
+        for pop_name in group:
+            for gid_key in group[pop_name]:
+                replay_full_binned_spike_count_dict[pop_name][int(gid_key)] = group[pop_name][gid_key][:]
+
+    for pop_name in replay_full_binned_spike_count_dict:
+        replay_binned_spike_count = np.empty((len(replay_full_binned_spike_count_dict[pop_name]), len(replay_binned_t)))
+        for i, gid in enumerate(sorted_gid_dict[pop_name]):
+            replay_binned_spike_count[i, :] = \
+                replay_full_binned_spike_count_dict[pop_name][gid][replay_valid_binned_t_indexes]
+        replay_binned_spike_count_matrix_dict[pop_name] = replay_binned_spike_count
+
+    return replay_binned_spike_count_matrix_dict
+
+
+def decode_position_from_offline_replay(run_binned_t, run_firing_rates_matrix_dict, replay_binned_t,
+                                        replay_binned_spike_count_matrix_dict, replay_binned_t_center_indexes,
+                                        decode_binned_t, window_dur=20.):
+    """
+
+    :param run_binned_t: array
+    :param run_firing_rates_matrix_dict: dict of 2d array
+    :param replay_binned_t: array
+    :param replay_binned_spike_count_matrix_dict: dict of 2d array
+    :param replay_binned_t_center_indexes: array
+    :param decode_binned_t: array
+    :param window_dur: float
     :return: nested dict
     """
     import numpy.matlib
-    run_binned_t, run_firing_rates_matrix_dict, sorted_gid_dict = \
-        get_run_data_from_file(run_data_file_path, run_data_key)
 
-    if not os.path.isfile(replay_data_file_path):
-        raise IOError('decode_position_from_offline_replay: invalid data file path: %s' % replay_data_file_path)
-
-    exported_data_key = 'simple_network_exported_data'
-    with h5py.File(replay_data_file_path, 'r') as f:
-        replay_input_t = f['shared_context']['full_binned_t'][:]
-        replay_valid_t = f['shared_context']['buffered_binned_t'][:]
-        binned_dt = replay_input_t[1] - replay_input_t[0]
-        if replay_data_keys is None:
-            replay_data_keys = []
-            for data_key in f:
-                if data_key != 'shared_context' and 'simple_network_exported_data' in f[data_key]:
-                    replay_data_keys.append(data_key)
-        else:
-            for data_key in replay_data_keys:
-                if data_key not in f:
-                    raise RuntimeError('decode_position_from_offline_replay: data_key: %s not found in '
-                                       'replay_data_file: %s' % (data_key, replay_data_file_path))
-
-    valid_indexes = np.where((replay_input_t >= replay_valid_t[0]) & (replay_input_t <= replay_valid_t[-1]))[0]
-    align_to_t = 0.
-
-    half_window_bins = int(window_dur // binned_dt // 2)
+    replay_binned_dt = replay_binned_t[1] - replay_binned_t[0]
+    half_window_bins = int(window_dur // replay_binned_dt // 2)
     window_bins = int(2 * half_window_bins + 1)
-    window_dur = window_bins * binned_dt
+    window_dur = window_bins * replay_binned_dt
 
-    step_bins = step_dur // binned_dt
-    step_dur = step_bins * binned_dt
-    half_step_dur = step_dur / 2.
+    p_pos_dict = dict()
+    for pop_name in replay_binned_spike_count_matrix_dict:
+        if replay_binned_spike_count_matrix_dict[pop_name].shape[0] != run_firing_rates_matrix_dict[pop_name].shape[0]:
+            raise RuntimeError('decode_position_from_offline_replay: population: %s; mismatched number of cells to'
+                               ' decode')
+        binned_spike_count = replay_binned_spike_count_matrix_dict[pop_name]
+        run_firing_rates = run_firing_rates_matrix_dict[pop_name]
 
-    # if possible, include a bin centered on time zero.
-    binned_t_center_indexes = []
-    this_center_index = np.where(replay_valid_t >= align_to_t)[0]
-    if len(this_center_index) > 0:
-        this_center_index = this_center_index[0]
-        if this_center_index < half_window_bins:
-            this_center_index = half_window_bins
-            binned_t_center_indexes.append(this_center_index)
-        else:
-            while this_center_index > half_window_bins:
-                binned_t_center_indexes.append(this_center_index)
-                this_center_index -= step_bins
-            binned_t_center_indexes.reverse()
-    else:
-        this_center_index = half_window_bins
-        binned_t_center_indexes.append(this_center_index)
-    this_center_index = binned_t_center_indexes[-1] + step_bins
-    while this_center_index < len(replay_valid_t) - half_window_bins:
-        binned_t_center_indexes.append(this_center_index)
-        this_center_index += step_bins
+        p_pos = np.empty((len(run_binned_t), len(decode_binned_t)))
+        p_pos.fill(np.nan)
 
-    binned_t_center_indexes = np.array(binned_t_center_indexes, dtype='int')
-    decode_binned_t = replay_valid_t[binned_t_center_indexes]
-    replay_x_mesh, replay_y_mesh = np.meshgrid(decode_binned_t - half_step_dur, run_binned_t)
+        population_rate_prior = np.exp(-window_dur / 1000. * np.sum(run_firing_rates, axis=0, dtype='float128'))
+        for p_pos_index, t_center_index in enumerate(replay_binned_t_center_indexes):
+            t_start_index = t_center_index - half_window_bins
+            t_end_index = t_center_index + half_window_bins + 1
+            local_spike_count_array = np.sum(binned_spike_count[:, t_start_index:t_end_index], axis=1,
+                                             dtype='float128')
+            if len(np.where(local_spike_count_array > 0)[0]) > 1:
+                n = np.matlib.repmat(local_spike_count_array, len(run_binned_t), 1).T
+                this_p_pos = (run_firing_rates ** n).prod(axis=0) * population_rate_prior
+                this_p_sum = np.nansum(this_p_pos)
+                if np.isnan(this_p_sum):
+                    p_pos[:, p_pos_index] = np.nan
+                elif this_p_sum > 0.:
+                    p_pos[:, p_pos_index] = this_p_pos / this_p_sum
+                else:
+                    p_pos[:, p_pos_index] = np.nan
+        p_pos_dict[pop_name] = p_pos
 
-    p_pos_dict = defaultdict(dict)
-    binned_spike_count_matrix_dict = defaultdict(dict)
-    for data_key in replay_data_keys:
-        full_binned_spike_count_dict = defaultdict(dict)
-        with h5py.File(replay_data_file_path, 'r') as f:
-            group = get_h5py_group(f, [data_key, exported_data_key])
-            subgroup = group['full_binned_spike_count']
-            for pop_name in subgroup:
-                for gid_key in subgroup[pop_name]:
-                    full_binned_spike_count_dict[pop_name][int(gid_key)] = subgroup[pop_name][gid_key][:]
-
-        for pop_name in full_binned_spike_count_dict:
-            if len(full_binned_spike_count_dict[pop_name]) != run_firing_rates_matrix_dict[pop_name].shape[0]:
-                raise RuntimeError('decode_position_from_offline_replay: population: %s; mismatched number of cells to'
-                                   ' decode')
-            binned_spike_count = np.empty((len(full_binned_spike_count_dict[pop_name]), len(replay_valid_t)))
-            for i, gid in enumerate(sorted_gid_dict[pop_name]):
-                binned_spike_count[i, :] = full_binned_spike_count_dict[pop_name][gid][valid_indexes]
-
-            run_firing_rates = run_firing_rates_matrix_dict[pop_name]
-
-            p_pos = np.empty((len(run_binned_t), len(decode_binned_t)))
-            p_pos.fill(np.nan)
-
-            population_rate_discount = np.exp(-window_dur / 1000. * np.sum(run_firing_rates, axis=0, dtype='float128'))
-            for p_pos_index, t_center_index in enumerate(binned_t_center_indexes):
-                t_start_index = t_center_index - half_window_bins
-                t_end_index = t_center_index + half_window_bins + 1
-                local_spike_count_array = np.sum(binned_spike_count[:, t_start_index:t_end_index], axis=1,
-                                                 dtype='float128')
-                if len(np.where(local_spike_count_array > 0)[0]) > 1:
-                    n = np.matlib.repmat(local_spike_count_array, len(run_binned_t), 1).T
-                    this_p_pos = (run_firing_rates ** n).prod(axis=0) * population_rate_discount
-                    this_p_sum = np.nansum(this_p_pos)
-                    if np.isnan(this_p_sum):
-                        p_pos[:, p_pos_index] = np.nan
-                    elif this_p_sum > 0.:
-                        p_pos[:, p_pos_index] = this_p_pos / this_p_sum
-                    else:
-                        p_pos[:, p_pos_index] = np.nan
-            p_pos_dict[data_key][pop_name] = p_pos
-            binned_spike_count_matrix_dict[data_key][pop_name] = binned_spike_count
-        if verbose:
-            print('decode_position_from_offline_replay: processed model: %s from replay_file_path: %s' %
-                  (data_key, replay_data_file_path))
-            sys.stdout.flush()
-
-    return replay_valid_t, binned_spike_count_matrix_dict, decode_binned_t, run_binned_t, replay_x_mesh, \
-           replay_y_mesh, p_pos_dict
+    return p_pos_dict
 
 
 def baks(spktimes, time, a=1.5, b=None):

@@ -58,10 +58,7 @@ def main(cli, run_data_file_path, replay_data_file_path, run_data_key, num_repla
     args = context.interface.execute(get_replay_data_keys)
     num_replay_events = len(args[0])
     sequences = args + [[context.export] * num_replay_events] + [[context.plot] * num_replay_events]
-    # decoded_position_package_list = context.interface.map(get_decoded_position_offline_replay, *sequences)
-
-    if context.debug:
-        print(args)
+    decoded_position_package_list = context.interface.map(get_decoded_position_offline_replay, *sequences)
 
     if context.export:
         pass
@@ -93,6 +90,65 @@ def get_replay_data_keys():
     return [replay_data_keys]
 
 
+def get_decoded_position_offline_replay(replay_data_key, export=False, plot=False):
+    """
+
+    :param replay_data_key: str
+    :param export: bool
+    :param plot: bool
+    :return:
+    """
+    start_time = time.time()
+    replay_binned_spike_count_matrix_dict = \
+        get_replay_data_from_file(context.replay_data_file_path, context.replay_binned_t,
+                                  context.replay_valid_binned_t_indexes, context.sorted_gid_dict,
+                                  replay_data_key=replay_data_key)
+
+    p_pos_dict = decode_position_from_offline_replay(context.run_binned_t, context.run_firing_rates_matrix_dict,
+                                                     context.replay_binned_t,
+                                                     replay_binned_spike_count_matrix_dict,
+                                                     context.replay_binned_t_center_indexes,
+                                                     context.decode_binned_t, window_dur=context.window_dur)
+
+    if context.verbose:
+        print('get_decoded_position_from_offline_replay: pid: %i processed replay event with data_key: %s from '
+              'replay_file_path: %s in %.1f s' %
+              (os.getpid(), replay_data_key, context.replay_data_file_path, time.time()-start_time))
+        sys.stdout.flush()
+
+    if plot:
+        ordered_pop_names = ['FF', 'E', 'I']
+        for pop_name in ordered_pop_names:
+            if pop_name not in p_pos_dict:
+                ordered_pop_names.remove(pop_name)
+        for pop_name in p_pos_dict:
+            if pop_name not in ordered_pop_names:
+                ordered_pop_names.append(pop_name)
+        fig, axes = plt.subplots(2, len(ordered_pop_names), figsize=(3.8 * len(ordered_pop_names) + 0.5, 7.5))
+        decoded_x_mesh, decoded_y_mesh = \
+            np.meshgrid(context.decode_binned_t - context.half_step_dur, context.run_binned_t)
+        for col, pop_name in enumerate(ordered_pop_names):
+            p_pos = p_pos_dict[pop_name]
+            replay_binned_spike_count = replay_binned_spike_count_matrix_dict[pop_name]
+            spikes_x_mesh, spikes_y_mesh = \
+                np.meshgrid(context.replay_binned_t, list(range(replay_binned_spike_count.shape[0])))
+            axes[1][col].pcolormesh(decoded_x_mesh, decoded_y_mesh, p_pos, vmin=0.)
+            axes[1][col].set_xlabel('Time (ms)')
+            axes[1][col].set_ylim([context.run_binned_t[-1], context.run_binned_t[0]])
+            axes[1][col].set_xlim([context.replay_binned_t[0], context.replay_binned_t[-1]])
+            axes[1][col].set_ylabel('Decoded position')
+            axes[1][col].set_title('Population: %s' % pop_name)
+            axes[0][col].scatter(spikes_x_mesh, spikes_y_mesh, replay_binned_spike_count, c='k')
+            axes[0][col].set_xlabel('Time (ms)')
+            axes[0][col].set_ylim([replay_binned_spike_count.shape[0] - 1, 0])
+            axes[0][col].set_xlim([context.replay_binned_t[0], context.replay_binned_t[-1]])
+            axes[0][col].set_ylabel('Sorted cells')
+            axes[0][col].set_title('Population: %s' % pop_name)
+        fig.suptitle('Event # %s' % replay_data_key, y=0.99)
+        fig.tight_layout()
+        fig.subplots_adjust(wspace=0.4, hspace=0.4, top=0.9)
+
+
 def config_worker():
 
     start_time = time.time()
@@ -114,33 +170,33 @@ def config_worker():
                           context.replay_data_file_path)
 
         with h5py.File(context.replay_data_file_path, 'r') as f:
-            replay_input_t = f['shared_context']['full_binned_t'][:]
-            replay_valid_t = f['shared_context']['buffered_binned_t'][:]
-        valid_indexes = np.where((replay_input_t >= replay_valid_t[0]) & (replay_input_t <= replay_valid_t[-1]))[0]
-        binned_dt = replay_input_t[1] - replay_input_t[0]
+            replay_full_binned_t = f['shared_context']['full_binned_t'][:]
+            replay_binned_t = f['shared_context']['buffered_binned_t'][:]
+        replay_valid_binned_t_indexes = \
+            np.where((replay_full_binned_t >= replay_binned_t[0]) & (replay_full_binned_t <= replay_binned_t[-1]))[0]
     else:
-        replay_valid_t = None
-        valid_indexes = None
-        binned_dt = None
-    context.comm.bcast(replay_valid_t, root=0)
-    context.comm.bcast(valid_indexes, root=0)
-    context.comm.bcast(binned_dt, root=0)
+        replay_binned_t = None
+        replay_valid_binned_t_indexes = None
 
+    context.comm.bcast(replay_binned_t, root=0)
+    context.comm.bcast(replay_valid_binned_t_indexes, root=0)
+
+    replay_binned_dt = replay_binned_t[1] - replay_binned_t[0]
     window_dur = context.window_dur
     step_dur = context.step_dur
 
     align_to_t = 0.
-    half_window_bins = int(window_dur // binned_dt // 2)
+    half_window_bins = int(window_dur // replay_binned_dt // 2)
     window_bins = int(2 * half_window_bins + 1)
-    window_dur = window_bins * binned_dt
+    window_dur = window_bins * replay_binned_dt
 
-    step_bins = step_dur // binned_dt
-    step_dur = step_bins * binned_dt
+    step_bins = step_dur // replay_binned_dt
+    step_dur = step_bins * replay_binned_dt
     half_step_dur = step_dur / 2.
 
     # if possible, include a bin centered on time zero.
     binned_t_center_indexes = []
-    this_center_index = np.where(replay_valid_t >= align_to_t)[0]
+    this_center_index = np.where(replay_binned_t >= align_to_t)[0]
     if len(this_center_index) > 0:
         this_center_index = this_center_index[0]
         if this_center_index < half_window_bins:
@@ -155,13 +211,12 @@ def config_worker():
         this_center_index = half_window_bins
         binned_t_center_indexes.append(this_center_index)
     this_center_index = binned_t_center_indexes[-1] + step_bins
-    while this_center_index < len(replay_valid_t) - half_window_bins:
+    while this_center_index < len(replay_binned_t) - half_window_bins:
         binned_t_center_indexes.append(this_center_index)
         this_center_index += step_bins
 
-    binned_t_center_indexes = np.array(binned_t_center_indexes, dtype='int')
-    decode_binned_t = replay_valid_t[binned_t_center_indexes]
-    replay_x_mesh, replay_y_mesh = np.meshgrid(decode_binned_t - half_step_dur, run_binned_t)
+    replay_binned_t_center_indexes = np.array(binned_t_center_indexes, dtype='int')
+    decode_binned_t = replay_binned_t[replay_binned_t_center_indexes]
 
     context.update(locals())
 
