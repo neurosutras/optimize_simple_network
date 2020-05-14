@@ -263,21 +263,25 @@ def config_worker():
 
     if 'param_file_path' in context() and context.param_file_path is not None and \
             'model_key' in context() and context.model_key is not None:
-        if not os.path.isfile(context.param_file_path):
-            raise Exception('simulate_simple_network_replay: invalid param_file_path: %s' % context.param_file_path)
-        model_param_dict = read_from_yaml(context.param_file_path)
-        if str(context.model_key) in model_param_dict:
-            context.model_key = str(context.model_key)
-        elif str(context.model_key).isnumeric() and int(context.model_key) in model_param_dict:
-            context.model_key = int(context.model_key)
+        if context.comm.rank == 0:
+            if not os.path.isfile(context.param_file_path):
+                raise Exception('simulate_simple_network_replay: invalid param_file_path: %s' % context.param_file_path)
+            model_param_dict = read_from_yaml(context.param_file_path)
+            if str(context.model_key) in model_param_dict:
+                context.model_key = str(context.model_key)
+            elif str(context.model_key).isnumeric() and int(context.model_key) in model_param_dict:
+                context.model_key = int(context.model_key)
+            else:
+                raise RuntimeError('simulate_simple_network_replay: provided model_key: %s not found in param_file_path: '
+                                   '%s' % (str(context.model_key), context.param_file_path))
+            this_x0 = model_param_dict[context.model_key]
+            if context.disp:
+                print('simulate_simple_network_replay: loaded network config params from param_file_path: %s with '
+                      'model_key: %s' % (context.param_file_path, context.model_key))
+                sys.stdout.flush()
         else:
-            raise RuntimeError('simulate_simple_network_replay: provided model_key: %s not found in param_file_path: '
-                               '%s' % (str(context.model_key), context.param_file_path))
-        context.x0 = model_param_dict[context.model_key]
-        if context.disp:
-            print('simulate_simple_network_replay: loaded network config params from param_file_path: %s with '
-                  'model_key: %s' % (context.param_file_path, context.model_key))
-            sys.stdout.flush()
+            this_x0 = None
+        context.x0 = context.comm.bcast(this_x0, root=0)
 
     context.x0_array = param_dict_to_array(context.x0, context.param_names)
     update_context(context.x0_array)

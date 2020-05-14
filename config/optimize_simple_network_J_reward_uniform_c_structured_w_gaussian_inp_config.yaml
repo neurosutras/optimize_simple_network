@@ -116,7 +116,7 @@ get_objectives:
   optimize_simple_network: get_objectives
 kwargs:
   verbose: 1
-  trial: 0
+  trial: 100
   network_id: 8
   connectivity_type: uniform
   default_weight_distribution_type: normal
