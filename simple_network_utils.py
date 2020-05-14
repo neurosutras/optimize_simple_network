@@ -908,6 +908,37 @@ def get_gaussian_rate(duration, peak_loc, sigma, min_rate, max_rate, dt, wrap_ar
     return rate
 
 
+def get_gaussian_prob_peak_locs(tuning_duration, pop_size, loc, sigma, depth, resolution=2, wrap_around=True):
+    """
+
+    :param tuning_duration: float
+    :param pop_size: int
+    :param loc: float
+    :param sigma: float
+    :param depth: float
+    :param resolution: int
+    :param wrap_around: bool
+    :return: array of len pop_size * resolution
+    """
+    if wrap_around:
+        peak_locs = np.linspace(0., tuning_duration, int(resolution * pop_size), endpoint=False)
+        extended_peak_locs = np.concatenate([peak_locs - tuning_duration, peak_locs, peak_locs + tuning_duration])
+        p_peak_locs = np.exp(-((extended_peak_locs - loc) / sigma) ** 2.)
+        before = np.array(p_peak_locs[:len(peak_locs)])
+        after = np.array(p_peak_locs[2 * len(peak_locs):])
+        within = np.array(p_peak_locs[len(peak_locs):2 * len(peak_locs)])
+        p_peak_locs = within[:len(peak_locs)] + before[:len(peak_locs)] + after[:len(peak_locs)]
+    else:
+        peak_locs = np.linspace(0., tuning_duration, int(resolution * pop_size), endpoint=False)
+        p_peak_locs = np.exp(-((peak_locs - loc) / sigma) ** 2.)
+    p_peak_locs /= np.sum(p_peak_locs)
+    p_peak_locs *= depth
+    p_peak_locs += 1. / len(peak_locs)
+    p_peak_locs /= np.sum(p_peak_locs)
+
+    return peak_locs, p_peak_locs
+
+
 def get_pop_gid_ranges(pop_sizes):
     """
 
@@ -2023,12 +2054,12 @@ def plot_2D_connection_distance(pop_syn_proportions, pop_cell_positions, connect
                 fig.show()
 
 
-def analyze_simple_network_results_from_file(data_file_path, model_label=None, verbose=False, return_context=False,
+def analyze_simple_network_results_from_file(data_file_path, data_key=None, verbose=False, return_context=False,
                                              plot=True):
     """
 
     :param data_file_path: str (path)
-    :param model_label: int or str
+    :param data_key: int or str
     :param verbose: bool
     :param return_context: bool
     :param plot: bool
@@ -2050,7 +2081,7 @@ def analyze_simple_network_results_from_file(data_file_path, model_label=None, v
 
     exported_data_key = 'simple_network_exported_data'
     with h5py.File(data_file_path, 'r') as f:
-        group = get_h5py_group(f, [model_label, exported_data_key])
+        group = get_h5py_group(f, [data_key, exported_data_key])
         connectivity_type = get_h5py_attr(group.attrs, 'connectivity_type')
         active_rate_threshold = group.attrs['active_rate_threshold']
         pop_gid_ranges = dict()
@@ -2147,12 +2178,12 @@ def analyze_simple_network_results_from_file(data_file_path, model_label=None, v
         return context
 
 
-def analyze_simple_network_replay_results_from_file(data_file_path, model_label=None, verbose=False,
+def analyze_simple_network_replay_results_from_file(data_file_path, data_key=None, verbose=False,
                                                     return_context=False, plot=True):
     """
 
     :param data_file_path: str (path)
-    :param model_label: int or str
+    :param data_key: int or str
     :param verbose: bool
     :param return_context: bool
     :param plot: bool
@@ -2161,7 +2192,6 @@ def analyze_simple_network_replay_results_from_file(data_file_path, model_label=
         raise IOError('analyze_simple_network_replay_results_from_file: invalid data file path: %s' % data_file_path)
 
     full_spike_times_dict = defaultdict(dict)
-    buffered_firing_rates_dict = defaultdict(dict)
     buffered_firing_rates_from_binned_spike_count_dict = defaultdict(dict)
     full_binned_spike_count_dict = defaultdict(dict)
     filter_bands = dict()
@@ -2224,15 +2254,11 @@ def analyze_simple_network_replay_results_from_file(data_file_path, model_label=
             pop_cell_positions[pop_name] = dict()
             for gid, position in zip(subgroup[pop_name]['gids'][:], subgroup[pop_name]['positions'][:]):
                 pop_cell_positions[pop_name][gid] = position
-        group = get_h5py_group(f, [model_label, exported_data_key])
+        group = get_h5py_group(f, [data_key, exported_data_key])
         subgroup = group['full_spike_times']
         for pop_name in subgroup:
             for gid_key in subgroup[pop_name]:
                 full_spike_times_dict[pop_name][int(gid_key)] = subgroup[pop_name][gid_key][:]
-        subgroup = group['buffered_firing_rates']
-        for pop_name in subgroup:
-            for gid_key in subgroup[pop_name]:
-                buffered_firing_rates_dict[pop_name][int(gid_key)] = subgroup[pop_name][gid_key][:]
         subgroup = group['buffered_firing_rates_from_binned_spike_count']
         for pop_name in subgroup:
             for gid_key in subgroup[pop_name]:
@@ -2275,46 +2301,79 @@ def analyze_simple_network_replay_results_from_file(data_file_path, model_label=
         return context
 
 
-def decode_position_from_offline_replay(run_data_file_path, replay_data_file_path, run_model_key='0',
-                                        replay_model_keys=None, window_dur = 20., step_dur = 20., verbose=False):
+def get_run_data_from_file(run_data_file_path, run_data_key='0'):
     """
 
     :param run_data_file_path: str (path)
-    :param replay_data_file_path: str (path)
-    :param run_model_key: str
-    :param replay_model_keys: list of str
-    :param window_dur: float (ms)
-    :param step_dur: float (ms)
-    :param verbose: bool
-    :return: nested dict
+    :param run_data_key: str
+    :return: tuple (array, dict, dict)
     """
-    import numpy.matlib
-    run_context = analyze_simple_network_results_from_file(run_data_file_path, run_model_key, return_context=True,
-                                                           plot=False)
-    run_binned_t = run_context.binned_t
-    run_buffered_binned_t = run_context.buffered_binned_t
+    if not os.path.isfile(run_data_file_path):
+        raise IOError('get_run_data_from_file: invalid data file path: %s' % run_data_file_path)
+
+    run_buffered_firing_rates_dict = defaultdict(dict)
+    run_tuning_peak_locs = dict()
+    run_data_group_key = 'simple_network_exported_data'
+    with h5py.File(run_data_file_path, 'r') as f:
+        group = get_h5py_group(f, [run_data_key, run_data_group_key])
+        run_buffered_binned_t = group['buffered_binned_t'][:]
+        run_binned_t = group['binned_t'][:]
+        subgroup = group['buffered_firing_rates']
+        for pop_name in subgroup:
+            for gid_key in subgroup[pop_name]:
+                run_buffered_firing_rates_dict[pop_name][int(gid_key)] = subgroup[pop_name][gid_key][:]
+        if 'tuning_peak_locs' in group and len(group['tuning_peak_locs']) > 0:
+            subgroup = group['tuning_peak_locs']
+            for pop_name in subgroup:
+                run_tuning_peak_locs[pop_name] = dict()
+                for target_gid, peak_loc in zip(subgroup[pop_name]['target_gids'], subgroup[pop_name]['peak_locs']):
+                    run_tuning_peak_locs[pop_name][target_gid] = peak_loc
+
     valid_indexes = np.where((run_buffered_binned_t >= run_binned_t[0]) &
                              (run_buffered_binned_t <= run_binned_t[-1]))[0]
 
     run_firing_rates_dict = defaultdict(dict)
     sorted_gid_dict = defaultdict(dict)
-    for pop_name in run_context.buffered_firing_rates_dict:
-        for gid_key in run_context.buffered_firing_rates_dict[pop_name]:
+    for pop_name in run_buffered_firing_rates_dict:
+        for gid_key in run_buffered_firing_rates_dict[pop_name]:
             run_firing_rates_dict[pop_name][int(gid_key)] = \
-                run_context.buffered_firing_rates_dict[pop_name][gid_key][valid_indexes]
-        if pop_name in run_context.tuning_peak_locs:
-            this_target_gids = np.array(list(run_context.tuning_peak_locs[pop_name].keys()))
-            this_peak_locs = np.array(list(run_context.tuning_peak_locs[pop_name].values()))
+                run_buffered_firing_rates_dict[pop_name][gid_key][valid_indexes]
+        if pop_name in run_tuning_peak_locs:
+            this_target_gids = np.array(list(run_tuning_peak_locs[pop_name].keys()))
+            this_peak_locs = np.array(list(run_tuning_peak_locs[pop_name].values()))
             indexes = np.argsort(this_peak_locs)
             sorted_gid_dict[pop_name] = this_target_gids[indexes]
         else:
-            this_target_gids = [int(gid_key) for gid_key in run_context.buffered_firing_rates_dict[pop_name]]
+            this_target_gids = [int(gid_key) for gid_key in run_buffered_firing_rates_dict[pop_name]]
             sorted_gid_dict[pop_name] = np.array(sorted(this_target_gids), dtype='int')
+
     run_firing_rates_matrix_dict = dict()
     for pop_name in run_firing_rates_dict:
         run_firing_rates_matrix_dict[pop_name] = np.empty((len(run_firing_rates_dict[pop_name]), len(run_binned_t)))
         for i, gid in enumerate(sorted_gid_dict[pop_name]):
             run_firing_rates_matrix_dict[pop_name][i, :] = run_firing_rates_dict[pop_name][gid]
+
+    return run_binned_t, run_firing_rates_matrix_dict, sorted_gid_dict
+
+
+def decode_position_from_offline_replay(run_data_file_path, replay_data_file_path, run_data_key='0',
+                                        replay_data_keys=None, window_dur=20., step_dur=20., verbose=False,
+                                        plot=False):
+    """
+
+    :param run_data_file_path: str (path)
+    :param replay_data_file_path: str (path)
+    :param run_data_key: str
+    :param replay_data_keys: list of str
+    :param window_dur: float (ms)
+    :param step_dur: float (ms)
+    :param verbose: bool
+    :param plot: bool
+    :return: nested dict
+    """
+    import numpy.matlib
+    run_binned_t, run_firing_rates_matrix_dict, sorted_gid_dict = \
+        get_run_data_from_file(run_data_file_path, run_data_key)
 
     if not os.path.isfile(replay_data_file_path):
         raise IOError('decode_position_from_offline_replay: invalid data file path: %s' % replay_data_file_path)
@@ -2324,16 +2383,16 @@ def decode_position_from_offline_replay(run_data_file_path, replay_data_file_pat
         replay_input_t = f['shared_context']['full_binned_t'][:]
         replay_valid_t = f['shared_context']['buffered_binned_t'][:]
         binned_dt = replay_input_t[1] - replay_input_t[0]
-        if replay_model_keys is None:
-            replay_model_keys = []
-            for model_key in f:
-                if model_key != 'shared_context' and 'simple_network_exported_data' in f[model_key]:
-                    replay_model_keys.append(model_key)
+        if replay_data_keys is None:
+            replay_data_keys = []
+            for data_key in f:
+                if data_key != 'shared_context' and 'simple_network_exported_data' in f[data_key]:
+                    replay_data_keys.append(data_key)
         else:
-            for model_key in replay_model_keys:
-                if model_key not in f:
-                    raise RuntimeError('decode_position_from_offline_replay: model_key: %s not found in '
-                                       'replay_data_file: %s' % (model_key, replay_data_file_path))
+            for data_key in replay_data_keys:
+                if data_key not in f:
+                    raise RuntimeError('decode_position_from_offline_replay: data_key: %s not found in '
+                                       'replay_data_file: %s' % (data_key, replay_data_file_path))
 
     valid_indexes = np.where((replay_input_t >= replay_valid_t[0]) & (replay_input_t <= replay_valid_t[-1]))[0]
     align_to_t = 0.
@@ -2373,17 +2432,17 @@ def decode_position_from_offline_replay(run_data_file_path, replay_data_file_pat
 
     p_pos_dict = defaultdict(dict)
     binned_spike_count_matrix_dict = defaultdict(dict)
-    for model_key in replay_model_keys:
+    for data_key in replay_data_keys:
         full_binned_spike_count_dict = defaultdict(dict)
         with h5py.File(replay_data_file_path, 'r') as f:
-            group = get_h5py_group(f, [model_key, exported_data_key])
+            group = get_h5py_group(f, [data_key, exported_data_key])
             subgroup = group['full_binned_spike_count']
             for pop_name in subgroup:
                 for gid_key in subgroup[pop_name]:
                     full_binned_spike_count_dict[pop_name][int(gid_key)] = subgroup[pop_name][gid_key][:]
 
         for pop_name in full_binned_spike_count_dict:
-            if len(full_binned_spike_count_dict[pop_name]) != len(run_firing_rates_dict[pop_name]):
+            if len(full_binned_spike_count_dict[pop_name]) != run_firing_rates_matrix_dict[pop_name].shape[0]:
                 raise RuntimeError('decode_position_from_offline_replay: population: %s; mismatched number of cells to'
                                    ' decode')
             binned_spike_count = np.empty((len(full_binned_spike_count_dict[pop_name]), len(replay_valid_t)))
@@ -2411,11 +2470,11 @@ def decode_position_from_offline_replay(run_data_file_path, replay_data_file_pat
                         p_pos[:, p_pos_index] = this_p_pos / this_p_sum
                     else:
                         p_pos[:, p_pos_index] = np.nan
-            p_pos_dict[model_key][pop_name] = p_pos
-            binned_spike_count_matrix_dict[model_key][pop_name] = binned_spike_count
+            p_pos_dict[data_key][pop_name] = p_pos
+            binned_spike_count_matrix_dict[data_key][pop_name] = binned_spike_count
         if verbose:
             print('decode_position_from_offline_replay: processed model: %s from replay_file_path: %s' %
-                  (model_key, replay_data_file_path))
+                  (data_key, replay_data_file_path))
             sys.stdout.flush()
 
     return replay_valid_t, binned_spike_count_matrix_dict, decode_binned_t, run_binned_t, replay_x_mesh, \

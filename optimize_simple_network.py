@@ -225,8 +225,20 @@ def config_worker():
                 context.structured_weight_params[target_pop_name]['norm_tuning_width']
             this_tuning_width = tuning_duration * this_norm_tuning_width
             this_sigma = this_tuning_width / 3. / np.sqrt(2.)
-            peak_locs_array = \
-                np.linspace(0., tuning_duration, context.pop_sizes[target_pop_name], endpoint=False)
+            if 'pop_over_representation' in context.structured_weight_params[target_pop_name]:
+                over_rep_loc = context.structured_weight_params[target_pop_name]['pop_over_representation']['loc']
+                over_rep_width = context.structured_weight_params[target_pop_name]['pop_over_representation']['width']
+                over_rep_depth = context.structured_weight_params[target_pop_name]['pop_over_representation']['depth']
+                over_rep_sigma = over_rep_width * tuning_duration / 3. / np.sqrt(2.)
+                available_peak_locs, p_peak_locs = \
+                    get_gaussian_prob_peak_locs(tuning_duration, context.pop_sizes[target_pop_name],
+                                                over_rep_loc * tuning_duration, over_rep_sigma, over_rep_depth,
+                                                resolution=2, wrap_around=track_wrap_around)
+                peak_locs_array = local_np_random.choice(available_peak_locs, size=context.pop_sizes[target_pop_name],
+                                                         p=p_peak_locs, replace=False)
+            else:
+                peak_locs_array = \
+                    np.linspace(0., tuning_duration, context.pop_sizes[target_pop_name], endpoint=False)
             local_np_random.shuffle(peak_locs_array)
             for peak_loc, target_gid in zip(peak_locs_array,
                                             range(pop_gid_ranges[target_pop_name][0],
