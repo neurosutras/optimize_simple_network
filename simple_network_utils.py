@@ -758,7 +758,7 @@ def append_connection(cell, pc, source_pop_name, syn_type, source_gid, delay=Non
 class IzhiCell(object):
     # Integrate-and-fire-like neuronal cell models with additional tunable dynamic parameters (e.g. adaptation).
     # Derived from http://modeldb.yale.edu/39948
-    def __init__(self, pop_name=None, gid=None, cell_type='RS'):
+    def __init__(self, pop_name=None, gid=None, cell_type='RS', ):
         """
 
         :param pop_name: str
@@ -994,7 +994,7 @@ def get_binned_spike_count_dict(spike_times_dict, t):
 
 
 def infer_firing_rates_from_spike_count(binned_spike_count_dict, input_t, output_t, align_to_t=0., window_dur=500.,
-                                        step_dur=1., smooth_dur=100., debug=False):
+                                        step_dur=1., smooth_dur=None, debug=False):
     """
 
     :param binned_spike_count_dict: dict: {pop_name: {gid: array} }
@@ -1012,9 +1012,10 @@ def infer_firing_rates_from_spike_count(binned_spike_count_dict, input_t, output
     window_bins = int(2 * half_window_bins + 1)
     window_dur = window_bins * dt
     step_bins = step_dur // dt
-    smooth_bins = int(smooth_dur // dt)
-    if smooth_bins % 2 == 0:
-        smooth_bins += 1
+    if smooth_dur is not None:
+        smooth_bins = int(smooth_dur // dt)
+        if smooth_bins % 2 == 0:
+            smooth_bins += 1
 
     # if possible, include a bin centered on output_t[0]
     binned_t_center_indexes = []
@@ -1053,9 +1054,12 @@ def infer_firing_rates_from_spike_count(binned_spike_count_dict, input_t, output
                 this_inferred_rate[rate_index] = \
                     np.sum(this_binned_spike_count[t_start_index:t_end_index]) / (window_dur / 1000.)
             this_interp_rate = np.interp(output_t, binned_t, this_inferred_rate)
-            this_smoothed_rate = savgol_filter(this_interp_rate, smooth_bins, 3, mode='interp')
-            this_smoothed_rate = np.maximum(0., this_smoothed_rate)
-            firing_rates_from_spike_count_dict[pop_name][gid] = this_smoothed_rate
+            if smooth_dur is not None:
+                this_smoothed_rate = savgol_filter(this_interp_rate, smooth_bins, 3, mode='interp')
+                this_smoothed_rate = np.maximum(0., this_smoothed_rate)
+                firing_rates_from_spike_count_dict[pop_name][gid] = this_smoothed_rate
+            else:
+                firing_rates_from_spike_count_dict[pop_name][gid] = this_interp_rate
             if debug and pop_name == 'FF' and plot_count < 10:
                 plot_count += 1
                 fig = plt.figure()
@@ -2192,15 +2196,14 @@ def analyze_simple_network_replay_results_from_file(data_file_path, data_key=Non
         raise IOError('analyze_simple_network_replay_results_from_file: invalid data file path: %s' % data_file_path)
 
     full_spike_times_dict = defaultdict(dict)
-    buffered_firing_rates_from_binned_spike_count_dict = defaultdict(dict)
-    full_binned_spike_count_dict = defaultdict(dict)
     filter_bands = dict()
-    subset_full_voltage_rec_dict = defaultdict(dict)
     connection_weights_dict = dict()
     tuning_peak_locs = dict()
     connectivity_dict = dict()
     pop_syn_proportions = dict()
     pop_cell_positions = dict()
+    centroid_freq_dict = defaultdict(dict)
+    freq_tuning_index_dict = defaultdict(dict)
 
     exported_data_key = 'simple_network_exported_data'
     with h5py.File(data_file_path, 'r') as f:
@@ -2259,21 +2262,22 @@ def analyze_simple_network_replay_results_from_file(data_file_path, data_key=Non
         for pop_name in subgroup:
             for gid_key in subgroup[pop_name]:
                 full_spike_times_dict[pop_name][int(gid_key)] = subgroup[pop_name][gid_key][:]
-        subgroup = group['buffered_firing_rates_from_binned_spike_count']
-        for pop_name in subgroup:
-            for gid_key in subgroup[pop_name]:
-                buffered_firing_rates_from_binned_spike_count_dict[pop_name][int(gid_key)] = \
-                    subgroup[pop_name][gid_key][:]
-        subgroup = group['full_binned_spike_count']
-        for pop_name in subgroup:
-            for gid_key in subgroup[pop_name]:
-                full_binned_spike_count_dict[pop_name][int(gid_key)] = subgroup[pop_name][gid_key][:]
-        subgroup = group['subset_full_voltage_recs']
-        for pop_name in subgroup:
-            for gid_key in subgroup[pop_name]:
-                subset_full_voltage_rec_dict[pop_name][int(gid_key)] = subgroup[pop_name][gid_key][:]
+        subgroup = group['filter_results']
+        data_group = subgroup['freq_tuning_index']
+        for band in data_group:
+            for pop_name in data_group[band].attrs:
+                freq_tuning_index_dict[band][pop_name] = data_group[band].attrs[pop_name]
+        data_group = subgroup['centroid_freq']
+        for band in data_group:
+            for pop_name in data_group[band].attrs:
+                centroid_freq_dict[band][pop_name] = data_group[band].attrs[pop_name]
 
     binned_dt = binned_t[1] - binned_t[0]
+    full_binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict, full_binned_t)
+    buffered_firing_rates_from_binned_spike_count_dict = \
+        infer_firing_rates_from_spike_count(full_binned_spike_count_dict, input_t=full_binned_t,
+                                            output_t=buffered_binned_t, align_to_t=50., window_dur=100.,
+                                            step_dur=binned_dt)
     full_pop_mean_rate_from_binned_spike_count_dict = \
         get_pop_mean_rate_from_binned_spike_count(full_binned_spike_count_dict, dt=binned_dt)
     _ = get_pop_activity_stats(buffered_firing_rates_from_binned_spike_count_dict, input_t=buffered_binned_t,
@@ -2282,11 +2286,6 @@ def analyze_simple_network_replay_results_from_file(data_file_path, data_key=Non
                                                input_t=full_binned_t, valid_t=binned_t, output_t=binned_t,
                                                plot=plot, verbose=verbose)
     if plot:
-        plot_inferred_spike_rates(full_spike_times_dict, buffered_firing_rates_from_binned_spike_count_dict,
-                                  input_t=buffered_binned_t, valid_t=buffered_binned_t,
-                                  active_rate_threshold=active_rate_threshold)
-        plot_voltage_traces(subset_full_voltage_rec_dict, full_rec_t, valid_t=rec_t,
-                            spike_times_dict=full_spike_times_dict)
         plot_weight_matrix(connection_weights_dict, pop_gid_ranges=pop_gid_ranges, tuning_peak_locs=tuning_peak_locs)
         plot_firing_rate_heatmaps(buffered_firing_rates_from_binned_spike_count_dict, input_t=buffered_binned_t,
                                   valid_t=buffered_binned_t, tuning_peak_locs=tuning_peak_locs)
@@ -2356,13 +2355,11 @@ def get_run_data_from_file(run_data_file_path, run_data_key='0'):
     return run_binned_t, run_firing_rates_matrix_dict, sorted_gid_dict
 
 
-def get_replay_data_from_file(replay_data_file_path, replay_binned_t, replay_valid_binned_t_indexes, sorted_gid_dict,
-                              replay_data_key='0'):
+def get_replay_data_from_file(replay_data_file_path, replay_binned_t, sorted_gid_dict, replay_data_key='0'):
     """
 
     :param replay_data_file_path: str (path)
     :param replay_binned_t: array
-    :param replay_valid_binned_t_indexes: array
     :param sorted_gid_dict: dict {str: list of int}
     :param replay_data_key: str
     :return: tuple ()
@@ -2370,20 +2367,21 @@ def get_replay_data_from_file(replay_data_file_path, replay_binned_t, replay_val
     if not os.path.isfile(replay_data_file_path):
         raise IOError('get_replay_data_from_file: invalid data file path: %s' % replay_data_file_path)
 
-    replay_full_binned_spike_count_dict = defaultdict(dict)
+    replay_full_spike_times_dict = defaultdict(dict)
     replay_binned_spike_count_matrix_dict = dict()
     replay_data_group_key = 'simple_network_exported_data'
     with h5py.File(replay_data_file_path, 'r') as f:
-        group = get_h5py_group(f, [replay_data_key, replay_data_group_key, 'full_binned_spike_count'])
+        group = get_h5py_group(f, [replay_data_key, replay_data_group_key, 'full_spike_times'])
         for pop_name in group:
             for gid_key in group[pop_name]:
-                replay_full_binned_spike_count_dict[pop_name][int(gid_key)] = group[pop_name][gid_key][:]
+                replay_full_spike_times_dict[pop_name][int(gid_key)] = group[pop_name][gid_key][:]
+    replay_full_binned_spike_count_dict = \
+        get_binned_spike_count_dict(replay_full_spike_times_dict, replay_binned_t)
 
     for pop_name in replay_full_binned_spike_count_dict:
         replay_binned_spike_count = np.empty((len(replay_full_binned_spike_count_dict[pop_name]), len(replay_binned_t)))
         for i, gid in enumerate(sorted_gid_dict[pop_name]):
-            replay_binned_spike_count[i, :] = \
-                replay_full_binned_spike_count_dict[pop_name][gid][replay_valid_binned_t_indexes]
+            replay_binned_spike_count[i, :] = replay_full_binned_spike_count_dict[pop_name][gid]
         replay_binned_spike_count_matrix_dict[pop_name] = replay_binned_spike_count
 
     return replay_binned_spike_count_matrix_dict

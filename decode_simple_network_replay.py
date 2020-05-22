@@ -30,7 +30,7 @@ def main(cli, run_data_file_path, replay_data_file_path, run_data_key, num_repla
     :param run_data_file_path: str (path)
     :param replay_data_file_path: str (path)
     :param run_data_key: str
-    :param num_events: int
+    :param num_replay_events: int
     :param window_dur: float
     :param step_dur: float
     :param export: bool
@@ -55,12 +55,16 @@ def main(cli, run_data_file_path, replay_data_file_path, run_data_key, num_repla
                               label=label, disp=context.disp, interface=context.interface, verbose=verbose, plot=plot,
                               debug=debug, **kwargs)
 
+    start_time = time.time()
     args = context.interface.execute(get_replay_data_keys)
     num_replay_events = len(args[0])
     sequences = args + [[context.export] * num_replay_events] + [[context.plot > 1] * num_replay_events]
     decoded_position_package_list = context.interface.map(get_decoded_position_offline_replay, *sequences)
     context.interface.execute(analyze_decoded_position_offline_replay, decoded_position_package_list,
                               context.export, context.plot > 0)
+    if context.verbose > 0:
+        print('decode_simple_network_replay: processing %i replay events took %.1f s' %
+              (num_replay_events, time.time() - start_time))
 
     if context.export:
         pass
@@ -97,16 +101,11 @@ def config_worker():
                           context.replay_data_file_path)
 
         with h5py.File(context.replay_data_file_path, 'r') as f:
-            replay_full_binned_t = f['shared_context']['full_binned_t'][:]
             replay_binned_t = f['shared_context']['buffered_binned_t'][:]
-        replay_valid_binned_t_indexes = \
-            np.where((replay_full_binned_t >= replay_binned_t[0]) & (replay_full_binned_t <= replay_binned_t[-1]))[0]
     else:
         replay_binned_t = None
-        replay_valid_binned_t_indexes = None
 
     context.comm.bcast(replay_binned_t, root=0)
-    context.comm.bcast(replay_valid_binned_t_indexes, root=0)
 
     replay_binned_dt = replay_binned_t[1] - replay_binned_t[0]
     window_dur = context.window_dur
@@ -159,7 +158,7 @@ def get_replay_data_keys():
         else:
             replay_data_keys = \
                 list(np.random.choice(available_data_keys, min(context.num_replay_events, len(available_data_keys)),
-                                 replace=False))
+                                      replace=False))
 
     return [replay_data_keys]
 
@@ -174,8 +173,7 @@ def get_decoded_position_offline_replay(replay_data_key, export=False, plot=Fals
     """
     start_time = time.time()
     replay_binned_spike_count_matrix_dict = \
-        get_replay_data_from_file(context.replay_data_file_path, context.replay_binned_t,
-                                  context.replay_valid_binned_t_indexes, context.sorted_gid_dict,
+        get_replay_data_from_file(context.replay_data_file_path, context.replay_binned_t, context.sorted_gid_dict,
                                   replay_data_key=replay_data_key)
 
     p_pos_dict = decode_position_from_offline_replay(context.run_binned_t, context.run_firing_rates_matrix_dict,
@@ -286,7 +284,7 @@ def analyze_decoded_position_offline_replay(decoded_position_package_list, expor
             if pop_name not in ordered_pop_names:
                 ordered_pop_names.append(pop_name)
         fig, axes = plt.subplots(2, 2, figsize=(8.5, 7.), constrained_layout=True)
-
+        """
         for pop_name in ordered_pop_names:
             hist, edges = np.histogram(decoded_pos_list_dict[pop_name], bins=np.linspace(0., 1., 11), density=True)
             bin_width = (edges[1] - edges[0])
@@ -309,7 +307,6 @@ def analyze_decoded_position_offline_replay(decoded_position_package_list, expor
         axes[1][0].set_ylabel('Probability')
         axes[1][0].legend(loc='best', frameon=False, framealpha=0.5)
         axes[1][0].set_title('Mean decoded position')
-        """
 
         max_variance = np.max(list(decoded_pos_diff_var.values()))
         for pop_name in ordered_pop_names:

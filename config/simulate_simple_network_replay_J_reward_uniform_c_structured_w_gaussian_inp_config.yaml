@@ -76,7 +76,7 @@ param_names:
   - E_norm_syn_count
   - I_norm_syn_count
   - E_peak_delta_weight
-label: simple_network_J_replay
+label: simple_network_J_reward_replay
 x0:
   E_FF_mean_weight: 1.279704E-01
   E_E_mean_weight: 1.036678E+00

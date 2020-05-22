@@ -12,9 +12,9 @@ input_types:
 input_offline_min_rates:
   FF: 0.
 input_offline_mean_rates:
-  FF: 15.
+  FF: 12.5  # 15.
 input_offline_fraction_active:
-  FF: 0.3
+  FF: 0.25  # 0.3
 input_norm_tuning_widths:
   FF: 0.5
 num_input_patterns: 2
