@@ -8,7 +8,7 @@ context = Context()
 
 @click.command(context_settings=dict(ignore_unknown_options=True, allow_extra_args=True, ))
 @click.option("--config-file-path", type=click.Path(exists=True, file_okay=True, dir_okay=False),
-              default='config/simulate_simple_network_replay_J_uniform_c_structured_w_gaussian_inp_config.yaml')
+              default='config/simulate_simple_network_J_uniform_c_structured_w_gaussian_inp_config.yaml')
 @click.option("--export", is_flag=True)
 @click.option("--output-dir", type=str, default='data')
 @click.option("--export-file-path", type=str, default=None)
@@ -54,10 +54,8 @@ def main(cli, config_file_path, export, output_dir, export_file_path, label, int
                               interface=context.interface, verbose=verbose, plot=plot, debug=debug, **kwargs)
 
     if simulate:
-        args = context.interface.execute(get_args_static_unique_ensemble_ids)
-        sequences = args + [list(range(context.num_input_patterns))] + \
-                    [[context.export] * context.num_input_patterns]
-        context.interface.map(simulate_network_replay, *sequences)
+        sequences = [list(range(context.num_trials))] + [[context.export] * context.num_trials]
+        context.interface.map(simulate_network, *sequences)
 
         if context.export:
             if merge_output_files:
@@ -74,11 +72,6 @@ def main(cli, config_file_path, export, output_dir, export_file_path, label, int
 
     if not interactive:
         context.interface.stop()
-
-
-def get_args_static_unique_ensemble_ids():
-
-    return [list(range(context.num_input_patterns))]
 
 
 def config_worker():
@@ -102,7 +95,7 @@ def config_worker():
 
     # {'pop_name': int}
     if 'pop_sizes' not in context() or context.pop_sizes is None:
-        raise RuntimeError('simulate_simple_network_replay: pop_sizes must be specified in the config.yaml')
+        raise RuntimeError('optimize_simple_network: pop_sizes must be specified in the config.yaml')
     for pop_name in context.pop_sizes:
         context.pop_sizes[pop_name] = int(context.pop_sizes[pop_name])
 
@@ -118,8 +111,11 @@ def config_worker():
         input_max_rates = None
     if 'input_norm_tuning_widths' not in context():
         input_norm_tuning_widths = None
-    context.num_input_patterns = int(context.num_input_patterns)
-    
+    if 'num_trials' not in context():
+        context.num_trials = 1
+    else:
+        context.num_trials = int(context.num_trials)
+
     if 'network_id' not in context():
         context.network_id = 0
     else:
@@ -134,7 +130,6 @@ def config_worker():
     context.weights_seed = [context.network_id, 2]
     context.location_seed = [context.network_id, 3]
     context.tuning_seed = [context.network_id, 4]
-    context.selection_seed = [context.network_id, 5, context.trial_offset]
 
     connection_weights_mean = defaultdict(dict)  # {'target_pop_name': {'source_pop_name': float} }
     connection_weights_norm_sigma = defaultdict(dict)  # {'target_pop_name': {'source_pop_name': float} }
@@ -157,9 +152,8 @@ def config_worker():
 
     delay = 1.  # ms
     equilibrate = 250.  # ms
-    buffer = 100.  # ms
-    duration = 250.  # ms
-    stim_edge_duration = (150., 25.)  # ms
+    buffer = 500.  # ms
+    duration = 3000.  # ms
     tuning_duration = 3000.  # ms
     tstop = int(equilibrate + duration + 2. * buffer)  # ms
     dt = 0.025
@@ -168,10 +162,10 @@ def config_worker():
     active_rate_threshold = 1.  # Hz
     baks_alpha = 4.7725100028345535
     baks_beta = 0.41969058927343522
-    baks_pad_dur = 0.  # ms
+    baks_pad_dur = 1000.  # ms
     baks_wrap_around = False
     track_wrap_around = True
-    filter_bands = {'Ripple': [30., 150.]}
+    filter_bands = {'Theta': [4., 10.], 'Gamma': [30., 100.]}
     max_num_cells_export_voltage_rec = 500
 
     if context.comm.rank == 0:
@@ -182,7 +176,7 @@ def config_worker():
 
         for pop_name in context.input_types:
             if pop_name not in context.pop_cell_types or context.pop_cell_types[pop_name] != 'input':
-                raise RuntimeError('simulate_simple_network_replay: %s not specified as an input population' % pop_name)
+                raise RuntimeError('optimize_simple_network: %s not specified as an input population' % pop_name)
             if context.input_types[pop_name] == 'gaussian':
                 if pop_name not in tuning_peak_locs:
                     tuning_peak_locs[pop_name] = dict()
@@ -241,7 +235,7 @@ def config_worker():
     if context.connectivity_type == 'gaussian':
         pop_axon_extents = {'FF': 1., 'E': 1., 'I': 1.}
         if 'spatial_dim' not in context():
-            raise RuntimeError('simulate_simple_network_replay: missing spatial_dim parameter required for gaussian '
+            raise RuntimeError('optimize_simple_network: missing spatial_dim parameter required for gaussian '
                                'connectivity not found')
 
         if context.comm.rank == 0:
@@ -295,7 +289,7 @@ def config_worker():
         debug=context.debug)
 
     if context.comm.rank == 0 and context.verbose > 0:
-        print('simulate_simple_network_replay: pid: %i; network initialization took %.2f s' %
+        print('simulate_simple_network: pid: %i; network initialization took %.2f s' %
               (os.getpid(), time.time() - start_time))
         sys.stdout.flush()
     current_time = time.time()
@@ -321,7 +315,7 @@ def config_worker():
                                                      tuning_duration=context.tuning_duration)
 
     if context.comm.rank == 0 and context.verbose > 0:
-        print('simulate_simple_network_replay: pid: %i; building network connections took %.2f s' %
+        print('simulate_simple_network: pid: %i; building network connections took %.2f s' %
               (os.getpid(), time.time() - current_time))
         sys.stdout.flush()
 
@@ -380,11 +374,10 @@ def update_context(x, local_context=None):
                     x_dict[peak_delta_weight_param_name]
 
 
-def analyze_network_output(network, ensemble_id=None, trial=None, export=False, plot=False):
+def analyze_network_output(network, trial=None, export=False, plot=False):
     """
 
     :param network: :class:'SimpleNetwork'
-    :param ensemble_id: int
     :param trial: int
     :param export: bool
     :param plot: bool
@@ -401,16 +394,15 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
     binned_t = np.arange(0., context.duration + context.binned_dt / 2., context.binned_dt)
 
     full_spike_times_dict = network.get_spike_times_dict()
+    buffered_firing_rates_dict = \
+        infer_firing_rates_baks(full_spike_times_dict, buffered_binned_t, alpha=context.baks_alpha,
+                                beta=context.baks_beta, pad_dur=context.baks_pad_dur,
+                                wrap_around=context.baks_wrap_around)
     full_binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict, full_binned_t)
-    buffered_firing_rates_from_binned_spike_count_dict = \
-        infer_firing_rates_from_spike_count(full_binned_spike_count_dict, input_t=full_binned_t,
-                                            output_t=buffered_binned_t, align_to_t=50., window_dur=100.,
-                                            step_dur=context.binned_dt, debug=context.debug and context.comm.rank == 0)
 
     gathered_full_spike_times_dict_list = context.comm.gather(full_spike_times_dict, root=0)
+    gathered_buffered_firing_rates_dict_list = context.comm.gather(buffered_firing_rates_dict, root=0)
     gathered_full_binned_spike_count_dict_list = context.comm.gather(full_binned_spike_count_dict, root=0)
-    gathered_buffered_firing_rates_from_binned_spike_count_dict_list = \
-        context.comm.gather(buffered_firing_rates_from_binned_spike_count_dict, root=0)
 
     full_voltage_rec_dict = network.get_voltage_rec_dict()
     voltages_exceed_threshold = check_voltages_exceed_threshold(full_voltage_rec_dict, input_t=full_rec_t,
@@ -446,16 +438,15 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
         gathered_connection_weights_dict_list = context.comm.gather(connection_weights_dict, root=0)
 
     if context.debug and context.verbose > 0 and context.comm.rank == 0:
-        print('simulate_simple_network_replay: pid: %i; trial: %i; gathering data across ranks took %.2f s' %
+        print('simulate_simple_network: pid: %i; trial: %i; gathering data across ranks took %.2f s' %
               (os.getpid(), trial, time.time() - start_time))
         sys.stdout.flush()
         current_time = time.time()
 
     if context.comm.rank == 0:
         full_spike_times_dict = merge_list_of_dict(gathered_full_spike_times_dict_list)
+        buffered_firing_rates_dict = merge_list_of_dict(gathered_buffered_firing_rates_dict_list)
         full_binned_spike_count_dict = merge_list_of_dict(gathered_full_binned_spike_count_dict_list)
-        buffered_firing_rates_from_binned_spike_count_dict = \
-            merge_list_of_dict(gathered_buffered_firing_rates_from_binned_spike_count_dict_list)
 
         if plot or export:
             subset_full_voltage_rec_dict = merge_list_of_dict(gathered_subset_full_voltage_rec_dict_list)
@@ -465,7 +456,7 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
                                                gathered_connection_weights_dict_list)
 
         if context.debug and context.verbose > 0:
-            print('simulate_simple_network_replay: pid: %i; trial: %i; merging data structures for analysis took %.2f s' %
+            print('simulate_simple_network: pid: %i; trial: %i; merging data structures for analysis took %.2f s' %
                   (os.getpid(), trial, time.time() - current_time))
             current_time = time.time()
             sys.stdout.flush()
@@ -473,32 +464,36 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
         full_pop_mean_rate_from_binned_spike_count_dict = \
             get_pop_mean_rate_from_binned_spike_count(full_binned_spike_count_dict, dt=context.binned_dt)
         mean_min_rate_dict, mean_peak_rate_dict, mean_rate_active_cells_dict, pop_fraction_active_dict = \
-            get_pop_activity_stats(buffered_firing_rates_from_binned_spike_count_dict, input_t=buffered_binned_t,
-                                   valid_t=buffered_binned_t, threshold=context.active_rate_threshold, plot=plot)
+            get_pop_activity_stats(buffered_firing_rates_dict, input_t=buffered_binned_t, valid_t=binned_t,
+                                   threshold=context.active_rate_threshold, plot=plot)
         filtered_mean_rate_dict, filter_envelope_dict, filter_envelope_ratio_dict, centroid_freq_dict, \
             freq_tuning_index_dict = \
             get_pop_bandpass_filtered_signal_stats(full_pop_mean_rate_from_binned_spike_count_dict,
                                                    context.filter_bands, input_t=full_binned_t,
-                                                   valid_t=binned_t, output_t=binned_t,
-                                                   plot=False, verbose=context.verbose > 1)
+                                                   valid_t=buffered_binned_t, output_t=binned_t,
+                                                   plot=plot, verbose=context.verbose > 1)
 
         if context.debug and context.verbose > 0:
-            print('simulate_simple_network_replay: pid: %i; trial: %i; additional data analysis took %.2f s' %
+            print('simulate_simple_network: pid: %i; trial: %i; additional data analysis took %.2f s' %
                   (os.getpid(), trial, time.time() - current_time))
             sys.stdout.flush()
 
         if plot:
-            plot_firing_rate_heatmaps(buffered_firing_rates_from_binned_spike_count_dict, input_t=buffered_binned_t,
-                                      valid_t=buffered_binned_t, tuning_peak_locs=context.tuning_peak_locs)
-            plot_firing_rate_heatmaps(full_binned_spike_count_dict, input_t=full_binned_t,
-                                      valid_t=buffered_binned_t, tuning_peak_locs=context.tuning_peak_locs)
+            plot_inferred_spike_rates(full_spike_times_dict, buffered_firing_rates_dict, input_t=buffered_binned_t,
+                                      valid_t=binned_t, active_rate_threshold=context.active_rate_threshold)
+            plot_voltage_traces(subset_full_voltage_rec_dict, full_rec_t, valid_t=rec_t,
+                                spike_times_dict=full_spike_times_dict)
+            plot_weight_matrix(connection_weights_dict, pop_gid_ranges=context.pop_gid_ranges,
+                               tuning_peak_locs=context.tuning_peak_locs)
+            plot_firing_rate_heatmaps(buffered_firing_rates_dict, input_t=buffered_binned_t, valid_t=binned_t,
+                                      tuning_peak_locs=context.tuning_peak_locs)
             if context.connectivity_type == 'gaussian':
                 plot_2D_connection_distance(context.pop_syn_proportions, context.pop_cell_positions, connectivity_dict)
 
         if any(voltages_exceed_threshold_list):
             voltages_exceed_threshold = True
             if context.verbose > 0:
-                print('simulate_simple_network_replay: pid: %i; trial: %i; model failed - mean membrane voltage in '
+                print('simulate_simple_network: pid: %i; trial: %i; model failed - mean membrane voltage in '
                       'some Izhi cells exceed spike threshold' % (os.getpid(), trial))
                 sys.stdout.flush()
         else:
@@ -574,7 +569,6 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
                         data_group.create_dataset('positions', data=positions, compression='gzip')
                 exported_data_key = 'simple_network_exported_data'
                 group = get_h5py_group(f, [trial, exported_data_key], create=True)
-                set_h5py_attr(group.attrs, 'ensemble_id', ensemble_id)
                 set_h5py_attr(group.attrs, 'voltages_exceed_threshold', voltages_exceed_threshold)
                 subgroup = group.create_group('full_spike_times')
                 for pop_name in full_spike_times_dict:
@@ -594,7 +588,7 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
                     for pop_name in centroid_freq_dict[band]:
                         data_group[band].attrs[pop_name] = centroid_freq_dict[band][pop_name]
 
-            print('simulate_simple_network_replay: pid: %i; trial: %i; exporting data to file: %s took %.2f s' %
+            print('simulate_simple_network: pid: %i; trial: %i; exporting data to file: %s took %.2f s' %
                   (os.getpid(), trial, context.temp_output_path, time.time() - current_time))
             sys.stdout.flush()
 
@@ -602,26 +596,25 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
             context.update(locals())
 
 
-def simulate_network_replay(ensemble_id, trial, export=False):
+def simulate_network(trial, export=False):
     """
 
-    :param ensemble_id: int
     :param trial: int
     :param export: bool
     """
     start_time = time.time()
-    this_selection_seed = context.selection_seed + [int(ensemble_id)]
     this_spikes_seed = context.spikes_seed + [int(trial)]
 
-    context.network.set_offline_input_pattern(
-        context.input_types, input_offline_min_rates=context.input_offline_min_rates,
-        input_offline_mean_rates=context.input_offline_mean_rates,
-        input_offline_fraction_active=context.input_offline_fraction_active, tuning_peak_locs=context.tuning_peak_locs,
-        track_wrap_around=context.track_wrap_around, stim_edge_duration=context.stim_edge_duration,
-        selection_seed=this_selection_seed, spikes_seed=this_spikes_seed, tuning_duration=context.tuning_duration)
+    context.network.set_input_pattern(context.input_types, input_mean_rates=context.input_mean_rates,
+                                      input_min_rates=context.input_min_rates,
+                                      input_max_rates=context.input_max_rates,
+                                      input_norm_tuning_widths=context.input_norm_tuning_widths,
+                                      tuning_peak_locs=context.tuning_peak_locs,
+                                      track_wrap_around=context.track_wrap_around, spikes_seed=this_spikes_seed,
+                                      tuning_duration=context.tuning_duration)
 
     if context.comm.rank == 0 and context.verbose > 0:
-        print('simulate_simple_network_replay: pid: %i; trial: %i; setting network input pattern took %.2f s' %
+        print('simulate_simple_network: pid: %i; trial: %i; setting network input pattern took %.2f s' %
               (os.getpid(), trial, time.time() - start_time))
         sys.stdout.flush()
     current_time = time.time()
@@ -634,14 +627,14 @@ def simulate_network_replay(ensemble_id, trial, export=False):
 
     context.network.run()
     if context.comm.rank == 0 and context.verbose > 0:
-        print('simulate_simple_network_replay: pid: %i; trial: %i; network simulation took %.2f s' %
+        print('simulate_simple_network: pid: %i; trial: %i; network simulation took %.2f s' %
               (os.getpid(), trial, time.time() - current_time))
         sys.stdout.flush()
     current_time = time.time()
 
-    analyze_network_output(context.network, ensemble_id=ensemble_id, trial=trial, export=export, plot=context.plot)
+    analyze_network_output(context.network, trial=trial, export=export, plot=context.plot)
     if context.comm.rank == 0 and context.verbose > 0:
-        print('simulate_simple_network_replay: pid: %i; trial: %i; analysis of network simulation results took %.2f s' %
+        print('simulate_simple_network: pid: %i; trial: %i; analysis of network simulation results took %.2f s' %
               (os.getpid(), trial, time.time() - current_time))
         sys.stdout.flush()
 
