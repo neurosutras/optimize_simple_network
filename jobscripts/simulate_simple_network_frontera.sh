@@ -1,7 +1,7 @@
 #!/bin/bash -l
 export DATE=$(date +%Y%m%d_%H%M%S)
 export LABEL="$2"_"$3"
-export JOB_NAME=simulate_simple_network_replay_"$LABEL"_"$DATE"
+export JOB_NAME=simulate_simple_network_"$LABEL"_"$DATE"
 export CONFIG_FILE_PATH="$1"
 export NETWORK_ID="$3"
 export PARAM_FILE_PATH="$4"
