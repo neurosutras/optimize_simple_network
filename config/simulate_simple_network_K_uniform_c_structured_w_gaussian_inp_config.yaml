@@ -1,6 +1,6 @@
 verbose: 1
 trial_offset: 0
-network_id: 8
+network_id: 9
 connectivity_type: uniform
 default_weight_distribution_type: normal
 connection_weight_distribution_types:
@@ -20,7 +20,6 @@ structured_weight_params:
   E:  # target_pop_name
     source_pop_names:
       - FF
-      - E
     tuning_type: additive
     norm_tuning_width: 0.5
 pop_cell_types:
@@ -70,7 +69,7 @@ param_names:
   - E_norm_syn_count
   - I_norm_syn_count
   - E_peak_delta_weight
-label: simple_network_J
+label: simple_network_K
 x0:
   E_FF_mean_weight: 1.279704E-01
   E_E_mean_weight: 1.036678E+00
