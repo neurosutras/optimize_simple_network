@@ -54,9 +54,8 @@ def main(cli, config_file_path, export, output_dir, export_file_path, label, int
                               interface=context.interface, verbose=verbose, plot=plot, debug=debug, **kwargs)
 
     if simulate:
-        args = context.interface.execute(get_args_static_unique_ensemble_ids)
-        sequences = args + [list(range(context.num_input_patterns))] + \
-                    [[context.export] * context.num_input_patterns]
+        args = context.interface.execute(get_args_static_event_ids)
+        sequences = args + [[context.export] * context.num_input_patterns]
         context.interface.map(simulate_network_replay, *sequences)
 
         if context.export:
@@ -76,9 +75,10 @@ def main(cli, config_file_path, export, output_dir, export_file_path, label, int
         context.interface.stop()
 
 
-def get_args_static_unique_ensemble_ids():
+def get_args_static_event_ids():
 
-    return [list(range(context.num_input_patterns))]
+    return [list(range(context.trial_offset, context.trial_offset + context.num_input_patterns)),
+            list(range(context.trial_offset, context.trial_offset + context.num_input_patterns))]
 
 
 def config_worker():
@@ -130,11 +130,11 @@ def config_worker():
         context.trial_offset = int(context.trial_offset)
 
     context.connection_seed = [context.network_id]
-    context.spikes_seed = [context.network_id, 1, context.trial_offset]
+    context.spikes_seed = [context.network_id, 1, 0]
     context.weights_seed = [context.network_id, 2]
     context.location_seed = [context.network_id, 3]
     context.tuning_seed = [context.network_id, 4]
-    context.selection_seed = [context.network_id, 5, context.trial_offset]
+    context.selection_seed = [context.network_id, 5]
 
     connection_weights_mean = defaultdict(dict)  # {'target_pop_name': {'source_pop_name': float} }
     connection_weights_norm_sigma = defaultdict(dict)  # {'target_pop_name': {'source_pop_name': float} }

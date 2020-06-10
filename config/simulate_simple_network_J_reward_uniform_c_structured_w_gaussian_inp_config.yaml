@@ -1,6 +1,6 @@
 verbose: 1
 trial_offset: 0
-network_id: 9
+network_id: 10
 connectivity_type: uniform
 default_weight_distribution_type: normal
 connection_weight_distribution_types:
@@ -9,21 +9,24 @@ connection_weight_distribution_types:
     E: lognormal
 input_types:
   FF: gaussian
-input_offline_min_rates:
+input_max_rates:
+  FF: 20.
+input_min_rates:
   FF: 0.
-input_offline_mean_rates:
-  FF: 12.5
-input_offline_fraction_active:
-  FF: 0.25
 input_norm_tuning_widths:
   FF: 0.5
-num_input_patterns: 1000
+num_trials: 5
 structured_weight_params:
   E:  # target_pop_name
     source_pop_names:
       - FF
+      - E
     tuning_type: additive
     norm_tuning_width: 0.5
+    pop_over_representation:
+      loc: 0.75
+      width: 0.25
+      depth: 0.5
 pop_cell_types:
   FF: input
   E: IB
@@ -71,7 +74,7 @@ param_names:
   - E_norm_syn_count
   - I_norm_syn_count
   - E_peak_delta_weight
-label: simple_network_K_replay
+label: simple_network_J_reward
 x0:
   E_FF_mean_weight: 1.279704E-01
   E_E_mean_weight: 1.036678E+00

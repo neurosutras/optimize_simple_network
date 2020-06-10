@@ -54,7 +54,8 @@ def main(cli, config_file_path, export, output_dir, export_file_path, label, int
                               interface=context.interface, verbose=verbose, plot=plot, debug=debug, **kwargs)
 
     if simulate:
-        sequences = [list(range(context.num_trials))] + [[context.export] * context.num_trials]
+        args = context.interface.execute(get_args_static_event_ids)
+        sequences = args + [[context.export] * context.num_trials]
         context.interface.map(simulate_network, *sequences)
 
         if context.export:
@@ -72,6 +73,11 @@ def main(cli, config_file_path, export, output_dir, export_file_path, label, int
 
     if not interactive:
         context.interface.stop()
+
+
+def get_args_static_event_ids():
+
+    return [list(range(context.trial_offset, context.trial_offset + context.num_trials))]
 
 
 def config_worker():
@@ -126,7 +132,7 @@ def config_worker():
         context.trial_offset = int(context.trial_offset)
 
     context.connection_seed = [context.network_id]
-    context.spikes_seed = [context.network_id, 1, context.trial_offset]
+    context.spikes_seed = [context.network_id, 1]
     context.weights_seed = [context.network_id, 2]
     context.location_seed = [context.network_id, 3]
     context.tuning_seed = [context.network_id, 4]
@@ -509,7 +515,6 @@ def analyze_network_output(network, trial=None, export=False, plot=False):
                                          compression='gzip')
                     group.create_dataset('x0', data=context.x0_array, compression='gzip')
                     set_h5py_attr(group.attrs, 'network_id', context.network_id)
-                    set_h5py_attr(group.attrs, 'trial_offset', context.trial_offset)
                     set_h5py_attr(group.attrs, 'connectivity_type', context.connectivity_type)
                     group.attrs['active_rate_threshold'] = context.active_rate_threshold
                     subgroup = group.create_group('pop_gid_ranges')

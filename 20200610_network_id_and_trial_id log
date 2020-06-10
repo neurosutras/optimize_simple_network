@@ -1,0 +1,19 @@
+J:
+ - optimized with network_id = 8, trial_id = 0
+ - simulate instances:
+    network_id [8, 800, 801, 802, 803], trial_id = range(5)
+
+K:
+ - optimized with network_id = 9, trial_id = 0
+ - simulate instances:
+    network_id [9, 900, 901, 902, 903], trial_id = range(5)
+
+C:
+ - optimized with network_id = 7, trial_id = 0
+ - simulate instances:
+    network_id [7, 700, 701, 702, 703], trial_id = range(5)
+
+J_reward:
+ - simulate instances:
+    network_id [10, 1000, 1001, 1002, 1003], trial_id = range(5)
+
