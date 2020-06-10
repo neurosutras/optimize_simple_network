@@ -64,7 +64,6 @@ param_names:
   - I_E_FF_syn_proportion
   - E_norm_syn_count
   - I_norm_syn_count
-  - E_peak_delta_weight
 label: simple_network_C_replay
 x0:
   E_FF_mean_weight: 1.279704E-01
