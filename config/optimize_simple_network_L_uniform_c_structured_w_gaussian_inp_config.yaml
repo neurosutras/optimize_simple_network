@@ -117,7 +117,7 @@ get_objectives:
 kwargs:
   verbose: 1
   trial: 0
-  network_id: 8
+  network_id: 11
   connectivity_type: uniform
   default_weight_distribution_type: normal
   connection_weight_distribution_types:

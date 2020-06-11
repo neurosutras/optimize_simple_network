@@ -17,3 +17,6 @@ J_reward:
  - simulate instances:
     network_id [10, 1000, 1001, 1002, 1003], trial_id = range(5)
 
+L:
+ - simulate instances:
+    network_id [11, 1100, 1101, 1102, 1103], trial_id = range(5)
