@@ -221,10 +221,6 @@ def config_worker():
         for target_pop_name in context.structured_weight_params:
             if target_pop_name not in tuning_peak_locs:
                 tuning_peak_locs[target_pop_name] = dict()
-            this_norm_tuning_width = \
-                context.structured_weight_params[target_pop_name]['norm_tuning_width']
-            this_tuning_width = tuning_duration * this_norm_tuning_width
-            this_sigma = this_tuning_width / 3. / np.sqrt(2.)
             if 'pop_over_representation' in context.structured_weight_params[target_pop_name]:
                 over_rep_loc = context.structured_weight_params[target_pop_name]['pop_over_representation']['loc']
                 over_rep_width = context.structured_weight_params[target_pop_name]['pop_over_representation']['width']

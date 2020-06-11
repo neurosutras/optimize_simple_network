@@ -1,14 +1,14 @@
-J:
+J: # structured E; structured FF
  - optimized with network_id = 8, trial_id = 0
  - simulate instances:
     network_id [8, 800, 801, 802, 803], trial_id = range(5)
 
-K:
+K:  # lognormal E; structured FF
  - optimized with network_id = 9, trial_id = 0
  - simulate instances:
     network_id [9, 900, 901, 902, 903], trial_id = range(5)
 
-C:
+C: # lognormal FF and E
  - optimized with network_id = 7, trial_id = 0
  - simulate instances:
     network_id [7, 700, 701, 702, 703], trial_id = range(5)
@@ -17,6 +17,14 @@ J_reward:
  - simulate instances:
     network_id [10, 1000, 1001, 1002, 1003], trial_id = range(5)
 
-L:
+L: # E cells are type RS
  - simulate instances:
     network_id [11, 1100, 1101, 1102, 1103], trial_id = range(5)
+
+M: # no rhythmicity objectives
+ - simulate instances:
+    network_id [12, 1200, 1201, 1202, 1203], trial_id = range(5)
+
+N: # 2:1 asymmetric structured weights at E, FF
+ - simulate instances:
+    network_id [13, 1300, 1301, 1302, 1303], trial_id = range(5)

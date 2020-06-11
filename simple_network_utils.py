@@ -524,8 +524,23 @@ class SimpleNetwork(object):
             this_peak_delta_weight = structured_weight_params[target_pop_name]['peak_delta_weight']
             this_norm_tuning_width = structured_weight_params[target_pop_name]['norm_tuning_width']
             this_tuning_width = tuning_duration * this_norm_tuning_width
-            this_sigma = this_tuning_width / 3. / np.sqrt(2.)
-            this_tuning_f = lambda delta_loc: this_peak_delta_weight * np.exp(-(delta_loc / this_sigma) ** 2.)
+            if 'skew' in structured_weight_params[target_pop_name]:
+                from scipy.stats import skewnorm
+                this_sigma = this_tuning_width / 6.
+                this_skew = structured_weight_params[target_pop_name]['skew']
+                skewnorm_scale = structured_weight_params[target_pop_name]['skew_width'] * this_sigma
+                skewnorm_x = np.linspace(skewnorm.ppf(0.01, this_skew, scale=skewnorm_scale),
+                                         skewnorm.ppf(0.99, this_skew, scale=skewnorm_scale), 10000)
+                skewnorm_pdf = skewnorm.pdf(skewnorm_x, this_skew, scale=skewnorm_scale)
+                skewnorm_argmax = np.argmax(skewnorm_pdf)
+                skewnorm_max = skewnorm_pdf[skewnorm_argmax]
+                skewnorm_loc_shift = skewnorm_x[skewnorm_argmax]
+                this_tuning_f = \
+                    lambda delta_loc: this_peak_delta_weight / skewnorm_max * \
+                                      skewnorm.pdf(delta_loc, this_skew, -skewnorm_loc_shift, skewnorm_scale)
+            else:
+                this_sigma = this_tuning_width / 3. / np.sqrt(2.)
+                this_tuning_f = lambda delta_loc: this_peak_delta_weight * np.exp(-(delta_loc / this_sigma) ** 2.)
             for syn_type in self.pop_syn_proportions[target_pop_name]:
                 for source_pop_name in \
                         (source_pop_name for source_pop_name in self.pop_syn_proportions[target_pop_name][syn_type]
@@ -539,10 +554,12 @@ class SimpleNetwork(object):
                         this_syn = target_cell.syns[syn_type][source_pop_name]
                         this_target_loc = tuning_peak_locs[target_pop_name][target_gid]
                         for source_gid in self.ncdict[target_pop_name][target_gid][source_pop_name]:
-                            this_delta_loc = abs(tuning_peak_locs[source_pop_name][source_gid] - this_target_loc)
+                            this_delta_loc = tuning_peak_locs[source_pop_name][source_gid] - this_target_loc
                             if wrap_around:
                                 if this_delta_loc > tuning_duration / 2.:
-                                    this_delta_loc = tuning_duration - this_delta_loc
+                                    this_delta_loc -= tuning_duration
+                                elif this_delta_loc < - tuning_duration / 2.:
+                                    this_delta_loc += tuning_duration
                             this_delta_weight = this_tuning_f(this_delta_loc)
                             for this_nc in self.ncdict[target_pop_name][target_gid][source_pop_name][source_gid]:
                                 initial_weight = get_connection_param(syn_type, 'weight', syn=this_syn, nc=this_nc,
