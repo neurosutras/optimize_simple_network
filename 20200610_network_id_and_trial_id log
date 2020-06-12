@@ -28,3 +28,7 @@ M: # no rhythmicity objectives
 N: # 2:1 asymmetric structured weights at E, FF
  - simulate instances:
     network_id [13, 1300, 1301, 1302, 1303], trial_id = range(5)
+
+O: # E cells are type FS
+ - simulate instances:
+    network_id [14, 1400, 1401, 1402, 1403], trial_id = range(5)
