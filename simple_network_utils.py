@@ -135,9 +135,6 @@ class SimpleNetwork(object):
         self.input_pop_t = dict()
         self.input_pop_firing_rates = defaultdict(dict)
 
-        self.local_random = random.Random()
-        self.local_np_random = np.random.RandomState()
-
         self.cells = defaultdict(dict)
         self.mkcells()
         if self.debug:
@@ -215,7 +212,6 @@ class SimpleNetwork(object):
         :param track_wrap_around: bool
         :param spikes_seed: list of int: random seed for reproducible input spike trains
         :param tuning_duration: float
-        :param equilibrate: float
         """
         if spikes_seed is None:
             raise RuntimeError('SimpleNetwork.set_input_pattern: missing spikes_seed required to generate reproducible'
@@ -229,12 +225,11 @@ class SimpleNetwork(object):
                     raise RuntimeError('SimpleNetwork.set_input_pattern: missing input_mean_rates required to specify '
                                        '%s input population: %s' % (input_types[pop_name], pop_name))
                 this_mean_rate = input_mean_rates[pop_name]
-                if pop_name not in self.input_pop_t:
-                    if self.equilibrate > 0.:
-                        self.input_pop_t[pop_name] = \
-                            np.append(np.arange(0., self.equilibrate, self.dt), [self.equilibrate, self.tstop])
-                    else:
-                        self.input_pop_t[pop_name] = [0., self.tstop]
+                if self.equilibrate > 0.:
+                    self.input_pop_t[pop_name] = \
+                        np.append(np.arange(0., self.equilibrate, self.dt), [self.equilibrate, self.tstop])
+                else:
+                    self.input_pop_t[pop_name] = [0., self.tstop]
                 for gid in self.cells[pop_name]:
                     if self.equilibrate > 0.:
                         self.input_pop_firing_rates[pop_name][gid] = \
@@ -254,8 +249,7 @@ class SimpleNetwork(object):
                                        'population: %s' % (input_types[pop_name], pop_name))
 
                 this_stim_t = np.arange(0., self.tstop + self.dt / 2., self.dt)
-                if pop_name not in self.input_pop_t:
-                    self.input_pop_t[pop_name] = this_stim_t
+                self.input_pop_t[pop_name] = this_stim_t
 
                 this_tuning_width = tuning_duration * this_norm_tuning_width
                 this_sigma = this_tuning_width / 3. / np.sqrt(2.)
@@ -271,11 +265,11 @@ class SimpleNetwork(object):
 
         for pop_name in (pop_name for pop_name in input_types if pop_name in self.cells):
             for gid in self.cells[pop_name]:
-                self.local_np_random.seed(spikes_seed + [gid])
+                local_np_random = np.random.default_rng(seed=spikes_seed + [gid])
                 this_spike_train = \
                     get_inhom_poisson_spike_times_by_thinning(self.input_pop_firing_rates[pop_name][gid],
                                                               self.input_pop_t[pop_name], dt=self.dt,
-                                                              generator=self.local_np_random)
+                                                              generator=local_np_random)
                 cell = self.cells[pop_name][gid]
                 cell.load_vecstim(this_spike_train)
 
@@ -292,8 +286,8 @@ class SimpleNetwork(object):
         :param tuning_peak_locs: dict
         :param track_wrap_around: bool
         :param stim_edge_duration: tuple of float
-        :param selection_seed: int: random seed for reproducible input cell selection
-        :param spikes_seed: int: random seed for reproducible input spike trains
+        :param selection_seed: list of int: random seed for reproducible input cell selection
+        :param spikes_seed: list of int: random seed for reproducible input spike trains
         :param tuning_duration: float
         """
         if spikes_seed is None:
@@ -323,20 +317,19 @@ class SimpleNetwork(object):
             if input_types[pop_name] in ['constant', 'gaussian']:
                 this_min_rate = input_offline_min_rates[pop_name]
                 this_mean_rate = input_offline_mean_rates[pop_name]
-                if pop_name not in self.input_pop_t:
-                    self.input_pop_t[pop_name] = np.concatenate((
-                        [0., self.buffer + self.equilibrate],
-                        np.arange(self.buffer + self.equilibrate,
-                                  self.buffer + self.equilibrate + stim_edge_duration[0], self.dt),
-                        [self.buffer + self.equilibrate + stim_edge_duration[0],
-                         self.buffer + self.equilibrate + self.duration - stim_edge_duration[1]],
-                        np.arange(self.buffer + self.equilibrate + self.duration - stim_edge_duration[1],
-                                  self.buffer + self.equilibrate + self.duration, self.dt),
-                        [self.buffer + self.equilibrate + self.duration, self.tstop]))
+                self.input_pop_t[pop_name] = np.concatenate((
+                    [0., self.buffer + self.equilibrate],
+                    np.arange(self.buffer + self.equilibrate,
+                              self.buffer + self.equilibrate + stim_edge_duration[0], self.dt),
+                    [self.buffer + self.equilibrate + stim_edge_duration[0],
+                     self.buffer + self.equilibrate + self.duration - stim_edge_duration[1]],
+                    np.arange(self.buffer + self.equilibrate + self.duration - stim_edge_duration[1],
+                              self.buffer + self.equilibrate + self.duration, self.dt),
+                    [self.buffer + self.equilibrate + self.duration, self.tstop]))
                 this_fraction_active = input_offline_fraction_active[pop_name]
                 for gid in self.cells[pop_name]:
-                    self.local_np_random.seed(selection_seed + [gid])
-                    if self.local_np_random.random_sample() <= this_fraction_active:
+                    local_np_random = np.random.default_rng(seed=selection_seed + [gid])
+                    if local_np_random.uniform(0., 1.) <= this_fraction_active:
                         components = [[this_min_rate, this_min_rate]]
                         if stim_edge_duration[0] > 0.:
                             components.append((this_mean_rate - this_min_rate) * stim_onset + this_min_rate)
@@ -351,11 +344,11 @@ class SimpleNetwork(object):
 
         for pop_name in (pop_name for pop_name in input_types if pop_name in self.cells):
             for gid in self.cells[pop_name]:
-                self.local_np_random.seed(spikes_seed + [gid])
+                local_np_random = np.random.default_rng(seed=spikes_seed + [gid])
                 this_spike_train = \
                     get_inhom_poisson_spike_times_by_thinning(self.input_pop_firing_rates[pop_name][gid],
                                                               self.input_pop_t[pop_name], dt=self.dt,
-                                                              generator=self.local_np_random)
+                                                              generator=local_np_random)
                 cell = self.cells[pop_name][gid]
                 cell.load_vecstim(this_spike_train)
 
@@ -401,7 +394,7 @@ class SimpleNetwork(object):
         """
 
         :param connectivity_type: str
-        :param connection_seed: int: random seed for reproducible connections
+        :param connection_seed: list of int: random seed for reproducible connections
         """
         if connection_seed is None:
             raise RuntimeError('SimpleNetwork.connect_cells: missing connection_seed required to generate reproducible'
@@ -410,12 +403,12 @@ class SimpleNetwork(object):
         for target_pop_name in self.pop_syn_proportions:
             total_syn_count = self.pop_syn_counts[target_pop_name]
             for target_gid in self.cells[target_pop_name]:
-                self.local_np_random.seed(connection_seed + [target_gid])
+                local_np_random = np.random.default_rng(seed=connection_seed + [target_gid])
                 target_cell = self.cells[target_pop_name][target_gid]
                 for syn_type in self.pop_syn_proportions[target_pop_name]:
                     for source_pop_name in self.pop_syn_proportions[target_pop_name][syn_type]:
                         p_syn_count = self.pop_syn_proportions[target_pop_name][syn_type][source_pop_name]
-                        this_syn_count = self.local_np_random.binomial(total_syn_count, p_syn_count)
+                        this_syn_count = local_np_random.binomial(total_syn_count, p_syn_count)
                         potential_source_gids = np.arange(self.pop_gid_ranges[source_pop_name][0],
                                                           self.pop_gid_ranges[source_pop_name][1], 1)
                         # avoid connections to self
@@ -430,7 +423,7 @@ class SimpleNetwork(object):
                         if p_connection is None:
                             continue
 
-                        this_source_gids = self.local_np_random.choice(potential_source_gids, size=this_syn_count,
+                        this_source_gids = local_np_random.choice(potential_source_gids, size=this_syn_count,
                                                                        p=p_connection)
                         for source_gid in this_source_gids:
                             this_syn, this_nc = append_connection(
@@ -453,7 +446,7 @@ class SimpleNetwork(object):
 
         :param default_weight_distribution_type: str
         :param connection_weight_distribution_types: nested dict: {target_pop_name: {source_pop_name: str}}
-        :param weights_seed: int: random seed for reproducible connection weights
+        :param weights_seed: list of int: random seed for reproducible connection weights
         """
         if weights_seed is None:
             raise RuntimeError('SimpleNetwork.set_input_pattern: missing weights_seed required to assign reproducible'
@@ -461,7 +454,7 @@ class SimpleNetwork(object):
         rank = int(self.pc.id())
         for target_pop_name in self.ncdict:
             for target_gid in self.ncdict[target_pop_name]:
-                self.local_np_random.seed(weights_seed + [target_gid])
+                local_np_random = np.random.default_rng(seed=weights_seed + [target_gid])
                 target_cell = self.cells[target_pop_name][target_gid]
                 for syn_type in self.pop_syn_proportions[target_pop_name]:
                     for source_pop_name in self.pop_syn_proportions[target_pop_name][syn_type]:
@@ -486,12 +479,12 @@ class SimpleNetwork(object):
                                 # enforce weights to be greater than 0
                                 this_weight = -1.
                                 while this_weight <= 0.:
-                                    this_weight = mu * self.local_np_random.normal(1., norm_sigma)
+                                    this_weight = mu * local_np_random.normal(1., norm_sigma)
                             elif this_weight_distribution_type == 'lognormal':
                                 # enforce weights to be less than 5-fold greater than mean
                                 this_weight = 5. * mu
                                 while this_weight >= 5. * mu:
-                                    this_weight = mu * self.local_np_random.lognormal(0., norm_sigma)
+                                    this_weight = mu * local_np_random.lognormal(0., norm_sigma)
                             else:
                                 raise RuntimeError('SimpleNetwork.assign_connection_weights: invalid connection '
                                                    'weight distribution type: %s' % this_weight_distribution_type)
@@ -1010,13 +1003,13 @@ def get_binned_spike_count_dict(spike_times_dict, t):
     return binned_spike_count_dict
 
 
-def infer_firing_rates_from_spike_count(binned_spike_count_dict, input_t, output_t, align_to_t=0., window_dur=500.,
+def infer_firing_rates_from_spike_count(binned_spike_count_dict, input_t, output_range, align_to_t=0., window_dur=500.,
                                         step_dur=1., smooth_dur=None, debug=False):
     """
 
     :param binned_spike_count_dict: dict: {pop_name: {gid: array} }
     :param input_t: array
-    :param output_t: array
+    :param output_range: array
     :param align_to_t: float
     :param window_dur: float
     :param step_dur: float
@@ -1024,70 +1017,56 @@ def infer_firing_rates_from_spike_count(binned_spike_count_dict, input_t, output
     :param debug: bool
     :return: tuple of dict
     """
-    dt = output_t[1] - output_t[0]
+    dt = input_t[1] - input_t[0]
     half_window_bins = int(window_dur // dt // 2)
     window_bins = int(2 * half_window_bins + 1)
     window_dur = window_bins * dt
     step_bins = step_dur // dt
     if smooth_dur is not None:
-        smooth_bins = int(smooth_dur // dt)
+        smooth_bins = int(smooth_dur // step_dur)
         if smooth_bins % 2 == 0:
             smooth_bins += 1
 
-    # if possible, include a bin centered on output_t[0]
+    # if possible, include a starting at output_t[0]
     binned_t_center_indexes = []
-    this_center_index = np.where(output_t >= align_to_t)[0]
-    if len(this_center_index) > 0:
-        this_center_index = this_center_index[0]
-        if this_center_index < half_window_bins:
-            this_center_index = half_window_bins
+    this_start_index = np.where(input_t >= align_to_t)[0]
+    if len(this_start_index) > 0:
+        this_center_index = this_start_index[0] + half_window_bins
+        while this_center_index >= half_window_bins:
             binned_t_center_indexes.append(this_center_index)
-        else:
-            while this_center_index > half_window_bins:
-                binned_t_center_indexes.append(this_center_index)
-                this_center_index -= step_bins
-            binned_t_center_indexes.reverse()
+            this_center_index -= step_bins
+        binned_t_center_indexes.reverse()
     else:
         this_center_index = half_window_bins
         binned_t_center_indexes.append(this_center_index)
     this_center_index = binned_t_center_indexes[-1] + step_bins
-    while this_center_index < len(output_t) - half_window_bins:
+    while this_center_index < len(input_t) - half_window_bins:
         binned_t_center_indexes.append(this_center_index)
         this_center_index += step_bins
     binned_t_center_indexes = np.array(binned_t_center_indexes, dtype='int')
-    binned_t = output_t[binned_t_center_indexes]
+    binned_t = input_t[binned_t_center_indexes]
 
-    valid_indexes = np.where((input_t >= output_t[0]) & (input_t <= output_t[-1]))[0]
+    valid_indexes = np.where((binned_t >= output_range[0]) & (binned_t <= output_range[-1]))[0]
     firing_rates_from_spike_count_dict = dict()
     plot_count = 0
     for pop_name in binned_spike_count_dict:
         firing_rates_from_spike_count_dict[pop_name] = dict()
         for gid in binned_spike_count_dict[pop_name]:
-            this_binned_spike_count = binned_spike_count_dict[pop_name][gid][valid_indexes]
+            this_binned_spike_count = binned_spike_count_dict[pop_name][gid]
             this_inferred_rate = np.empty_like(binned_t)
             for rate_index, t_center_index in enumerate(binned_t_center_indexes):
                 t_start_index = t_center_index - half_window_bins
                 t_end_index = t_center_index + half_window_bins + 1
                 this_inferred_rate[rate_index] = \
                     np.sum(this_binned_spike_count[t_start_index:t_end_index]) / (window_dur / 1000.)
-            this_interp_rate = np.interp(output_t, binned_t, this_inferred_rate)
             if smooth_dur is not None:
-                this_smoothed_rate = savgol_filter(this_interp_rate, smooth_bins, 3, mode='interp')
+                this_smoothed_rate = savgol_filter(this_inferred_rate, smooth_bins, 3, mode='interp')
                 this_smoothed_rate = np.maximum(0., this_smoothed_rate)
-                firing_rates_from_spike_count_dict[pop_name][gid] = this_smoothed_rate
+                firing_rates_from_spike_count_dict[pop_name][gid] = this_smoothed_rate[valid_indexes]
             else:
-                firing_rates_from_spike_count_dict[pop_name][gid] = this_interp_rate
-            if debug and pop_name == 'FF' and plot_count < 10:
-                plot_count += 1
-                fig = plt.figure()
-                active_indexes = np.where(this_binned_spike_count > 0.)[0]
-                plt.plot(input_t[active_indexes], np.ones_like(active_indexes), '.')
-                plt.plot(binned_t, this_inferred_rate)
-                plt.plot(output_t, this_interp_rate)
-                plt.plot(output_t, this_smoothed_rate)
-                fig.show()
+                firing_rates_from_spike_count_dict[pop_name][gid] = this_inferred_rate[valid_indexes]
 
-    return firing_rates_from_spike_count_dict
+    return binned_t[valid_indexes], firing_rates_from_spike_count_dict
 
 
 def find_nearest(arr, tt):
@@ -1119,24 +1098,25 @@ def padded_baks(spike_times, t, alpha, beta, pad_dur=500., wrap_around=False, pl
         return np.zeros_like(t)
     if pad_len > 0:
         padded_spike_times = valid_spike_times
-        r_pad_indexes = np.where((spike_times > t[0]) & (spike_times <= t[pad_len]))[0]
-        l_pad_indexes = np.where((spike_times >= t[-pad_len]) & (spike_times < t[-1]))[0]
+        r_pad_indexes = np.where((valid_spike_times > t[0]) & (valid_spike_times <= t[pad_len]))[0]
+        l_pad_indexes = np.where((valid_spike_times >= t[-pad_len]) & (valid_spike_times < t[-1]))[0]
         if wrap_around:
             if len(r_pad_indexes) > 0:
-                r_pad_spike_times = np.add(t[-1]+dt, np.subtract(spike_times[r_pad_indexes], t[0]))
+                r_pad_spike_times = np.add(t[-1], np.subtract(valid_spike_times[r_pad_indexes], t[0]))
                 padded_spike_times = np.append(padded_spike_times, r_pad_spike_times)
             if len(l_pad_indexes) > 0:
-                l_pad_spike_times = np.add(t[0], np.subtract(spike_times[l_pad_indexes], t[-1]+dt))
+                l_pad_spike_times = np.add(t[0], np.subtract(valid_spike_times[l_pad_indexes], t[-1]+dt))
                 padded_spike_times = np.append(l_pad_spike_times, padded_spike_times)
         else:
             if len(r_pad_indexes) > 0:
-                r_pad_spike_times = np.add(t[0], np.subtract(t[0], spike_times[r_pad_indexes])[::-1])
+                r_pad_spike_times = np.add(t[0], np.subtract(t[0], valid_spike_times[r_pad_indexes])[::-1])
                 padded_spike_times = np.append(r_pad_spike_times, padded_spike_times)
             if len(l_pad_indexes) > 0:
-                l_pad_spike_times = np.add(t[-1]+dt, np.subtract(t[-1]+dt, spike_times[l_pad_indexes])[::-1])
+                l_pad_spike_times = np.add(t[-1], np.subtract(t[-1], valid_spike_times[l_pad_indexes])[::-1])
                 padded_spike_times = np.append(padded_spike_times, l_pad_spike_times)
         padded_t = \
-            np.concatenate((np.arange(-pad_dur, 0., dt), t, np.arange(t[-1] + dt, t[-1] + pad_dur + dt / 2., dt)))
+            np.concatenate((np.arange(t[0] - pad_dur, t[0], dt), t,
+                            np.arange(t[-1] + dt, t[-1] + pad_dur + dt / 2., dt)))
         padded_rate, h = baks(padded_spike_times/1000., padded_t/1000., alpha, beta)
         if plot:
             fig = plt.figure()
@@ -1164,7 +1144,10 @@ def get_binned_spike_count(spike_times, t):
     binned_spikes = np.zeros_like(t)
     if len(spike_times) > 0:
         try:
-            spike_indexes = [np.where(t >= spike_time)[0][0] for spike_time in spike_times]
+            spike_indexes = []
+            for spike_time in spike_times:
+                if t[0] <= spike_time <= t[-1]:
+                    spike_indexes.append(np.where(t <= spike_time)[0][-1])
         except Exception as e:
             print(spike_times)
             print(t)
@@ -2116,11 +2099,6 @@ def analyze_simple_network_results_from_file(data_file_path, data_key=None, verb
         for pop_name in subgroup:
             for gid_key in subgroup[pop_name]:
                 buffered_firing_rates_dict[pop_name][int(gid_key)] = subgroup[pop_name][gid_key][:]
-        subgroup = group['buffered_firing_rates_from_binned_spike_count']
-        for pop_name in subgroup:
-            for gid_key in subgroup[pop_name]:
-                buffered_firing_rates_from_binned_spike_count_dict[pop_name][int(gid_key)] = \
-                    subgroup[pop_name][gid_key][:]
         subgroup = group['full_binned_spike_count']
         for pop_name in subgroup:
             for gid_key in subgroup[pop_name]:

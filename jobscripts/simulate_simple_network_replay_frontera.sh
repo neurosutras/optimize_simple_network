@@ -23,6 +23,6 @@ set -x
 cd $SCRATCH/src/optimize_simple_network
 
 ibrun -n 2240 python3 simulate_simple_network_replay.py --config-file-path=$CONFIG_FILE_PATH --verbose=1 \
-    --procs_per_worker=112 --export --num_input_patterns=1000 --param_file_path=$PARAM_FILE_PATH \
+    --procs_per_worker=112 --export --num_trials=1000 --param_file_path=$PARAM_FILE_PATH \
     --model_key=$MODEL_KEY --network_id=$NETWORK_ID --label=$LABEL
 EOT

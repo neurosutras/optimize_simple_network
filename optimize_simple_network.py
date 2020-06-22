@@ -136,16 +136,22 @@ def config_worker():
         context.network_id = 0
     else:
         context.network_id = int(context.network_id)
+    if 'network_instance' not in context():
+        context.network_instance = 0
+    else:
+        context.network_instance = int(context.network_instance)
     if 'trial' not in context():
         context.trial = 0
     else:
         context.trial = int(context.trial)
 
-    context.connection_seed = [context.network_id]
-    context.spikes_seed = [context.network_id, 1, context.trial]
-    context.weights_seed = [context.network_id, 2]
-    context.location_seed = [context.network_id, 3]
-    context.tuning_seed = [context.network_id, 4]
+    context.stim_type_seed = 0
+    context.base_seed = [context.network_id, context.network_instance]
+    context.connection_seed = context.base_seed + [1]
+    context.spikes_seed = context.base_seed + [2, context.stim_type_seed, context.trial]
+    context.weights_seed = context.base_seed + [3]
+    context.location_seed = context.base_seed + [4]
+    context.tuning_seed = context.base_seed + [5]
 
     connection_weights_mean = defaultdict(dict)  # {'target_pop_name': {'source_pop_name': float} }
     connection_weights_norm_sigma = defaultdict(dict)  # {'target_pop_name': {'source_pop_name': float} }
@@ -156,7 +162,6 @@ def config_worker():
         structured_weights = False
     else:
         structured_weights = True
-    local_np_random = np.random.RandomState()
 
     syn_mech_params = defaultdict(lambda: defaultdict(dict))
     if 'default_syn_mech_params' in context() and context.default_syn_mech_params is not None:
@@ -178,8 +183,8 @@ def config_worker():
     active_rate_threshold = 1.  # Hz
     baks_alpha = 4.7725100028345535
     baks_beta = 0.41969058927343522
-    baks_pad_dur = 1000.  # ms
-    baks_wrap_around = False
+    baks_pad_dur = duration  # ms
+    baks_wrap_around = True
     track_wrap_around = True
     filter_bands = {'Theta': [4., 10.], 'Gamma': [30., 100.]}
     max_num_cells_export_voltage_rec = 500
@@ -187,7 +192,7 @@ def config_worker():
     if context.comm.rank == 0:
         if any([this_input_type == 'gaussian' for this_input_type in
                 context.input_types.values()]) or structured_weights:
-            local_np_random.seed(context.tuning_seed)
+            local_np_random = np.random.default_rng(seed=context.tuning_seed)
         tuning_peak_locs = dict()  # {'pop_name': {'gid': float} }
 
         for pop_name in context.input_types:
@@ -218,7 +223,7 @@ def config_worker():
             fig.show()
         """
 
-        for target_pop_name in context.structured_weight_params:
+        for target_pop_name in sorted(list(context.structured_weight_params.keys())):
             if target_pop_name not in tuning_peak_locs:
                 tuning_peak_locs[target_pop_name] = dict()
             if 'pop_over_representation' in context.structured_weight_params[target_pop_name]:
@@ -251,10 +256,10 @@ def config_worker():
                                'connectivity not found')
 
         if context.comm.rank == 0:
+            local_np_random = np.random.default_rng(seed=context.location_seed)
             pop_cell_positions = dict()
-            for pop_name in pop_gid_ranges:
+            for pop_name in sorted(list(pop_gid_ranges.keys())):
                 for gid in range(pop_gid_ranges[pop_name][0], pop_gid_ranges[pop_name][1]):
-                    local_np_random.seed(context.location_seed.append(gid))
                     if pop_name not in pop_cell_positions:
                         pop_cell_positions[pop_name] = dict()
                     pop_cell_positions[pop_name][gid] = local_np_random.uniform(-1., 1., size=context.spatial_dim)
@@ -329,6 +334,7 @@ def analyze_network_output(network, model_id=None, export=False, plot=False):
     """
 
     :param network: :class:'SimpleNetwork'
+    :param model_id: int
     :param export: bool
     :param plot: bool
     :return: dict
@@ -338,7 +344,7 @@ def analyze_network_output(network, model_id=None, export=False, plot=False):
                            context.dt)
     buffered_rec_t = np.arange(-context.buffer, context.duration + context.buffer + context.dt / 2., context.dt)
     rec_t = np.arange(0., context.duration, context.dt)
-    full_binned_t = np.arange(-context.buffer-context.equilibrate,
+    full_binned_t = np.arange(-context.buffer - context.equilibrate,
                               context.duration + context.buffer + context.binned_dt / 2., context.binned_dt)
     buffered_binned_t = np.arange(-context.buffer, context.duration + context.buffer + context.binned_dt / 2.,
                                   context.binned_dt)
@@ -350,16 +356,10 @@ def analyze_network_output(network, model_id=None, export=False, plot=False):
                                 beta=context.baks_beta, pad_dur=context.baks_pad_dur,
                                 wrap_around=context.baks_wrap_around)
     full_binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict, full_binned_t)
-    buffered_firing_rates_from_binned_spike_count_dict = \
-        infer_firing_rates_from_spike_count(full_binned_spike_count_dict, input_t=full_binned_t,
-                                            output_t=buffered_binned_t, align_to_t=0., window_dur=500.,
-                                            step_dur=context.binned_dt, smooth_dur=250.,
-                                            debug=context.debug and context.comm.rank == 0)
+
     gathered_full_spike_times_dict_list = context.comm.gather(full_spike_times_dict, root=0)
     gathered_buffered_firing_rates_dict_list = context.comm.gather(buffered_firing_rates_dict, root=0)
     gathered_full_binned_spike_count_dict_list = context.comm.gather(full_binned_spike_count_dict, root=0)
-    gathered_buffered_firing_rates_from_binned_spike_count_dict_list = \
-        context.comm.gather(buffered_firing_rates_from_binned_spike_count_dict, root=0)
 
     full_voltage_rec_dict = network.get_voltage_rec_dict()
     voltages_exceed_threshold = check_voltages_exceed_threshold(full_voltage_rec_dict, input_t=full_rec_t,
@@ -404,8 +404,6 @@ def analyze_network_output(network, model_id=None, export=False, plot=False):
         full_spike_times_dict = merge_list_of_dict(gathered_full_spike_times_dict_list)
         buffered_firing_rates_dict = merge_list_of_dict(gathered_buffered_firing_rates_dict_list)
         full_binned_spike_count_dict = merge_list_of_dict(gathered_full_binned_spike_count_dict_list)
-        buffered_firing_rates_from_binned_spike_count_dict = \
-            merge_list_of_dict(gathered_buffered_firing_rates_from_binned_spike_count_dict_list)
 
         if plot or export:
             subset_full_voltage_rec_dict = merge_list_of_dict(gathered_subset_full_voltage_rec_dict_list)
@@ -455,6 +453,9 @@ def analyze_network_output(network, model_id=None, export=False, plot=False):
                 exported_data_key = 'simple_network_exported_data'
                 group = get_h5py_group(f, [model_id, exported_data_key], create=True)
                 set_h5py_attr(group.attrs, 'connectivity_type', context.connectivity_type)
+                set_h5py_attr(group.attrs, 'network_id', context.network_id)
+                set_h5py_attr(group.attrs, 'network_instance', context.network_instance)
+                set_h5py_attr(group.attrs, 'trial_id', context.trial)
                 group.attrs['active_rate_threshold'] = context.active_rate_threshold
                 subgroup = group.create_group('pop_gid_ranges')
                 for pop_name in context.pop_gid_ranges:
@@ -472,12 +473,6 @@ def analyze_network_output(network, model_id=None, export=False, plot=False):
                         subgroup[pop_name].create_dataset(
                             str(gid), data=buffered_firing_rates_dict[pop_name][gid], compression='gzip')
                 subgroup = group.create_group('buffered_firing_rates_from_binned_spike_count')
-                for pop_name in buffered_firing_rates_from_binned_spike_count_dict:
-                    subgroup.create_group(pop_name)
-                    for gid in buffered_firing_rates_from_binned_spike_count_dict[pop_name]:
-                        subgroup[pop_name].create_dataset(
-                            str(gid), data=buffered_firing_rates_from_binned_spike_count_dict[pop_name][gid],
-                            compression='gzip')
                 subgroup = group.create_group('full_binned_spike_count')
                 for pop_name in full_binned_spike_count_dict:
                     subgroup.create_group(pop_name)

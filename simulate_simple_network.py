@@ -101,7 +101,7 @@ def config_worker():
 
     # {'pop_name': int}
     if 'pop_sizes' not in context() or context.pop_sizes is None:
-        raise RuntimeError('optimize_simple_network: pop_sizes must be specified in the config.yaml')
+        raise RuntimeError('simulate_simple_network: pop_sizes must be specified in the config.yaml')
     for pop_name in context.pop_sizes:
         context.pop_sizes[pop_name] = int(context.pop_sizes[pop_name])
 
@@ -126,16 +126,22 @@ def config_worker():
         context.network_id = 0
     else:
         context.network_id = int(context.network_id)
+    if 'network_instance' not in context():
+        context.network_instance = 0
+    else:
+        context.network_instance = int(context.network_instance)
     if 'trial_offset' not in context():
         context.trial_offset = 0
     else:
         context.trial_offset = int(context.trial_offset)
 
-    context.connection_seed = [context.network_id]
-    context.spikes_seed = [context.network_id, 1]
-    context.weights_seed = [context.network_id, 2]
-    context.location_seed = [context.network_id, 3]
-    context.tuning_seed = [context.network_id, 4]
+    context.stim_type_seed = 0
+    context.base_seed = [context.network_id, context.network_instance]
+    context.connection_seed = context.base_seed + [1]
+    context.spikes_seed = context.base_seed + [2, context.stim_type_seed]
+    context.weights_seed = context.base_seed + [3]
+    context.location_seed = context.base_seed + [4]
+    context.tuning_seed = context.base_seed + [5]
 
     connection_weights_mean = defaultdict(dict)  # {'target_pop_name': {'source_pop_name': float} }
     connection_weights_norm_sigma = defaultdict(dict)  # {'target_pop_name': {'source_pop_name': float} }
@@ -146,7 +152,6 @@ def config_worker():
         structured_weights = False
     else:
         structured_weights = True
-    local_np_random = np.random.RandomState()
 
     syn_mech_params = defaultdict(lambda: defaultdict(dict))
     if 'default_syn_mech_params' in context() and context.default_syn_mech_params is not None:
@@ -158,18 +163,19 @@ def config_worker():
 
     delay = 1.  # ms
     equilibrate = 250.  # ms
+    equilibrate_range = (250, 400)  # ms
     buffer = 500.  # ms
     duration = 3000.  # ms
-    tuning_duration = 3000.  # ms
     tstop = int(equilibrate + duration + 2. * buffer)  # ms
+    tuning_duration = 3000.  # ms
     dt = 0.025
     binned_dt = 1.  # ms
     filter_dt = 1.  # ms
     active_rate_threshold = 1.  # Hz
     baks_alpha = 4.7725100028345535
     baks_beta = 0.41969058927343522
-    baks_pad_dur = 1000.  # ms
-    baks_wrap_around = False
+    baks_pad_dur = duration  # ms
+    baks_wrap_around = True
     track_wrap_around = True
     filter_bands = {'Theta': [4., 10.], 'Gamma': [30., 100.]}
     max_num_cells_export_voltage_rec = 500
@@ -177,12 +183,12 @@ def config_worker():
     if context.comm.rank == 0:
         if any([this_input_type == 'gaussian' for this_input_type in
                 context.input_types.values()]) or structured_weights:
-            local_np_random.seed(context.tuning_seed)
+            local_np_random = np.random.default_rng(seed=context.tuning_seed)
         tuning_peak_locs = dict()  # {'pop_name': {'gid': float} }
 
-        for pop_name in context.input_types:
+        for pop_name in sorted(list(context.input_types.keys())):
             if pop_name not in context.pop_cell_types or context.pop_cell_types[pop_name] != 'input':
-                raise RuntimeError('optimize_simple_network: %s not specified as an input population' % pop_name)
+                raise RuntimeError('simulate_simple_network: %s not specified as an input population' % pop_name)
             if context.input_types[pop_name] == 'gaussian':
                 if pop_name not in tuning_peak_locs:
                     tuning_peak_locs[pop_name] = dict()
@@ -208,7 +214,7 @@ def config_worker():
             fig.show()
         """
 
-        for target_pop_name in context.structured_weight_params:
+        for target_pop_name in sorted(list(context.structured_weight_params.keys())):
             if target_pop_name not in tuning_peak_locs:
                 tuning_peak_locs[target_pop_name] = dict()
             if 'pop_over_representation' in context.structured_weight_params[target_pop_name]:
@@ -237,14 +243,14 @@ def config_worker():
     if context.connectivity_type == 'gaussian':
         pop_axon_extents = {'FF': 1., 'E': 1., 'I': 1.}
         if 'spatial_dim' not in context():
-            raise RuntimeError('optimize_simple_network: missing spatial_dim parameter required for gaussian '
+            raise RuntimeError('simulate_simple_network: missing spatial_dim parameter required for gaussian '
                                'connectivity not found')
 
         if context.comm.rank == 0:
+            local_np_random = np.random.default_rng(seed=context.location_seed)
             pop_cell_positions = dict()
-            for pop_name in pop_gid_ranges:
+            for pop_name in sorted(list(pop_gid_ranges.keys())):
                 for gid in range(pop_gid_ranges[pop_name][0], pop_gid_ranges[pop_name][1]):
-                    local_np_random.seed(context.location_seed.append(gid))
                     if pop_name not in pop_cell_positions:
                         pop_cell_positions[pop_name] = dict()
                     pop_cell_positions[pop_name][gid] = local_np_random.uniform(-1., 1., size=context.spatial_dim)
@@ -267,8 +273,8 @@ def config_worker():
             elif str(context.model_key).isnumeric() and int(context.model_key) in model_param_dict:
                 context.model_key = int(context.model_key)
             else:
-                raise RuntimeError('simulate_simple_network_replay: provided model_key: %s not found in param_file_path: '
-                                   '%s' % (str(context.model_key), context.param_file_path))
+                raise RuntimeError('simulate_simple_network_replay: provided model_key: %s not found in '
+                                   'param_file_path: %s' % (str(context.model_key), context.param_file_path))
             this_x0 = model_param_dict[context.model_key]
             if context.disp:
                 print('simulate_simple_network_replay: loaded network config params from param_file_path: %s with '
@@ -389,7 +395,7 @@ def analyze_network_output(network, trial=None, export=False, plot=False):
                            context.dt)
     buffered_rec_t = np.arange(-context.buffer, context.duration + context.buffer + context.dt / 2., context.dt)
     rec_t = np.arange(0., context.duration, context.dt)
-    full_binned_t = np.arange(-context.buffer-context.equilibrate,
+    full_binned_t = np.arange(-context.buffer - context.equilibrate,
                               context.duration + context.buffer + context.binned_dt / 2., context.binned_dt)
     buffered_binned_t = np.arange(-context.buffer, context.duration + context.buffer + context.binned_dt / 2.,
                                   context.binned_dt)
@@ -511,20 +517,17 @@ def analyze_network_output(network, trial=None, export=False, plot=False):
                                          compression='gzip')
                     group.create_dataset('x0', data=context.x0_array, compression='gzip')
                     set_h5py_attr(group.attrs, 'network_id', context.network_id)
+                    set_h5py_attr(group.attrs, 'network_instance', context.network_instance)
                     set_h5py_attr(group.attrs, 'connectivity_type', context.connectivity_type)
                     group.attrs['active_rate_threshold'] = context.active_rate_threshold
                     subgroup = group.create_group('pop_gid_ranges')
                     for pop_name in context.pop_gid_ranges:
                         subgroup.create_dataset(pop_name, data=context.pop_gid_ranges[pop_name])
-                    group.create_dataset('full_binned_t', data=full_binned_t, compression='gzip')
                     group.create_dataset('buffered_binned_t', data=buffered_binned_t, compression='gzip')
                     group.create_dataset('binned_t', data=binned_t, compression='gzip')
                     subgroup = group.create_group('filter_bands')
                     for filter, band in viewitems(context.filter_bands):
                         subgroup.create_dataset(filter, data=band)
-                    group.create_dataset('full_rec_t', data=full_rec_t, compression='gzip')
-                    group.create_dataset('buffered_rec_t', data=buffered_rec_t, compression='gzip')
-                    group.create_dataset('rec_t', data=rec_t, compression='gzip')
                     subgroup = group.create_group('connection_weights')
                     for target_pop_name in connection_weights_dict:
                         subgroup.create_group(target_pop_name)
@@ -570,6 +573,7 @@ def analyze_network_output(network, trial=None, export=False, plot=False):
                         data_group.create_dataset('positions', data=positions, compression='gzip')
                 exported_data_key = 'simple_network_exported_data'
                 group = get_h5py_group(f, [trial, exported_data_key], create=True)
+                group.create_dataset('full_binned_t', data=full_binned_t, compression='gzip')
                 set_h5py_attr(group.attrs, 'voltages_exceed_threshold', voltages_exceed_threshold)
                 subgroup = group.create_group('full_spike_times')
                 for pop_name in full_spike_times_dict:
@@ -604,14 +608,20 @@ def simulate_network(trial, export=False):
     :param export: bool
     """
     start_time = time.time()
-    this_spikes_seed = context.spikes_seed + [int(trial)]
 
+    local_np_random = np.random.default_rng(seed=context.base_seed + [int(trial)])
+    context.equilibrate = float(local_np_random.integers(*context.equilibrate_range))
+    context.tstop = int(context.equilibrate + context.duration + 2. * context.buffer)  # ms
+    context.network.equilibrate = context.equilibrate
+    context.network.tstop = context.tstop
+
+    trial_spikes_seed = context.spikes_seed + [int(trial)]
     context.network.set_input_pattern(context.input_types, input_mean_rates=context.input_mean_rates,
                                       input_min_rates=context.input_min_rates,
                                       input_max_rates=context.input_max_rates,
                                       input_norm_tuning_widths=context.input_norm_tuning_widths,
                                       tuning_peak_locs=context.tuning_peak_locs,
-                                      track_wrap_around=context.track_wrap_around, spikes_seed=this_spikes_seed,
+                                      track_wrap_around=context.track_wrap_around, spikes_seed=trial_spikes_seed,
                                       tuning_duration=context.tuning_duration)
 
     if context.comm.rank == 0 and context.verbose > 0:

@@ -83,6 +83,10 @@ def main(cli, run_data_file_path, replay_data_file_path, run_data_key, num_repla
 def config_worker():
 
     start_time = time.time()
+    baks_alpha = 4.7725100028345535
+    baks_beta = 0.41969058927343522
+    baks_pad_dur = 1000.  # ms
+    baks_wrap_around = False
 
     if context.comm.rank == 0:
         run_binned_t, run_firing_rates_matrix_dict, sorted_gid_dict = \
@@ -120,9 +124,9 @@ def config_worker():
     step_dur = step_bins * replay_binned_dt
     half_step_dur = step_dur / 2.
 
-    # if possible, include a bin centered on time zero.
+    # if possible, include a bin starting at time zero.
     binned_t_center_indexes = []
-    this_center_index = np.where(replay_binned_t >= align_to_t)[0]
+    this_center_index = np.where(replay_binned_t >= align_to_t)[0] + half_window_bins
     if len(this_center_index) > 0:
         this_center_index = this_center_index[0]
         if this_center_index < half_window_bins:

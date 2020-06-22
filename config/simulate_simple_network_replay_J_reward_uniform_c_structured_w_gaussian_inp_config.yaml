@@ -1,6 +1,7 @@
 verbose: 1
 trial_offset: 0
 network_id: 10
+network_instance: 0
 connectivity_type: uniform
 default_weight_distribution_type: normal
 connection_weight_distribution_types:
@@ -17,7 +18,7 @@ input_offline_fraction_active:
   FF: 0.25
 input_norm_tuning_widths:
   FF: 0.5
-num_input_patterns: 1000
+num_trials: 1000
 structured_weight_params:
   E:  # target_pop_name
     source_pop_names:

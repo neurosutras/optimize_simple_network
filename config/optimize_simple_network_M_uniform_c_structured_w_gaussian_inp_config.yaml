@@ -118,6 +118,7 @@ kwargs:
   verbose: 1
   trial: 0
   network_id: 12
+  network_instance: 0
   connectivity_type: uniform
   default_weight_distribution_type: normal
   connection_weight_distribution_types:

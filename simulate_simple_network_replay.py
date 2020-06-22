@@ -55,7 +55,7 @@ def main(cli, config_file_path, export, output_dir, export_file_path, label, int
 
     if simulate:
         args = context.interface.execute(get_args_static_event_ids)
-        sequences = args + [[context.export] * context.num_input_patterns]
+        sequences = args + [[context.export] * context.num_trials]
         context.interface.map(simulate_network_replay, *sequences)
 
         if context.export:
@@ -77,8 +77,8 @@ def main(cli, config_file_path, export, output_dir, export_file_path, label, int
 
 def get_args_static_event_ids():
 
-    return [list(range(context.trial_offset, context.trial_offset + context.num_input_patterns)),
-            list(range(context.trial_offset, context.trial_offset + context.num_input_patterns))]
+    return [list(range(context.trial_offset, context.trial_offset + context.num_trials)),
+            list(range(context.trial_offset, context.trial_offset + context.num_trials))]
 
 
 def config_worker():
@@ -118,8 +118,11 @@ def config_worker():
         input_max_rates = None
     if 'input_norm_tuning_widths' not in context():
         input_norm_tuning_widths = None
-    context.num_input_patterns = int(context.num_input_patterns)
-    
+    if 'num_trials' not in context():
+        context.num_trials = 1
+    else:
+        context.num_trials = int(context.num_trials)
+
     if 'network_id' not in context():
         context.network_id = 0
     else:
@@ -129,12 +132,14 @@ def config_worker():
     else:
         context.trial_offset = int(context.trial_offset)
 
-    context.connection_seed = [context.network_id]
-    context.spikes_seed = [context.network_id, 1, 0]
-    context.weights_seed = [context.network_id, 2]
-    context.location_seed = [context.network_id, 3]
-    context.tuning_seed = [context.network_id, 4]
-    context.selection_seed = [context.network_id, 5]
+    context.stim_type_seed = 0
+    context.base_seed = [context.network_id, context.network_instance]
+    context.connection_seed = context.base_seed + [1]
+    context.spikes_seed = context.base_seed + [2, context.stim_type_seed]
+    context.weights_seed = context.base_seed + [3]
+    context.location_seed = context.base_seed + [4]
+    context.tuning_seed = context.base_seed + [5]
+    context.selection_seed = context.base_seed + [6]
 
     connection_weights_mean = defaultdict(dict)  # {'target_pop_name': {'source_pop_name': float} }
     connection_weights_norm_sigma = defaultdict(dict)  # {'target_pop_name': {'source_pop_name': float} }
@@ -145,7 +150,6 @@ def config_worker():
         structured_weights = False
     else:
         structured_weights = True
-    local_np_random = np.random.RandomState()
 
     syn_mech_params = defaultdict(lambda: defaultdict(dict))
     if 'default_syn_mech_params' in context() and context.default_syn_mech_params is not None:
@@ -177,10 +181,10 @@ def config_worker():
     if context.comm.rank == 0:
         if any([this_input_type == 'gaussian' for this_input_type in
                 context.input_types.values()]) or structured_weights:
-            local_np_random.seed(context.tuning_seed)
+            local_np_random = np.random.default_rng(seed=context.tuning_seed)
         tuning_peak_locs = dict()  # {'pop_name': {'gid': float} }
 
-        for pop_name in context.input_types:
+        for pop_name in sorted(list(context.input_types.keys())):
             if pop_name not in context.pop_cell_types or context.pop_cell_types[pop_name] != 'input':
                 raise RuntimeError('simulate_simple_network_replay: %s not specified as an input population' % pop_name)
             if context.input_types[pop_name] == 'gaussian':
@@ -208,7 +212,7 @@ def config_worker():
             fig.show()
         """
 
-        for target_pop_name in context.structured_weight_params:
+        for target_pop_name in sorted(list(context.structured_weight_params.keys())):
             if target_pop_name not in tuning_peak_locs:
                 tuning_peak_locs[target_pop_name] = dict()
             if 'pop_over_representation' in context.structured_weight_params[target_pop_name]:
@@ -241,10 +245,10 @@ def config_worker():
                                'connectivity not found')
 
         if context.comm.rank == 0:
+            local_np_random = np.random.default_rng(seed=context.location_seed)
             pop_cell_positions = dict()
-            for pop_name in pop_gid_ranges:
+            for pop_name in sorted(list(pop_gid_ranges.keys())):
                 for gid in range(pop_gid_ranges[pop_name][0], pop_gid_ranges[pop_name][1]):
-                    local_np_random.seed(context.location_seed.append(gid))
                     if pop_name not in pop_cell_positions:
                         pop_cell_positions[pop_name] = dict()
                     pop_cell_positions[pop_name][gid] = local_np_random.uniform(-1., 1., size=context.spatial_dim)
@@ -267,8 +271,8 @@ def config_worker():
             elif str(context.model_key).isnumeric() and int(context.model_key) in model_param_dict:
                 context.model_key = int(context.model_key)
             else:
-                raise RuntimeError('simulate_simple_network_replay: provided model_key: %s not found in param_file_path: '
-                                   '%s' % (str(context.model_key), context.param_file_path))
+                raise RuntimeError('simulate_simple_network_replay: provided model_key: %s not found in '
+                                   'param_file_path: %s' % (str(context.model_key), context.param_file_path))
             this_x0 = model_param_dict[context.model_key]
             if context.disp:
                 print('simulate_simple_network_replay: loaded network config params from param_file_path: %s with '
@@ -390,7 +394,7 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
                            context.dt)
     buffered_rec_t = np.arange(-context.buffer, context.duration + context.buffer + context.dt / 2., context.dt)
     rec_t = np.arange(0., context.duration, context.dt)
-    full_binned_t = np.arange(-context.buffer-context.equilibrate,
+    full_binned_t = np.arange(-context.buffer - context.equilibrate,
                               context.duration + context.buffer + context.binned_dt / 2., context.binned_dt)
     buffered_binned_t = np.arange(-context.buffer, context.duration + context.buffer + context.binned_dt / 2.,
                                   context.binned_dt)
@@ -398,10 +402,11 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
 
     full_spike_times_dict = network.get_spike_times_dict()
     full_binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict, full_binned_t)
-    buffered_firing_rates_from_binned_spike_count_dict = \
+    inferred_binned_t, buffered_firing_rates_from_binned_spike_count_dict = \
         infer_firing_rates_from_spike_count(full_binned_spike_count_dict, input_t=full_binned_t,
-                                            output_t=buffered_binned_t, align_to_t=50., window_dur=100.,
-                                            step_dur=context.binned_dt, debug=context.debug and context.comm.rank == 0)
+                                            output_range=(buffered_binned_t[0], buffered_binned_t[-1]), align_to_t=0.,
+                                            window_dur=20., step_dur=20.,
+                                            debug=context.debug and context.comm.rank == 0)
 
     gathered_full_spike_times_dict_list = context.comm.gather(full_spike_times_dict, root=0)
     gathered_full_binned_spike_count_dict_list = context.comm.gather(full_binned_spike_count_dict, root=0)
@@ -469,8 +474,8 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
         full_pop_mean_rate_from_binned_spike_count_dict = \
             get_pop_mean_rate_from_binned_spike_count(full_binned_spike_count_dict, dt=context.binned_dt)
         mean_min_rate_dict, mean_peak_rate_dict, mean_rate_active_cells_dict, pop_fraction_active_dict = \
-            get_pop_activity_stats(buffered_firing_rates_from_binned_spike_count_dict, input_t=buffered_binned_t,
-                                   valid_t=buffered_binned_t, threshold=context.active_rate_threshold, plot=plot)
+            get_pop_activity_stats(buffered_firing_rates_from_binned_spike_count_dict, input_t=inferred_binned_t,
+                                   valid_t=inferred_binned_t, threshold=context.active_rate_threshold, plot=plot)
         filtered_mean_rate_dict, filter_envelope_dict, filter_envelope_ratio_dict, centroid_freq_dict, \
             freq_tuning_index_dict = \
             get_pop_bandpass_filtered_signal_stats(full_pop_mean_rate_from_binned_spike_count_dict,
@@ -484,10 +489,8 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
             sys.stdout.flush()
 
         if plot:
-            plot_firing_rate_heatmaps(buffered_firing_rates_from_binned_spike_count_dict, input_t=buffered_binned_t,
-                                      valid_t=buffered_binned_t, tuning_peak_locs=context.tuning_peak_locs)
-            plot_firing_rate_heatmaps(full_binned_spike_count_dict, input_t=full_binned_t,
-                                      valid_t=buffered_binned_t, tuning_peak_locs=context.tuning_peak_locs)
+            plot_firing_rate_heatmaps(buffered_firing_rates_from_binned_spike_count_dict, input_t=inferred_binned_t,
+                                      valid_t=inferred_binned_t, tuning_peak_locs=context.tuning_peak_locs)
             if context.connectivity_type == 'gaussian':
                 plot_2D_connection_distance(context.pop_syn_proportions, context.pop_cell_positions, connectivity_dict)
 
@@ -522,9 +525,6 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
                     subgroup = group.create_group('filter_bands')
                     for filter, band in viewitems(context.filter_bands):
                         subgroup.create_dataset(filter, data=band)
-                    group.create_dataset('full_rec_t', data=full_rec_t, compression='gzip')
-                    group.create_dataset('buffered_rec_t', data=buffered_rec_t, compression='gzip')
-                    group.create_dataset('rec_t', data=rec_t, compression='gzip')
                     subgroup = group.create_group('connection_weights')
                     for target_pop_name in connection_weights_dict:
                         subgroup.create_group(target_pop_name)
@@ -606,15 +606,15 @@ def simulate_network_replay(ensemble_id, trial, export=False):
     :param export: bool
     """
     start_time = time.time()
-    this_selection_seed = context.selection_seed + [int(ensemble_id)]
-    this_spikes_seed = context.spikes_seed + [int(trial)]
+    trial_selection_seed = context.selection_seed + [int(ensemble_id)]
+    trial_spikes_seed = context.spikes_seed + [int(ensemble_id)] + [int(trial)]
 
     context.network.set_offline_input_pattern(
         context.input_types, input_offline_min_rates=context.input_offline_min_rates,
         input_offline_mean_rates=context.input_offline_mean_rates,
         input_offline_fraction_active=context.input_offline_fraction_active, tuning_peak_locs=context.tuning_peak_locs,
         track_wrap_around=context.track_wrap_around, stim_edge_duration=context.stim_edge_duration,
-        selection_seed=this_selection_seed, spikes_seed=this_spikes_seed, tuning_duration=context.tuning_duration)
+        selection_seed=trial_selection_seed, spikes_seed=trial_spikes_seed, tuning_duration=context.tuning_duration)
 
     if context.comm.rank == 0 and context.verbose > 0:
         print('simulate_simple_network_replay: pid: %i; trial: %i; setting network input pattern took %.2f s' %
