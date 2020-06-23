@@ -11,7 +11,7 @@ sbatch <<EOT
 #SBATCH -J $JOB_NAME
 #SBATCH -o /scratch1/06441/aaronmil/src/optimize_simple_network/logs/$JOB_NAME.%j.o
 #SBATCH -e /scratch1/06441/aaronmil/src/optimize_simple_network/logs/$JOB_NAME.%j.e
-#SBATCH -p normal
+#SBATCH -p development
 #SBATCH -N 40
 #SBATCH -n 2240
 #SBATCH -t 2:00:00
