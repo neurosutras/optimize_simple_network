@@ -9,7 +9,6 @@ context = Context()
 @click.command(context_settings=dict(ignore_unknown_options=True, allow_extra_args=True, ))
 @click.option("--run-data-file-path", type=click.Path(exists=True, file_okay=True, dir_okay=False), required=True)
 @click.option("--replay-data-file-path", type=click.Path(exists=True, file_okay=True, dir_okay=False), required=True)
-@click.option("--run-data-key", type=str, default='0')
 @click.option("--num-replay-events", type=int, default=None)
 @click.option("--window-dur", type=float, default=20.)
 @click.option("--step-dur", type=float, default=20.)
@@ -22,14 +21,13 @@ context = Context()
 @click.option("--plot", type=int, default=1)
 @click.option("--debug", is_flag=True)
 @click.pass_context
-def main(cli, run_data_file_path, replay_data_file_path, run_data_key, num_replay_events, window_dur, step_dur, export,
+def main(cli, run_data_file_path, replay_data_file_path, num_replay_events, window_dur, step_dur, export,
          output_dir, export_file_path, label, interactive, verbose, plot, debug):
     """
 
     :param cli: contains unrecognized args as list of str
     :param run_data_file_path: str (path)
     :param replay_data_file_path: str (path)
-    :param run_data_key: str
     :param num_replay_events: int
     :param window_dur: float
     :param step_dur: float
@@ -56,7 +54,29 @@ def main(cli, run_data_file_path, replay_data_file_path, run_data_key, num_repla
                               debug=debug, **kwargs)
 
     start_time = time.time()
-    args = context.interface.execute(get_replay_data_keys)
+    run_trial_duration = context.interface.execute(get_run_trial_duration)
+    if not np.isnan(run_trial_duration):
+        context.baks_pad_dur = run_trial_duration
+    args = context.interface.execute(get_args_run_trial_data)
+    num_run_trials = len(args[0])
+    run_template_package_list = context.interface.map(get_run_trial_data_from_file, *args)
+    run_binned_t, run_firing_rates_matrix_dict, sorted_gid_dict = \
+        context.interface.execute(process_run_template, run_template_package_list)
+    del run_template_package_list
+    print('debug: getting here')
+    sys.stdout.flush()
+    context.interface.apply(update_remote_contexts, run_binned_t=run_binned_t,
+                            run_firing_rates_matrix_dict=run_firing_rates_matrix_dict, sorted_gid_dict=sorted_gid_dict)
+    if context.disp:
+        print('decode_simple_network_replay: processing run data for %i trials took %.1f s' %
+              (len(num_run_trials), time.time() - start_time))
+        sys.stdout.flush()
+
+    if context.debug:
+        context.update(locals())
+        return
+
+    args = context.interface.execute(get_replay_trial_keys)
     num_replay_events = len(args[0])
     sequences = args + [[context.export] * num_replay_events] + [[context.plot > 1] * num_replay_events]
     decoded_position_package_list = context.interface.map(get_decoded_position_offline_replay, *sequences)
@@ -85,19 +105,8 @@ def config_worker():
     start_time = time.time()
     baks_alpha = 4.7725100028345535
     baks_beta = 0.41969058927343522
-    baks_pad_dur = 1000.  # ms
-    baks_wrap_around = False
-
-    if context.comm.rank == 0:
-        run_binned_t, run_firing_rates_matrix_dict, sorted_gid_dict = \
-            context.interface.execute(get_run_data_from_file, context.run_data_file_path, context.run_data_key)
-    else:
-        run_binned_t = None
-        run_firing_rates_matrix_dict = None
-        sorted_gid_dict = None
-    context.comm.bcast(run_binned_t, root=0)
-    context.comm.bcast(run_firing_rates_matrix_dict, root=0)
-    context.comm.bcast(sorted_gid_dict, root=0)
+    baks_pad_dur = 3000.  # ms
+    baks_wrap_around = True
 
     if context.comm.rank == 0:
         if not os.path.isfile(context.replay_data_file_path):
@@ -151,7 +160,58 @@ def config_worker():
     context.update(locals())
 
 
-def get_replay_data_keys():
+def get_run_trial_duration():
+
+    with h5py.File(context.run_data_file_path, 'r') as f:
+        group = get_h5py_group(f, ['shared_context'])
+        if 'duration' not in group.attrs:
+            return np.nan
+        else:
+            return group.attrs['duration']
+
+
+def get_args_run_trial_data():
+
+    run_data_group_key = 'simple_network_exported_data'
+    with h5py.File(context.run_data_file_path, 'r') as f:
+        available_trial_keys = \
+            [data_key for data_key in f if run_data_group_key in f[data_key]]
+    num_run_trials = len(available_trial_keys)
+    return [[context.run_data_file_path] * num_run_trials, available_trial_keys, [context.baks_alpha] * num_run_trials,
+            [context.baks_beta] * num_run_trials, [context.baks_pad_dur] * num_run_trials,
+            [context.baks_wrap_around] * num_run_trials]
+
+
+def process_run_template(run_template_package_list):
+    """
+
+    :param run_template_package_list: list of tuple
+    :return: tuple
+    """
+    first = True
+    run_firing_rates_matrix_dict_list = []
+
+    for run_template_package in run_template_package_list:
+        if first:
+            run_binned_t, run_firing_rates_matrix_dict, sorted_gid_dict = run_template_package
+            first = False
+        else:
+            _, run_firing_rates_matrix_dict, _ = run_template_package
+        run_firing_rates_matrix_dict_list.append(run_firing_rates_matrix_dict)
+
+    trial_average_run_firing_rates_matrix_dict = dict()
+    for pop_name in run_firing_rates_matrix_dict_list[0]:
+        trial_average_run_firing_rates_matrix_list = []
+        for trial in range(len(run_firing_rates_matrix_dict_list)):
+            this_trial_run_firing_rates_matrix = run_firing_rates_matrix_dict_list[trial][pop_name]
+            trial_average_run_firing_rates_matrix_list.append(this_trial_run_firing_rates_matrix)
+        trial_average_run_firing_rates_matrix_dict[pop_name] = \
+            np.mean(trial_average_run_firing_rates_matrix_list, axis=0)
+
+    return run_binned_t, trial_average_run_firing_rates_matrix_dict, sorted_gid_dict
+
+
+def get_replay_trial_keys():
 
     replay_data_group_key = 'simple_network_exported_data'
     with h5py.File(context.replay_data_file_path, 'r') as f:

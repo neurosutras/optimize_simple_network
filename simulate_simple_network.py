@@ -519,6 +519,7 @@ def analyze_network_output(network, trial=None, export=False, plot=False):
                     set_h5py_attr(group.attrs, 'network_id', context.network_id)
                     set_h5py_attr(group.attrs, 'network_instance', context.network_instance)
                     set_h5py_attr(group.attrs, 'connectivity_type', context.connectivity_type)
+                    set_h5py_attr(group.attrs, 'duration', context.duration)
                     group.attrs['active_rate_threshold'] = context.active_rate_threshold
                     subgroup = group.create_group('pop_gid_ranges')
                     for pop_name in context.pop_gid_ranges:
