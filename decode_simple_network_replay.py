@@ -54,22 +54,14 @@ def main(cli, run_data_file_path, replay_data_file_path, num_replay_events, wind
                               debug=debug, **kwargs)
 
     start_time = time.time()
-    run_trial_duration = context.interface.execute(get_run_trial_duration)
-    if not np.isnan(run_trial_duration):
-        context.baks_pad_dur = run_trial_duration
-    args = context.interface.execute(get_args_run_trial_data)
-    num_run_trials = len(args[0])
-    run_template_package_list = context.interface.map(get_run_trial_data_from_file, *args)
-    run_binned_t, run_firing_rates_matrix_dict, sorted_gid_dict = \
-        context.interface.execute(process_run_template, run_template_package_list)
-    del run_template_package_list
-    print('debug: getting here')
-    sys.stdout.flush()
-    context.interface.apply(update_remote_contexts, run_binned_t=run_binned_t,
-                            run_firing_rates_matrix_dict=run_firing_rates_matrix_dict, sorted_gid_dict=sorted_gid_dict)
+
+    if not context.run_data_is_processed:
+        append_processed_run_data_to_file()
+    context.interface.apply(load_processed_run_data_from_file)
+
     if context.disp:
         print('decode_simple_network_replay: processing run data for %i trials took %.1f s' %
-              (len(num_run_trials), time.time() - start_time))
+              (len(context.run_trial_keys), time.time() - start_time))
         sys.stdout.flush()
 
     if context.debug:
@@ -108,17 +100,29 @@ def config_worker():
     baks_pad_dur = 3000.  # ms
     baks_wrap_around = True
 
-    if context.comm.rank == 0:
-        if not os.path.isfile(context.replay_data_file_path):
-            raise IOError('decode_simple_network_replay: invalid replay data file path: %s' %
-                          context.replay_data_file_path)
+    if context.global_comm.rank == 0:
+        if not os.path.isfile(context.run_data_file_path):
+            raise IOError('decode_simple_network_replay: invalid run_data_file_path: %s' %
+                          context.run_data_file_path)
+        with h5py.File(context.run_data_file_path, 'r') as f:
+            group = get_h5py_group(f, ['shared_context'])
+            if 'duration' in group.attrs:
+                baks_pad_dur = group.attrs['duration']
+            if 'trial_averaged_firing_rate_matrix' in group:
+                run_data_is_processed = True
+            else:
+                run_data_is_processed = False
+            run_binned_t = group['binned_t'][:]
+            run_data_group_key = 'simple_network_exported_data'
+            run_trial_keys = [key for key in f if run_data_group_key in f[key]]
 
-        with h5py.File(context.replay_data_file_path, 'r') as f:
-            replay_binned_t = f['shared_context']['buffered_binned_t'][:]
-    else:
-        replay_binned_t = None
+    if not os.path.isfile(context.replay_data_file_path):
+        raise IOError('decode_simple_network_replay: invalid replay_data_file_path: %s' %
+                      context.replay_data_file_path)
 
-    context.comm.bcast(replay_binned_t, root=0)
+    with h5py.File(context.replay_data_file_path, 'r') as f:
+        group = get_h5py_group(f, ['shared_context'])
+        replay_binned_t = group['buffered_binned_t'][:]
 
     replay_binned_dt = replay_binned_t[1] - replay_binned_t[0]
     window_dur = context.window_dur
@@ -160,55 +164,150 @@ def config_worker():
     context.update(locals())
 
 
-def get_run_trial_duration():
+def export_processed_run_trial_data(trial_key):
+    """
 
-    with h5py.File(context.run_data_file_path, 'r') as f:
-        group = get_h5py_group(f, ['shared_context'])
-        if 'duration' not in group.attrs:
-            return np.nan
-        else:
-            return group.attrs['duration']
+    :param trial_key: str
+    """
+    start_time = time.time()
 
-
-def get_args_run_trial_data():
-
+    full_spike_times_dict = dict()
+    tuning_peak_locs = dict()
     run_data_group_key = 'simple_network_exported_data'
     with h5py.File(context.run_data_file_path, 'r') as f:
-        available_trial_keys = \
-            [data_key for data_key in f if run_data_group_key in f[data_key]]
-    num_run_trials = len(available_trial_keys)
-    return [[context.run_data_file_path] * num_run_trials, available_trial_keys, [context.baks_alpha] * num_run_trials,
-            [context.baks_beta] * num_run_trials, [context.baks_pad_dur] * num_run_trials,
-            [context.baks_wrap_around] * num_run_trials]
+        group = get_h5py_group(f, ['shared_context'])
+        if 'tuning_peak_locs' in group and len(group['tuning_peak_locs']) > 0:
+            subgroup = group['tuning_peak_locs']
+            for pop_name in subgroup:
+                tuning_peak_locs[pop_name] = dict()
+                for target_gid, peak_loc in zip(subgroup[pop_name]['target_gids'], subgroup[pop_name]['peak_locs']):
+                    tuning_peak_locs[pop_name][target_gid] = peak_loc
+        run_binned_t = group['binned_t'][:]
+        group = get_h5py_group(f, [trial_key, run_data_group_key])
+        subgroup = group['full_spike_times']
+        for pop_name in subgroup:
+            full_spike_times_dict[pop_name] = dict()
+            for gid_key in subgroup[pop_name]:
+                full_spike_times_dict[pop_name][int(gid_key)] = subgroup[pop_name][gid_key][:]
 
+    if context.disp:
+        print('export_processed_run_trial_data: pid: %i took %.1f s to load spikes times for trial: %s' %
+              (os.getpid(), time.time() - start_time, trial_key))
+        sys.stdout.flush()
+    current_time = time.time()
 
-def process_run_template(run_template_package_list):
-    """
+    binned_firing_rates_dict = \
+        infer_firing_rates_baks(full_spike_times_dict, run_binned_t, alpha=context.baks_alpha, beta=context.baks_beta,
+                                pad_dur=context.baks_pad_dur, wrap_around=context.baks_wrap_around)
 
-    :param run_template_package_list: list of tuple
-    :return: tuple
-    """
-    first = True
-    run_firing_rates_matrix_dict_list = []
-
-    for run_template_package in run_template_package_list:
-        if first:
-            run_binned_t, run_firing_rates_matrix_dict, sorted_gid_dict = run_template_package
-            first = False
+    sorted_gid_dict = dict()
+    for pop_name in full_spike_times_dict:
+        if pop_name in tuning_peak_locs:
+            this_target_gids = np.array(list(tuning_peak_locs[pop_name].keys()))
+            this_peak_locs = np.array(list(tuning_peak_locs[pop_name].values()))
+            indexes = np.argsort(this_peak_locs)
+            sorted_gid_dict[pop_name] = this_target_gids[indexes]
         else:
-            _, run_firing_rates_matrix_dict, _ = run_template_package
-        run_firing_rates_matrix_dict_list.append(run_firing_rates_matrix_dict)
+            this_target_gids = [int(gid_key) for gid_key in full_spike_times_dict[pop_name]]
+            sorted_gid_dict[pop_name] = np.array(sorted(this_target_gids), dtype='int')
 
-    trial_average_run_firing_rates_matrix_dict = dict()
-    for pop_name in run_firing_rates_matrix_dict_list[0]:
-        trial_average_run_firing_rates_matrix_list = []
-        for trial in range(len(run_firing_rates_matrix_dict_list)):
-            this_trial_run_firing_rates_matrix = run_firing_rates_matrix_dict_list[trial][pop_name]
-            trial_average_run_firing_rates_matrix_list.append(this_trial_run_firing_rates_matrix)
-        trial_average_run_firing_rates_matrix_dict[pop_name] = \
-            np.mean(trial_average_run_firing_rates_matrix_list, axis=0)
+    firing_rates_matrix_dict = dict()
+    for pop_name in binned_firing_rates_dict:
+        firing_rates_matrix_dict[pop_name] = np.empty((len(binned_firing_rates_dict[pop_name]), len(run_binned_t)))
+        for i, gid in enumerate(sorted_gid_dict[pop_name]):
+            firing_rates_matrix_dict[pop_name][i, :] = binned_firing_rates_dict[pop_name][gid]
 
-    return run_binned_t, trial_average_run_firing_rates_matrix_dict, sorted_gid_dict
+    if context.disp:
+        print('export_processed_run_trial_data: pid: %i took %.1f s to process firing rates for trial: %s' %
+              (os.getpid(), time.time() - current_time, trial_key))
+        sys.stdout.flush()
+
+    with h5py.File(context.temp_output_path, 'a') as f:
+        if 'shared_context' not in f:
+            group = get_h5py_group(f, ['shared_context'], create=True)
+            subgroup = group.create_group('sorted_gids')
+            for pop_name in sorted_gid_dict:
+                subgroup.create_dataset(pop_name, data=sorted_gid_dict[pop_name], compression='gzip')
+        exported_data_key = 'simple_network_processed_data'
+        group = get_h5py_group(f, [trial_key, exported_data_key], create=True)
+        subgroup = group.create_group('firing_rates_matrix')
+        for pop_name in firing_rates_matrix_dict:
+            subgroup.create_dataset(pop_name, data=firing_rates_matrix_dict[pop_name], compression='gzip')
+
+    if context.disp:
+        print('export_processed_run_trial_data: pid: %i exported data for trial: %s to temp_output_path: %s' %
+              (os.getpid(), trial_key, context.temp_output_path))
+        sys.stdout.flush()
+
+
+def append_processed_run_data_to_file():
+
+    start_time = time.time()
+    context.interface.apply(update_worker_contexts, baks_pad_dur=context.baks_pad_dur)
+    context.interface.map(export_processed_run_trial_data, *[context.run_trial_keys])
+    temp_output_path_list = [temp_output_path for temp_output_path in context.interface.get('context.temp_output_path')
+                             if os.path.isfile(temp_output_path)]
+
+    run_trial_firing_rates_matrix_list_dict = dict()
+    first = True
+    for temp_output_path in temp_output_path_list:
+        with h5py.File(temp_output_path, 'r') as f:
+            if first:
+                group = get_h5py_group(f, ['shared_context'])
+                sorted_gid_dict = dict()
+                subgroup = group['sorted_gids']
+                for pop_name in subgroup:
+                    sorted_gid_dict[pop_name] = subgroup[pop_name][:]
+                first = False
+            exported_data_key = 'simple_network_processed_data'
+            for trial_key in (key for key in f if exported_data_key in f[key]):
+                group = get_h5py_group(f, [trial_key, exported_data_key])
+                subgroup = group['firing_rates_matrix']
+                for pop_name in subgroup:
+                    this_run_trial_firing_rates_matrix = subgroup[pop_name][:]
+                    if pop_name not in run_trial_firing_rates_matrix_list_dict:
+                        run_trial_firing_rates_matrix_list_dict[pop_name] = []
+                    run_trial_firing_rates_matrix_list_dict[pop_name].append(this_run_trial_firing_rates_matrix)
+
+    trial_averaged_run_firing_rate_matrix_dict = dict()
+    for pop_name in run_trial_firing_rates_matrix_list_dict:
+        trial_averaged_run_firing_rate_matrix_dict[pop_name] = \
+            np.mean(run_trial_firing_rates_matrix_list_dict[pop_name], axis=0)
+
+    with h5py.File(context.run_data_file_path, 'a') as f:
+        group = get_h5py_group(f, ['shared_context'])
+        subgroup = group.create_group('sorted_gids')
+        for pop_name in sorted_gid_dict:
+            subgroup.create_dataset(pop_name, data=sorted_gid_dict[pop_name], compression='gzip')
+        subgroup = group.create_group('trial_averaged_firing_rate_matrix')
+        for pop_name in trial_averaged_run_firing_rate_matrix_dict:
+            subgroup.create_dataset(pop_name, data=trial_averaged_run_firing_rate_matrix_dict[pop_name],
+                                    compression='gzip')
+
+    for temp_output_path in temp_output_path_list:
+        os.remove(temp_output_path)
+
+    if context.disp:
+        print('append_processed_run_data_to_file: pid: %i; exporting to run_data_file_path: %s '
+              'took %.1f s' % (os.getpid(), context.run_data_file_path, time.time() - start_time))
+
+
+def load_processed_run_data_from_file():
+    """
+
+    """
+    sorted_gid_dict = dict()
+    run_firing_rate_matrix_dict = dict()
+    with h5py.File(context.run_data_file_path, 'r') as f:
+        group = get_h5py_group(f, ['shared_context'])
+        run_binned_t = group['binned_t'][:]
+        subgroup = group['sorted_gids']
+        for pop_name in subgroup:
+            sorted_gid_dict[pop_name] = subgroup[pop_name][:]
+        subgroup = group['trial_averaged_firing_rate_matrix']
+        for pop_name in subgroup:
+            run_firing_rate_matrix_dict[pop_name] = subgroup[pop_name][:]
+    context.update(locals())
 
 
 def get_replay_trial_keys():
@@ -240,7 +339,7 @@ def get_decoded_position_offline_replay(replay_data_key, export=False, plot=Fals
         get_replay_data_from_file(context.replay_data_file_path, context.replay_binned_t, context.sorted_gid_dict,
                                   replay_data_key=replay_data_key)
 
-    p_pos_dict = decode_position_from_offline_replay(context.run_binned_t, context.run_firing_rates_matrix_dict,
+    p_pos_dict = decode_position_from_offline_replay(context.run_binned_t, context.run_firing_rate_matrix_dict,
                                                      context.replay_binned_t,
                                                      replay_binned_spike_count_matrix_dict,
                                                      context.replay_binned_t_center_indexes,
@@ -417,247 +516,6 @@ def analyze_decoded_position_offline_replay(decoded_position_package_list, expor
         clean_axes(axes)
         fig.set_constrained_layout_pads(hspace=0.15, wspace=0.15)
         fig.show()
-
-
-def analyze_network_output(network, model_id=None, export=False, plot=False):
-    """
-
-    :param network: :class:'SimpleNetwork'
-    :param export: bool
-    :param plot: bool
-    :return: dict
-    """
-    start_time = time.time()
-    full_rec_t = np.arange(-context.buffer - context.equilibrate, context.duration + context.buffer + context.dt / 2.,
-                           context.dt)
-    buffered_rec_t = np.arange(-context.buffer, context.duration + context.buffer + context.dt / 2., context.dt)
-    rec_t = np.arange(0., context.duration, context.dt)
-    full_binned_t = np.arange(-context.buffer-context.equilibrate,
-                              context.duration + context.buffer + context.binned_dt / 2., context.binned_dt)
-    buffered_binned_t = np.arange(-context.buffer, context.duration + context.buffer + context.binned_dt / 2.,
-                                  context.binned_dt)
-    binned_t = np.arange(0., context.duration + context.binned_dt / 2., context.binned_dt)
-
-    full_spike_times_dict = network.get_spike_times_dict()
-    buffered_firing_rates_dict = \
-        infer_firing_rates_baks(full_spike_times_dict, buffered_binned_t, alpha=context.baks_alpha,
-                                beta=context.baks_beta, pad_dur=context.baks_pad_dur,
-                                wrap_around=context.baks_wrap_around)
-    full_binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict, full_binned_t)
-    buffered_firing_rates_from_binned_spike_count_dict = \
-        infer_firing_rates_from_spike_count(full_binned_spike_count_dict, input_t=full_binned_t,
-                                            output_t=buffered_binned_t, align_to_t=0., window_dur=40.,
-                                            step_dur=context.binned_dt, smooth_dur=20.,
-                                            debug=context.debug and context.comm.rank == 0)
-    gathered_full_spike_times_dict_list = context.comm.gather(full_spike_times_dict, root=0)
-    gathered_buffered_firing_rates_dict_list = context.comm.gather(buffered_firing_rates_dict, root=0)
-    gathered_full_binned_spike_count_dict_list = context.comm.gather(full_binned_spike_count_dict, root=0)
-    gathered_buffered_firing_rates_from_binned_spike_count_dict_list = \
-        context.comm.gather(buffered_firing_rates_from_binned_spike_count_dict, root=0)
-
-    full_voltage_rec_dict = network.get_voltage_rec_dict()
-    voltages_exceed_threshold = check_voltages_exceed_threshold(full_voltage_rec_dict, input_t=full_rec_t,
-                                                                valid_t=buffered_rec_t,
-                                                                pop_cell_types=context.pop_cell_types)
-    voltages_exceed_threshold_list = context.comm.gather(voltages_exceed_threshold, root=0)
-
-    if plot or export:
-        bcast_subset_voltage_rec_gids = dict()
-        if context.comm.rank == 0:
-            for pop_name in (pop_name for pop_name in context.pop_cell_types
-                             if context.pop_cell_types[pop_name] != 'input'):
-                gather_gids = random.sample(range(*context.pop_gid_ranges[pop_name]),
-                                            min(context.max_num_cells_export_voltage_rec, context.pop_sizes[pop_name]))
-                bcast_subset_voltage_rec_gids[pop_name] = set(gather_gids)
-        bcast_subset_voltage_rec_gids = context.comm.bcast(bcast_subset_voltage_rec_gids, root=0)
-
-        subset_full_voltage_rec_dict = dict()
-        for pop_name in bcast_subset_voltage_rec_gids:
-            if pop_name in full_voltage_rec_dict:
-                for gid in full_voltage_rec_dict[pop_name]:
-                    if gid in bcast_subset_voltage_rec_gids[pop_name]:
-                        if pop_name not in subset_full_voltage_rec_dict:
-                            subset_full_voltage_rec_dict[pop_name] = dict()
-                        subset_full_voltage_rec_dict[pop_name][gid] = full_voltage_rec_dict[pop_name][gid]
-        gathered_subset_full_voltage_rec_dict_list = context.comm.gather(subset_full_voltage_rec_dict, root=0)
-
-        connectivity_dict = network.get_connectivity_dict()
-        connectivity_dict = context.comm.gather(connectivity_dict, root=0)
-
-        connection_target_gid_dict, connection_weights_dict = network.get_connection_weights()
-        gathered_connection_target_gid_dict_list = context.comm.gather(connection_target_gid_dict, root=0)
-        gathered_connection_weights_dict_list = context.comm.gather(connection_weights_dict, root=0)
-
-    if context.debug and context.verbose > 0 and context.comm.rank == 0:
-        print('optimize_simple_network_replay: pid: %i; gathering data across ranks took %.2f s' %
-              (os.getpid(), time.time() - start_time))
-        sys.stdout.flush()
-        current_time = time.time()
-
-    if context.comm.rank == 0:
-        full_spike_times_dict = merge_list_of_dict(gathered_full_spike_times_dict_list)
-        buffered_firing_rates_dict = merge_list_of_dict(gathered_buffered_firing_rates_dict_list)
-        full_binned_spike_count_dict = merge_list_of_dict(gathered_full_binned_spike_count_dict_list)
-        buffered_firing_rates_from_binned_spike_count_dict = \
-            merge_list_of_dict(gathered_buffered_firing_rates_from_binned_spike_count_dict_list)
-
-        if plot or export:
-            subset_full_voltage_rec_dict = merge_list_of_dict(gathered_subset_full_voltage_rec_dict_list)
-            connectivity_dict = merge_list_of_dict(connectivity_dict)
-            connection_weights_dict = \
-                merge_connection_weights_dicts(gathered_connection_target_gid_dict_list,
-                                               gathered_connection_weights_dict_list)
-
-        if context.debug and context.verbose > 0:
-            print('optimize_simple_network: pid: %i; merging data structures for analysis took %.2f s' %
-                  (os.getpid(), time.time() - current_time))
-            current_time = time.time()
-            sys.stdout.flush()
-
-        full_pop_mean_rate_from_binned_spike_count_dict = \
-            get_pop_mean_rate_from_binned_spike_count(full_binned_spike_count_dict, dt=context.binned_dt)
-        mean_min_rate_dict, mean_peak_rate_dict, mean_rate_active_cells_dict, pop_fraction_active_dict = \
-            get_pop_activity_stats(buffered_firing_rates_from_binned_spike_count_dict, input_t=buffered_binned_t,
-                                   valid_t=buffered_binned_t, threshold=context.active_rate_threshold, plot=plot)
-        filtered_mean_rate_dict, filter_envelope_dict, filter_envelope_ratio_dict, centroid_freq_dict, \
-            freq_tuning_index_dict = \
-            get_pop_bandpass_filtered_signal_stats(full_pop_mean_rate_from_binned_spike_count_dict,
-                                                   context.filter_bands, input_t=full_binned_t,
-                                                   valid_t=binned_t, output_t=binned_t,
-                                                   plot=plot, verbose=context.verbose > 1)
-
-        if context.debug and context.verbose > 0:
-            print('optimize_simple_network: pid: %i; additional data analysis took %.2f s' %
-                  (os.getpid(), time.time() - current_time))
-            sys.stdout.flush()
-
-        if plot:
-            """
-            plot_inferred_spike_rates(full_spike_times_dict, buffered_firing_rates_from_binned_spike_count_dict,
-                                      input_t=buffered_binned_t, valid_t=buffered_binned_t,
-                                      active_rate_threshold=context.active_rate_threshold)
-            plot_voltage_traces(subset_full_voltage_rec_dict, full_rec_t, valid_t=rec_t,
-                                spike_times_dict=full_spike_times_dict)
-            plot_weight_matrix(connection_weights_dict, pop_gid_ranges=context.pop_gid_ranges,
-                               tuning_peak_locs=context.tuning_peak_locs)
-            """
-            plot_firing_rate_heatmaps(buffered_firing_rates_from_binned_spike_count_dict, input_t=buffered_binned_t,
-                                      valid_t=buffered_binned_t, tuning_peak_locs=context.tuning_peak_locs)
-            plot_firing_rate_heatmaps(full_binned_spike_count_dict, input_t=full_binned_t,
-                                      valid_t=buffered_binned_t, tuning_peak_locs=context.tuning_peak_locs)
-            if context.connectivity_type == 'gaussian':
-                plot_2D_connection_distance(context.pop_syn_proportions, context.pop_cell_positions, connectivity_dict)
-
-        if any(voltages_exceed_threshold_list):
-            voltages_exceed_threshold = True
-            if context.verbose > 0:
-                print('optimize_simple_network: pid: %i; model_id: %i; model failed - mean membrane voltage in some '
-                      'Izhi cells exceeds spike threshold' % (os.getpid(), model_id))
-                sys.stdout.flush()
-        else:
-            voltages_exceed_threshold = False
-
-        if export:
-            current_time = time.time()
-            with h5py.File(context.temp_output_path, 'a') as f:
-                shared_context_key = 'shared_context'
-                if model_id == 0 and 'shared_context' not in f:
-                    group = f.create_group('shared_context')
-                    group.create_dataset('param_names', data=np.array(context.param_names, dtype='S'),
-                                         compression='gzip')
-                    group.create_dataset('x0', data=context.x0_array, compression='gzip')
-                    set_h5py_attr(group.attrs, 'connectivity_type', context.connectivity_type)
-                    group.attrs['active_rate_threshold'] = context.active_rate_threshold
-                    subgroup = group.create_group('pop_gid_ranges')
-                    for pop_name in context.pop_gid_ranges:
-                        subgroup.create_dataset(pop_name, data=context.pop_gid_ranges[pop_name])
-                    group.create_dataset('full_binned_t', data=full_binned_t, compression='gzip')
-                    group.create_dataset('buffered_binned_t', data=buffered_binned_t, compression='gzip')
-                    group.create_dataset('binned_t', data=binned_t, compression='gzip')
-                    subgroup = group.create_group('filter_bands')
-                    for filter, band in viewitems(context.filter_bands):
-                        subgroup.create_dataset(filter, data=band)
-                    group.create_dataset('full_rec_t', data=full_rec_t, compression='gzip')
-                    group.create_dataset('buffered_rec_t', data=buffered_rec_t, compression='gzip')
-                    group.create_dataset('rec_t', data=rec_t, compression='gzip')
-                    subgroup = group.create_group('connection_weights')
-                    for target_pop_name in connection_weights_dict:
-                        subgroup.create_group(target_pop_name)
-                        for source_pop_name in connection_weights_dict[target_pop_name]:
-                            subgroup[target_pop_name].create_dataset(
-                                source_pop_name, data=connection_weights_dict[target_pop_name][source_pop_name],
-                                compression='gzip')
-                    if len(context.tuning_peak_locs) > 0:
-                        subgroup = group.create_group('tuning_peak_locs')
-                        for pop_name in context.tuning_peak_locs:
-                            if len(context.tuning_peak_locs[pop_name]) > 0:
-                                data_group = subgroup.create_group(pop_name)
-                                target_gids = np.array(list(context.tuning_peak_locs[pop_name].keys()))
-                                peak_locs = np.array(list(context.tuning_peak_locs[pop_name].values()))
-                                data_group.create_dataset('target_gids', data=target_gids, compression='gzip')
-                                data_group.create_dataset('peak_locs', data=peak_locs, compression='gzip')
-                    subgroup = group.create_group('connectivity')
-                    for target_pop_name in connectivity_dict:
-                        subgroup.create_group(target_pop_name)
-                        for target_gid in connectivity_dict[target_pop_name]:
-                            data_group = subgroup[target_pop_name].create_group(str(target_gid))
-                            for source_pop_name in connectivity_dict[target_pop_name][target_gid]:
-                                data_group.create_dataset(source_pop_name,
-                                                          data=connectivity_dict[target_pop_name][target_gid][
-                                                              source_pop_name])
-                    subgroup = group.create_group('pop_syn_proportions')
-                    for target_pop_name in context.pop_syn_proportions:
-                        subgroup.create_group(target_pop_name)
-                        for syn_type in context.pop_syn_proportions[target_pop_name]:
-                            data_group = subgroup[target_pop_name].create_group(syn_type)
-                            source_pop_names = \
-                                np.array(list(context.pop_syn_proportions[target_pop_name][syn_type].keys()), dtype='S')
-                            syn_proportions = \
-                                np.array(list(context.pop_syn_proportions[target_pop_name][syn_type].values()))
-                            data_group.create_dataset('source_pop_names', data=source_pop_names)
-                            data_group.create_dataset('syn_proportions', data=syn_proportions)
-                    subgroup = group.create_group('pop_cell_positions')
-                    for pop_name in context.pop_cell_positions:
-                        data_group = subgroup.create_group(pop_name)
-                        gids = np.array(list(context.pop_cell_positions[pop_name].keys()))
-                        positions = np.array(list(context.pop_cell_positions[pop_name].values()))
-                        data_group.create_dataset('gids', data=gids, compression='gzip')
-                        data_group.create_dataset('positions', data=positions, compression='gzip')
-                exported_data_key = 'simple_network_exported_data'
-                group = get_h5py_group(f, [model_id, exported_data_key], create=True)
-                set_h5py_attr(group.attrs, 'voltages_exceed_threshold', voltages_exceed_threshold)
-                subgroup = group.create_group('full_spike_times')
-                for pop_name in full_spike_times_dict:
-                    subgroup.create_group(pop_name)
-                    for gid in full_spike_times_dict[pop_name]:
-                        subgroup[pop_name].create_dataset(
-                            str(gid), data=full_spike_times_dict[pop_name][gid], compression='gzip')
-                subgroup = group.create_group('buffered_firing_rates_from_binned_spike_count')
-                for pop_name in buffered_firing_rates_from_binned_spike_count_dict:
-                    subgroup.create_group(pop_name)
-                    for gid in buffered_firing_rates_from_binned_spike_count_dict[pop_name]:
-                        subgroup[pop_name].create_dataset(
-                            str(gid), data=buffered_firing_rates_from_binned_spike_count_dict[pop_name][gid],
-                            compression='gzip')
-                subgroup = group.create_group('full_binned_spike_count')
-                for pop_name in full_binned_spike_count_dict:
-                    subgroup.create_group(pop_name)
-                    for gid in full_binned_spike_count_dict[pop_name]:
-                        subgroup[pop_name].create_dataset(
-                            str(gid), data=full_binned_spike_count_dict[pop_name][gid], compression='gzip')
-                subgroup = group.create_group('subset_full_voltage_recs')
-                for pop_name in subset_full_voltage_rec_dict:
-                    subgroup.create_group(pop_name)
-                    for gid in subset_full_voltage_rec_dict[pop_name]:
-                        subgroup[pop_name].create_dataset(
-                            str(gid), data=subset_full_voltage_rec_dict[pop_name][gid], compression='gzip')
-
-            print('optimize_simple_network: pid: %i; model_id: %i; exporting data to file: %s took %.2f s' %
-                  (os.getpid(), model_id, context.temp_output_path, time.time() - current_time))
-            sys.stdout.flush()
-
-        if context.interactive:
-            context.update(locals())
 
 
 if __name__ == '__main__':
