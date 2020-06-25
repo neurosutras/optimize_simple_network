@@ -9,35 +9,27 @@ context = Context()
 @click.command(context_settings=dict(ignore_unknown_options=True, allow_extra_args=True, ))
 @click.option("--run-data-file-path", type=click.Path(exists=True, file_okay=True, dir_okay=False), required=True)
 @click.option("--replay-data-file-path", type=click.Path(exists=True, file_okay=True, dir_okay=False), required=True)
-@click.option("--num-replay-events", type=int, default=None)
+@click.option("--plot-n-trials", type=int, default=10)
 @click.option("--window-dur", type=float, default=20.)
 @click.option("--step-dur", type=float, default=20.)
-@click.option("--export", is_flag=True)
-@click.option("--output-dir", type=str, default='data')
-@click.option("--export-file-path", type=str, default=None)
-@click.option("--label", type=str, default=None)
 @click.option("--interactive", is_flag=True)
 @click.option("--verbose", type=int, default=2)
-@click.option("--plot", type=int, default=1)
+@click.option("--plot", is_flag=True)
 @click.option("--debug", is_flag=True)
 @click.pass_context
-def main(cli, run_data_file_path, replay_data_file_path, num_replay_events, window_dur, step_dur, export,
-         output_dir, export_file_path, label, interactive, verbose, plot, debug):
+def main(cli, run_data_file_path, replay_data_file_path, plot_n_trials, window_dur, step_dur, interactive, verbose,
+         plot, debug):
     """
 
     :param cli: contains unrecognized args as list of str
     :param run_data_file_path: str (path)
     :param replay_data_file_path: str (path)
-    :param num_replay_events: int
+    :param plot_n_trials: int
     :param window_dur: float
     :param step_dur: float
-    :param export: bool
-    :param output_dir: str
-    :param export_file_path: str
-    :param label: str
     :param interactive: bool
     :param verbose: int
-    :param plot: int
+    :param plot: bool
     :param debug: bool
     """
     # requires a global variable context: :class:'Context'
@@ -49,8 +41,7 @@ def main(cli, run_data_file_path, replay_data_file_path, num_replay_events, wind
     context.interface.start(disp=context.disp)
     context.interface.ensure_controller()
 
-    config_parallel_interface(__file__, output_dir=output_dir, export=export, export_file_path=export_file_path,
-                              label=label, disp=context.disp, interface=context.interface, verbose=verbose, plot=plot,
+    config_parallel_interface(__file__, disp=context.disp, interface=context.interface, verbose=verbose, plot=plot,
                               debug=debug, **kwargs)
 
     start_time = time.time()
@@ -63,25 +54,29 @@ def main(cli, run_data_file_path, replay_data_file_path, num_replay_events, wind
         print('decode_simple_network_replay: processing run data for %i trials took %.1f s' %
               (len(context.run_trial_keys), time.time() - start_time))
         sys.stdout.flush()
+    current_time = time.time()
 
-    if context.debug:
-        context.update(locals())
-        return
+    context.interface.apply(update_worker_contexts, replay_binned_t=context.replay_binned_t,
+                            plot_replay_trial_keys=context.plot_replay_trial_keys)
+    context.interface.apply(init_context)
 
-    args = context.interface.execute(get_replay_trial_keys)
-    num_replay_events = len(args[0])
-    sequences = args + [[context.export] * num_replay_events] + [[context.plot > 1] * num_replay_events]
-    decoded_position_package_list = context.interface.map(get_decoded_position_offline_replay, *sequences)
-    context.interface.execute(analyze_decoded_position_offline_replay, decoded_position_package_list,
-                              context.export, context.plot > 0)
-    if context.verbose > 0:
-        print('decode_simple_network_replay: processing %i replay events took %.1f s' %
-              (num_replay_events, time.time() - start_time))
+    if not context.replay_data_is_processed:
+        num_replay_trials = len(context.replay_trial_keys)
+        sequences = [context.replay_trial_keys, [True] * num_replay_trials]
+        context.interface.map(process_replay_trial_data, *sequences)
+        append_processed_replay_data_to_file()
+    elif plot:
+        sequences = [context.plot_replay_trial_keys, [False] * context.plot_n_trials]
+        context.interface.map(process_replay_trial_data, *sequences)
 
-    if context.export:
-        pass
-    sys.stdout.flush()
-    time.sleep(.1)
+    if plot:
+        analyze_decoded_position_replay_from_file(context.replay_data_file_path,
+                                                  (context.run_binned_t[0], context.run_binned_t[-1]), plot=True)
+
+    if context.disp:
+        print('decode_simple_network_replay: processing replay data for %i trials took %.1f s' %
+              (len(context.replay_trial_keys), time.time() - start_time))
+        sys.stdout.flush()
 
     if context.plot:
         context.interface.apply(plt.show)
@@ -94,7 +89,6 @@ def main(cli, run_data_file_path, replay_data_file_path, num_replay_events, wind
 
 def config_worker():
 
-    start_time = time.time()
     baks_alpha = 4.7725100028345535
     baks_beta = 0.41969058927343522
     baks_pad_dur = 3000.  # ms
@@ -116,14 +110,29 @@ def config_worker():
             run_data_group_key = 'simple_network_exported_data'
             run_trial_keys = [key for key in f if run_data_group_key in f[key]]
 
-    if not os.path.isfile(context.replay_data_file_path):
-        raise IOError('decode_simple_network_replay: invalid replay_data_file_path: %s' %
-                      context.replay_data_file_path)
+        if not os.path.isfile(context.replay_data_file_path):
+            raise IOError('decode_simple_network_replay: invalid replay_data_file_path: %s' %
+                          context.replay_data_file_path)
+        with h5py.File(context.replay_data_file_path, 'r') as f:
+            group = get_h5py_group(f, ['shared_context'])
+            replay_binned_t = group['buffered_binned_t'][:]
+            if context.global_comm.rank == 0:
+                replay_data_group_key = 'simple_network_exported_data'
+                replay_trial_keys = [key for key in f if replay_data_group_key in f[key]]
+                context.plot_n_trials = min(int(context.plot_n_trials), len(replay_trial_keys))
+                plot_replay_trial_keys = \
+                    list(np.random.choice(replay_trial_keys, context.plot_n_trials, replace=False))
+                if 'decoded_pos_matrix' in group:
+                    replay_data_is_processed = True
+                else:
+                    replay_data_is_processed = False
 
-    with h5py.File(context.replay_data_file_path, 'r') as f:
-        group = get_h5py_group(f, ['shared_context'])
-        replay_binned_t = group['buffered_binned_t'][:]
+    context.update(locals())
 
+
+def init_context():
+
+    replay_binned_t = context.replay_binned_t
     replay_binned_dt = replay_binned_t[1] - replay_binned_t[0]
     window_dur = context.window_dur
     step_dur = context.step_dur
@@ -310,34 +319,33 @@ def load_processed_run_data_from_file():
     context.update(locals())
 
 
-def get_replay_trial_keys():
-
-    replay_data_group_key = 'simple_network_exported_data'
-    with h5py.File(context.replay_data_file_path, 'r') as f:
-        available_data_keys = \
-            [data_key for data_key in f if data_key != 'shared_context' and replay_data_group_key in f[data_key]]
-        if context.num_replay_events is None:
-            replay_data_keys = available_data_keys
-        else:
-            replay_data_keys = \
-                list(np.random.choice(available_data_keys, min(context.num_replay_events, len(available_data_keys)),
-                                      replace=False))
-
-    return [replay_data_keys]
-
-
-def get_decoded_position_offline_replay(replay_data_key, export=False, plot=False):
+def process_replay_trial_data(trial_key, export=True):
     """
 
-    :param replay_data_key: str
+    :param trial_key: str
     :param export: bool
-    :param plot: bool
-    :return: tuple (str, dict, dict)
     """
     start_time = time.time()
-    replay_binned_spike_count_matrix_dict = \
-        get_replay_data_from_file(context.replay_data_file_path, context.replay_binned_t, context.sorted_gid_dict,
-                                  replay_data_key=replay_data_key)
+
+    replay_full_spike_times_dict = dict()
+    replay_binned_spike_count_matrix_dict = dict()
+    replay_data_group_key = 'simple_network_exported_data'
+    with h5py.File(context.replay_data_file_path, 'r') as f:
+        group = get_h5py_group(f, [trial_key, replay_data_group_key, 'full_spike_times'])
+        for pop_name in group:
+            if pop_name not in replay_full_spike_times_dict:
+                replay_full_spike_times_dict[pop_name] = dict()
+            for gid_key in group[pop_name]:
+                replay_full_spike_times_dict[pop_name][int(gid_key)] = group[pop_name][gid_key][:]
+    replay_full_binned_spike_count_dict = \
+        get_binned_spike_count_dict(replay_full_spike_times_dict, context.replay_binned_t)
+
+    for pop_name in replay_full_binned_spike_count_dict:
+        replay_binned_spike_count = np.empty((len(replay_full_binned_spike_count_dict[pop_name]),
+                                              len(context.replay_binned_t)))
+        for i, gid in enumerate(context.sorted_gid_dict[pop_name]):
+            replay_binned_spike_count[i, :] = replay_full_binned_spike_count_dict[pop_name][gid]
+        replay_binned_spike_count_matrix_dict[pop_name] = replay_binned_spike_count
 
     p_pos_dict = decode_position_from_offline_replay(context.run_binned_t, context.run_firing_rate_matrix_dict,
                                                      context.replay_binned_t,
@@ -345,13 +353,36 @@ def get_decoded_position_offline_replay(replay_data_key, export=False, plot=Fals
                                                      context.replay_binned_t_center_indexes,
                                                      context.decode_binned_t, window_dur=context.window_dur)
 
-    if context.verbose:
-        print('get_decoded_position_from_offline_replay: pid: %i processed replay event with data_key: %s from '
-              'replay_file_path: %s in %.1f s' %
-              (os.getpid(), replay_data_key, context.replay_data_file_path, time.time()-start_time))
+    decoded_pos_dict = dict()
+    for pop_name in p_pos_dict:
+        this_decoded_pos = np.empty_like(context.decode_binned_t)
+        this_decoded_pos[:] = np.nan
+        p_pos = p_pos_dict[pop_name]
+        for pos_bin in range(p_pos.shape[1]):
+            if np.any(~np.isnan(p_pos[:, pos_bin])):
+                index = np.nanargmax(p_pos[:, pos_bin])
+                this_decoded_pos[pos_bin] = context.run_binned_t[index]
+        decoded_pos_dict[pop_name] = this_decoded_pos
+
+    if context.disp:
+        print('process_replay_trial_data: pid: %i took %.1f s to decode position for trial: %s' %
+              (os.getpid(), time.time() - start_time, trial_key))
         sys.stdout.flush()
 
-    if plot:
+    if export:
+        with h5py.File(context.temp_output_path, 'a') as f:
+            exported_data_key = 'simple_network_processed_data'
+            group = get_h5py_group(f, [trial_key, exported_data_key], create=True)
+            subgroup = group.create_group('decoded_position')
+            for pop_name in decoded_pos_dict:
+                subgroup.create_dataset(pop_name, data=decoded_pos_dict[pop_name], compression='gzip')
+
+        if context.disp:
+            print('process_replay_trial_data: pid: %i exported data for trial: %s to temp_output_path: %s' %
+                  (os.getpid(), trial_key, context.temp_output_path))
+            sys.stdout.flush()
+
+    if context.plot and trial_key in context.plot_replay_trial_keys:
         ordered_pop_names = ['FF', 'E', 'I']
         for pop_name in ordered_pop_names:
             if pop_name not in p_pos_dict:
@@ -379,77 +410,116 @@ def get_decoded_position_offline_replay(replay_data_key, export=False, plot=Fals
             axes[0][col].set_xlim([context.replay_binned_t[0], context.replay_binned_t[-1]])
             axes[0][col].set_ylabel('Sorted cells')
             axes[0][col].set_title('Population: %s' % pop_name)
-        fig.suptitle('Event # %s' % replay_data_key, y=0.99)
+        fig.suptitle('Trial # %s' % trial_key, y=0.99)
         fig.tight_layout()
         fig.subplots_adjust(wspace=0.4, hspace=0.4, top=0.9)
 
-    decoded_pos_dict = dict()
-    for pop_name in p_pos_dict:
-        this_decoded_pos = np.empty_like(context.decode_binned_t)
-        this_decoded_pos[:] = np.nan
-        p_pos = p_pos_dict[pop_name]
-        for pos_bin in range(p_pos.shape[1]):
-            if np.any(~np.isnan(p_pos[:, pos_bin])):
-                index = np.nanargmax(p_pos[:, pos_bin])
-                this_decoded_pos[pos_bin] = context.run_binned_t[index]
-        decoded_pos_dict[pop_name] = this_decoded_pos
 
-    return replay_data_key, p_pos_dict, decoded_pos_dict
+def append_processed_replay_data_to_file():
+
+    start_time = time.time()
+    temp_output_path_list = [temp_output_path for temp_output_path in context.interface.get('context.temp_output_path')
+                             if os.path.isfile(temp_output_path)]
+
+    decoded_pos_list_dict = dict()
+    for temp_output_path in temp_output_path_list:
+        with h5py.File(temp_output_path, 'r') as f:
+            exported_data_key = 'simple_network_processed_data'
+            for trial_key in (key for key in f if exported_data_key in f[key]):
+                group = get_h5py_group(f, [trial_key, exported_data_key])
+                subgroup = group['decoded_position']
+                for pop_name in subgroup:
+                    this_decoded_position = subgroup[pop_name][:]
+                    if pop_name not in decoded_pos_list_dict:
+                        decoded_pos_list_dict[pop_name] = []
+                    decoded_pos_list_dict[pop_name].append(this_decoded_position)
+
+    if context.debug:
+        context.update(decoded_pos_list_dict=decoded_pos_list_dict)
+
+    with h5py.File(context.replay_data_file_path, 'a') as f:
+        group = get_h5py_group(f, ['shared_context'])
+        group.create_dataset('decode_binned_t', data=context.decode_binned_t, compression='gzip')
+        subgroup = group.create_group('decoded_pos_matrix')
+        for pop_name in decoded_pos_list_dict:
+            subgroup.create_dataset(pop_name, data=np.asarray(decoded_pos_list_dict[pop_name]), compression='gzip')
+
+    for temp_output_path in temp_output_path_list:
+        os.remove(temp_output_path)
+
+    if context.disp:
+        print('append_processed_replay_data_to_file: pid: %i; exporting to replay_data_file_path: %s '
+              'took %.1f s' % (os.getpid(), context.replay_data_file_path, time.time() - start_time))
 
 
-def analyze_decoded_position_offline_replay(decoded_position_package_list, export=False, plot=False):
+def analyze_decoded_position_replay_from_file(replay_data_file_path, run_range, plot=True, full_output=False):
     """
 
-    :param decoded_position_package_list: tuple (str, dict, dict)
-    :param export: bool
+    :param replay_data_file_path: str (path)
+    :param run_range: tuple of float
     :param plot: bool
-    :return:
+    :param full_output: bool
+    :return: tuple
     """
-    from scipy.stats import circmean, pearsonr
+    track_start = run_range[0]
+    track_length = run_range[1] - run_range[0]
 
-    decoded_pos_list_dict = defaultdict(list)
-    mean_decoded_pos = defaultdict(list)
-    decoded_pos_diff_var = defaultdict(list)
-    track_length = context.run_binned_t[-1] - context.run_binned_t[0]
-    decoded_trajectory_len = defaultdict(list)
+    decoded_pos_matrix_dict = dict()
+    band_freq_dict = defaultdict(lambda: defaultdict(list))
+    band_tuning_index_dict = defaultdict(lambda: defaultdict(list))
+    with h5py.File(replay_data_file_path, 'r') as f:
+        group = get_h5py_group(f, ['shared_context', 'decoded_pos_matrix'])
+        for pop_name in group:
+            decoded_pos_matrix_dict[pop_name] = group[pop_name][:]
+        exported_data_group_key = 'simple_network_exported_data'
+        for trial_key in (key for key in f if exported_data_group_key in f[key]):
+            group = get_h5py_group(f, [trial_key, exported_data_group_key, 'filter_results'])
+            subgroup = group['centroid_freq']
+            for band in subgroup:
+                for pop_name in subgroup[band].attrs:
+                    band_freq_dict[band][pop_name].append(subgroup[band].attrs[pop_name])
+            subgroup = group['freq_tuning_index']
+            for band in subgroup:
+                for pop_name in subgroup[band].attrs:
+                    band_tuning_index_dict[band][pop_name].append(subgroup[band].attrs[pop_name])
 
-    for replay_data_key, p_pos_dict, decoded_pos_dict in decoded_position_package_list:
-        for pop_name in decoded_pos_dict:
-            this_decoded_pos = decoded_pos_dict[pop_name]
-            clean_indexes = ~np.isnan(this_decoded_pos)
+    all_decoded_pos_dict = dict()
+    decoded_pos_diff_var_dict = defaultdict(list)
+    decoded_path_len_dict = defaultdict(list)
+    decoded_distance_dict = defaultdict(list)
+
+    for pop_name in decoded_pos_matrix_dict:
+        this_decoded_pos_matrix = (decoded_pos_matrix_dict[pop_name] - track_start)/ track_length
+        clean_indexes = ~np.isnan(this_decoded_pos_matrix)
+        all_decoded_pos_dict[pop_name] = this_decoded_pos_matrix[clean_indexes]
+        this_decoded_pos_diff = np.diff(this_decoded_pos_matrix, axis=1)
+        for trial in range(this_decoded_pos_diff.shape[0]):
+            this_trial_diff = this_decoded_pos_diff[trial, :]
+            clean_indexes = ~np.isnan(this_trial_diff)
             if len(clean_indexes) > 0:
-                decoded_pos_list_dict[pop_name].extend(this_decoded_pos[clean_indexes] / track_length)
-                this_mean_decoded_pos = circmean(this_decoded_pos[clean_indexes], low=context.run_binned_t[0],
-                                                 high=context.run_binned_t[-1])
-            else:
-                continue
-            mean_decoded_pos[pop_name].append(this_mean_decoded_pos / track_length)
-            decoded_pos_diff = np.diff(this_decoded_pos)
-            clean_indexes = ~np.isnan(decoded_pos_diff)
-            if len(clean_indexes) > 0:
-                decoded_pos_diff = decoded_pos_diff[clean_indexes]
-            else:
-                continue
-            decoded_pos_diff[np.where(decoded_pos_diff < -track_length / 2.)] += track_length
-            decoded_pos_diff[np.where(decoded_pos_diff > track_length / 2.)] -= track_length
-            decoded_pos_diff /= track_length
-            this_decoded_pos_diff_var = np.var(decoded_pos_diff)
-            decoded_pos_diff_var[pop_name].append(this_decoded_pos_diff_var)
-            this_decoded_trajectory_len = np.sum(np.abs(decoded_pos_diff))
-            decoded_trajectory_len[pop_name].append(this_decoded_trajectory_len)
+                this_trial_diff = this_trial_diff[clean_indexes]
+                this_trial_diff[np.where(this_trial_diff < -0.5)] += 1.
+                this_trial_diff[np.where(this_trial_diff > 0.5)] -= 1.
+                this_path_len = np.sum(np.abs(this_trial_diff))
+                decoded_path_len_dict[pop_name].append(this_path_len)
+                this_distance = np.sum(this_trial_diff)
+                decoded_distance_dict[pop_name].append(this_distance)
+                if len(clean_indexes) > 1:
+                    this_trial_diff_var = np.var(this_trial_diff)
+                    decoded_pos_diff_var_dict[pop_name].append(this_trial_diff_var)
 
     if plot:
         ordered_pop_names = ['FF', 'E', 'I']
         for pop_name in ordered_pop_names:
-            if pop_name not in mean_decoded_pos:
+            if pop_name not in decoded_pos_matrix_dict:
                 ordered_pop_names.remove(pop_name)
-        for pop_name in mean_decoded_pos:
+        for pop_name in decoded_pos_matrix_dict:
             if pop_name not in ordered_pop_names:
                 ordered_pop_names.append(pop_name)
-        fig, axes = plt.subplots(2, 2, figsize=(8.5, 7.), constrained_layout=True)
-        """
+        fig, axes = plt.subplots(3, 2, figsize=(8.5, 10.5), constrained_layout=True)
+
         for pop_name in ordered_pop_names:
-            hist, edges = np.histogram(decoded_pos_list_dict[pop_name], bins=np.linspace(0., 1., 11), density=True)
+            hist, edges = np.histogram(all_decoded_pos_dict[pop_name], bins=np.linspace(0., 1., 21), density=True)
             bin_width = (edges[1] - edges[0])
             axes[1][0].plot(edges[1:] - bin_width / 2., hist * bin_width, label=pop_name)
         axes[1][0].set_xlim((0., 1.))
@@ -459,21 +529,9 @@ def analyze_decoded_position_offline_replay(decoded_position_package_list, expor
         axes[1][0].legend(loc='best', frameon=False, framealpha=0.5)
         axes[1][0].set_title('Decoded positions')
 
-        """
+        max_variance = np.max(list(decoded_pos_diff_var_dict.values()))
         for pop_name in ordered_pop_names:
-            hist, edges = np.histogram(mean_decoded_pos[pop_name], bins=np.linspace(0., 1., 11), density=True)
-            bin_width = (edges[1] - edges[0])
-            axes[1][0].plot(edges[1:] - bin_width / 2., hist * bin_width, label=pop_name)
-        axes[1][0].set_xlim((0., 1.))
-        axes[1][0].set_ylim((0., axes[1][0].get_ylim()[1]))
-        axes[1][0].set_xlabel('Decoded position')
-        axes[1][0].set_ylabel('Probability')
-        axes[1][0].legend(loc='best', frameon=False, framealpha=0.5)
-        axes[1][0].set_title('Mean decoded position')
-
-        max_variance = np.max(list(decoded_pos_diff_var.values()))
-        for pop_name in ordered_pop_names:
-            hist, edges = np.histogram(decoded_pos_diff_var[pop_name], bins=np.linspace(0., max_variance, 11),
+            hist, edges = np.histogram(decoded_pos_diff_var_dict[pop_name], bins=np.linspace(0., max_variance, 21),
                                        density=True)
             bin_width = (edges[1] - edges[0])
             axes[0][1].plot(edges[1:] - bin_width / 2., hist * bin_width, label=pop_name)
@@ -484,34 +542,61 @@ def analyze_decoded_position_offline_replay(decoded_position_package_list, expor
         axes[0][1].legend(loc='best', frameon=False, framealpha=0.5)
         axes[0][1].set_title('Variance of steps within decoded trajectory')
 
-        max_trajectory_len = np.max(list(decoded_trajectory_len.values()))
+        max_path_len = np.max(list(decoded_path_len_dict.values()))
         for pop_name in ordered_pop_names:
-            hist, edges = np.histogram(decoded_trajectory_len[pop_name], bins=np.linspace(0., max_trajectory_len, 11),
+            hist, edges = np.histogram(decoded_path_len_dict[pop_name], bins=np.linspace(0., max_path_len, 21),
                                        density=True)
             bin_width = (edges[1] - edges[0])
             axes[0][0].plot(edges[1:] - bin_width / 2., hist * bin_width, label=pop_name)
-        axes[0][0].set_xlim((0., max_trajectory_len))
+        axes[0][0].set_xlim((0., max_path_len))
         axes[0][0].set_ylim((0., axes[0][0].get_ylim()[1]))
         axes[0][0].set_xlabel('Path length')
         axes[0][0].set_ylabel('Probability')
         axes[0][0].legend(loc='best', frameon=False, framealpha=0.5)
         axes[0][0].set_title('Path length of decoded trajectory')
 
-        fit_params = np.polyfit(decoded_trajectory_len['FF'], decoded_trajectory_len['E'], 1)
-        fit_f = np.vectorize(lambda x: fit_params[0] * x + fit_params[1])
-        xlim = (0., max_trajectory_len)
-        axes[1][1].plot(xlim, fit_f(xlim), c='k', alpha=0.75, zorder=1, linestyle='--')
-        r_val, p_val = pearsonr(decoded_trajectory_len['FF'], decoded_trajectory_len['E'])
-        axes[1][1].annotate('R$^{2}$ = %.3f;\np %s %.3f' %
-                            (r_val ** 2., '>' if p_val > 0.05 else '<', p_val if p_val > 0.001 else 0.001),
-                            xy=(0.6, 0.7),
-                            xycoords='axes fraction')
-        axes[1][1].scatter(decoded_trajectory_len['FF'], decoded_trajectory_len['E'], s=1., c='grey', alpha=0.5)
-        axes[1][1].set_xlim(xlim)
-        axes[1][1].set_ylim((xlim))
-        axes[1][1].set_xlabel('Path length (FF)')
-        axes[1][1].set_ylabel('Path length (E)')
-        axes[1][1].set_title('Path length of decoded trajectory')
+        max_distance = np.max(np.abs(list(decoded_distance_dict.values())))
+        for pop_name in ordered_pop_names:
+            hist, edges = np.histogram(decoded_distance_dict[pop_name],
+                                       bins=np.linspace(-max_distance, max_distance, 21),
+                                       density=True)
+            bin_width = (edges[1] - edges[0])
+            axes[1][1].plot(edges[1:] - bin_width / 2., hist * bin_width, label=pop_name)
+        axes[1][1].set_xlim((-max_distance, max_distance))
+        axes[1][1].set_ylim((0., axes[1][1].get_ylim()[1]))
+        axes[1][1].set_xlabel('Distance')
+        axes[1][1].set_ylabel('Probability')
+        axes[1][1].legend(loc='best', frameon=False, framealpha=0.5)
+        axes[1][1].set_title('Distance traveled by decoded trajectory')
+
+        min_freq = np.min(list(band_freq_dict['Ripple'].values()))
+        max_freq = np.max(list(band_freq_dict['Ripple'].values()))
+        for pop_name in ordered_pop_names:
+            hist, edges = np.histogram(band_freq_dict['Ripple'][pop_name], bins=np.linspace(min_freq, max_freq, 21),
+                                       density=True)
+            bin_width = (edges[1] - edges[0])
+            axes[2][0].plot(edges[1:] - bin_width / 2., hist * bin_width, label=pop_name)
+        axes[2][0].set_xlim((min_freq, max_freq))
+        axes[2][0].set_ylim((0., axes[2][0].get_ylim()[1]))
+        axes[2][0].set_xlabel('Frequency (Hz)')
+        axes[2][0].set_ylabel('Probability')
+        axes[2][0].legend(loc='best', frameon=False, framealpha=0.5)
+        axes[2][0].set_title('Oscillation frequency')
+
+        min_tuning_index = np.min(list(band_tuning_index_dict['Ripple'].values()))
+        max_tuning_index = np.max(list(band_tuning_index_dict['Ripple'].values()))
+        for pop_name in ordered_pop_names:
+            hist, edges = np.histogram(band_tuning_index_dict['Ripple'][pop_name],
+                                       bins=np.linspace(min_tuning_index, max_tuning_index, 21),
+                                       density=True)
+            bin_width = (edges[1] - edges[0])
+            axes[2][1].plot(edges[1:] - bin_width / 2., hist * bin_width, label=pop_name)
+        axes[2][1].set_xlim((min_tuning_index, max_tuning_index))
+        axes[2][1].set_ylim((0., axes[2][1].get_ylim()[1]))
+        axes[2][1].set_xlabel('Frequency tuning index')
+        axes[2][1].set_ylabel('Probability')
+        axes[2][1].legend(loc='best', frameon=False, framealpha=0.5)
+        axes[2][1].set_title('Oscillation frequency tuning index')
 
         clean_axes(axes)
         fig.set_constrained_layout_pads(hspace=0.15, wspace=0.15)
