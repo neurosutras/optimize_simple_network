@@ -44,6 +44,9 @@ def main(cli, run_data_file_path, replay_data_file_path, plot_n_trials, window_d
     config_parallel_interface(__file__, disp=context.disp, interface=context.interface, verbose=verbose, plot=plot,
                               debug=debug, **kwargs)
 
+    if context.debug:
+        return
+
     start_time = time.time()
 
     if not context.run_data_is_processed:
@@ -87,45 +90,48 @@ def main(cli, run_data_file_path, replay_data_file_path, plot_n_trials, window_d
         context.update(locals())
 
 
+def config_controller():
+
+    if not os.path.isfile(context.run_data_file_path):
+        raise IOError('decode_simple_network_replay: invalid run_data_file_path: %s' %
+                      context.run_data_file_path)
+    with h5py.File(context.run_data_file_path, 'r') as f:
+        group = get_h5py_group(f, ['shared_context'])
+        if 'duration' in group.attrs:
+            baks_pad_dur = group.attrs['duration']
+        if 'trial_averaged_firing_rate_matrix' in group:
+            run_data_is_processed = True
+        else:
+            run_data_is_processed = False
+        run_binned_t = group['binned_t'][:]
+        run_data_group_key = 'simple_network_exported_data'
+        run_trial_keys = [key for key in f if run_data_group_key in f[key]]
+
+    if not os.path.isfile(context.replay_data_file_path):
+        raise IOError('decode_simple_network_replay: invalid replay_data_file_path: %s' %
+                      context.replay_data_file_path)
+    with h5py.File(context.replay_data_file_path, 'r') as f:
+        group = get_h5py_group(f, ['shared_context'])
+        replay_binned_t = group['buffered_binned_t'][:]
+        replay_data_group_key = 'simple_network_exported_data'
+        replay_trial_keys = [key for key in f if replay_data_group_key in f[key]]
+        context.plot_n_trials = min(int(context.plot_n_trials), len(replay_trial_keys))
+        plot_replay_trial_keys = \
+            list(np.random.choice(replay_trial_keys, context.plot_n_trials, replace=False))
+        if 'decoded_pos_matrix' in group:
+            replay_data_is_processed = True
+        else:
+            replay_data_is_processed = False
+
+    context.update(locals())
+
+
 def config_worker():
 
     baks_alpha = 4.7725100028345535
     baks_beta = 0.41969058927343522
     baks_pad_dur = 3000.  # ms
     baks_wrap_around = True
-
-    if context.global_comm.rank == 0:
-        if not os.path.isfile(context.run_data_file_path):
-            raise IOError('decode_simple_network_replay: invalid run_data_file_path: %s' %
-                          context.run_data_file_path)
-        with h5py.File(context.run_data_file_path, 'r') as f:
-            group = get_h5py_group(f, ['shared_context'])
-            if 'duration' in group.attrs:
-                baks_pad_dur = group.attrs['duration']
-            if 'trial_averaged_firing_rate_matrix' in group:
-                run_data_is_processed = True
-            else:
-                run_data_is_processed = False
-            run_binned_t = group['binned_t'][:]
-            run_data_group_key = 'simple_network_exported_data'
-            run_trial_keys = [key for key in f if run_data_group_key in f[key]]
-
-        if not os.path.isfile(context.replay_data_file_path):
-            raise IOError('decode_simple_network_replay: invalid replay_data_file_path: %s' %
-                          context.replay_data_file_path)
-        with h5py.File(context.replay_data_file_path, 'r') as f:
-            group = get_h5py_group(f, ['shared_context'])
-            replay_binned_t = group['buffered_binned_t'][:]
-            if context.global_comm.rank == 0:
-                replay_data_group_key = 'simple_network_exported_data'
-                replay_trial_keys = [key for key in f if replay_data_group_key in f[key]]
-                context.plot_n_trials = min(int(context.plot_n_trials), len(replay_trial_keys))
-                plot_replay_trial_keys = \
-                    list(np.random.choice(replay_trial_keys, context.plot_n_trials, replace=False))
-                if 'decoded_pos_matrix' in group:
-                    replay_data_is_processed = True
-                else:
-                    replay_data_is_processed = False
 
     context.update(locals())
 

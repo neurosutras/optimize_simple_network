@@ -1,7 +1,7 @@
 #!/bin/bash -l
 export DATE=$(date +%Y%m%d_%H%M%S)
 export LABEL=simple_network_replay_"$3"
-export JOB_NAME=simulate_"$LABEL"_"$DATE"
+export JOB_NAME=decode_"$LABEL"_"$DATE"
 export RUN_DATA_FILE_PATH="$1"
 export REPLAY_DATA_FILE_PATH="$2"
 sbatch <<EOT
