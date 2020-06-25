@@ -14,7 +14,7 @@ sbatch <<EOT
 #SBATCH -p development
 #SBATCH -N 10
 #SBATCH -n 560
-#SBATCH -t 2:00:00
+#SBATCH -t 1:00:00
 #SBATCH --mail-user=aaronmil@stanford.edu
 #SBATCH --mail-type=BEGIN,END,FAIL
 
