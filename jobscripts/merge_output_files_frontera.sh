@@ -10,7 +10,7 @@ sbatch <<EOT
 #SBATCH -p normal
 #SBATCH -N 1
 #SBATCH -n 1
-#SBATCH -t 2:00:00
+#SBATCH -t 0:30:00
 #SBATCH --mail-user=aaronmil@stanford.edu
 #SBATCH --mail-type=BEGIN,END,FAIL
 
