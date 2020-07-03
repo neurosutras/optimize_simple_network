@@ -461,7 +461,7 @@ def append_processed_replay_data_to_file():
 def analyze_decoded_position_replay_from_file(replay_data_file_path, run_range, plot=True, full_output=False):
     """
 
-    :param replay_data_file_path: str (path)
+    :param replay_data_file_path: str (path) or list of str
     :param run_range: tuple of float
     :param plot: bool
     :param full_output: bool
@@ -470,90 +470,192 @@ def analyze_decoded_position_replay_from_file(replay_data_file_path, run_range, 
     track_start = run_range[0]
     track_length = run_range[1] - run_range[0]
 
-    decoded_pos_matrix_dict = dict()
-    band_freq_dict = defaultdict(lambda: defaultdict(list))
-    band_tuning_index_dict = defaultdict(lambda: defaultdict(list))
-    with h5py.File(replay_data_file_path, 'r') as f:
-        group = get_h5py_group(f, ['shared_context', 'decoded_pos_matrix'])
-        for pop_name in group:
-            decoded_pos_matrix_dict[pop_name] = group[pop_name][:]
-        exported_data_group_key = 'simple_network_exported_data'
-        for trial_key in (key for key in f if exported_data_group_key in f[key]):
-            group = get_h5py_group(f, [trial_key, exported_data_group_key, 'filter_results'])
-            subgroup = group['centroid_freq']
-            for band in subgroup:
-                for pop_name in subgroup[band].attrs:
-                    band_freq_dict[band][pop_name].append(subgroup[band].attrs[pop_name])
-            subgroup = group['freq_tuning_index']
-            for band in subgroup:
-                for pop_name in subgroup[band].attrs:
-                    band_tuning_index_dict[band][pop_name].append(subgroup[band].attrs[pop_name])
+    if not isinstance(replay_data_file_path, list):
+        replay_data_file_path_list = [replay_data_file_path]
+    else:
+        replay_data_file_path_list = replay_data_file_path
 
-    all_decoded_pos_dict = dict()
-    decoded_pos_diff_var_dict = defaultdict(list)
-    decoded_path_len_dict = defaultdict(list)
-    decoded_distance_dict = defaultdict(list)
+    num_instances = len(replay_data_file_path_list)
 
-    for pop_name in decoded_pos_matrix_dict:
-        this_decoded_pos_matrix = (decoded_pos_matrix_dict[pop_name] - track_start)/ track_length
-        clean_indexes = ~np.isnan(this_decoded_pos_matrix)
-        all_decoded_pos_dict[pop_name] = this_decoded_pos_matrix[clean_indexes]
-        this_decoded_pos_diff = np.diff(this_decoded_pos_matrix, axis=1)
-        for trial in range(this_decoded_pos_diff.shape[0]):
-            this_trial_diff = this_decoded_pos_diff[trial, :]
-            clean_indexes = ~np.isnan(this_trial_diff)
-            if len(clean_indexes) > 0:
-                this_trial_diff = this_trial_diff[clean_indexes]
-                this_trial_diff[np.where(this_trial_diff < -0.5)] += 1.
-                this_trial_diff[np.where(this_trial_diff > 0.5)] -= 1.
-                this_path_len = np.sum(np.abs(this_trial_diff))
-                decoded_path_len_dict[pop_name].append(this_path_len)
-                this_distance = np.sum(this_trial_diff)
-                decoded_distance_dict[pop_name].append(this_distance)
-                if len(clean_indexes) > 1:
-                    this_trial_diff_var = np.var(this_trial_diff)
-                    decoded_pos_diff_var_dict[pop_name].append(this_trial_diff_var)
+    band_freq_dict_instances_list = defaultdict(lambda: defaultdict(list))
+    band_tuning_index_dict_instances_list = defaultdict(lambda: defaultdict(list))
+    all_decoded_pos_dict_instances_list = defaultdict(list)
+    decoded_pos_diff_var_dict_instances_list = defaultdict(list)
+    decoded_path_len_dict_instances_list = defaultdict(list)
+    decoded_distance_dict_instances_list = defaultdict(list)
+    first = True
+
+    for replay_data_file_path in replay_data_file_path_list:
+        decoded_pos_matrix_dict = dict()
+        band_freq_dict = defaultdict(lambda: defaultdict(list))
+        band_tuning_index_dict = defaultdict(lambda: defaultdict(list))
+        with h5py.File(replay_data_file_path, 'r') as f:
+            group = get_h5py_group(f, ['shared_context', 'decoded_pos_matrix'])
+            for pop_name in group:
+                decoded_pos_matrix_dict[pop_name] = group[pop_name][:]
+            exported_data_group_key = 'simple_network_exported_data'
+            for trial_key in (key for key in f if exported_data_group_key in f[key]):
+                group = get_h5py_group(f, [trial_key, exported_data_group_key, 'filter_results'])
+                subgroup = group['centroid_freq']
+                for band in subgroup:
+                    for pop_name in subgroup[band].attrs:
+                        band_freq_dict[band][pop_name].append(subgroup[band].attrs[pop_name])
+                subgroup = group['freq_tuning_index']
+                for band in subgroup:
+                    for pop_name in subgroup[band].attrs:
+                        band_tuning_index_dict[band][pop_name].append(subgroup[band].attrs[pop_name])
+
+        all_decoded_pos_dict = dict()
+        decoded_path_len_dict = defaultdict(list)
+        decoded_distance_dict = defaultdict(list)
+        decoded_pos_diff_var_dict = defaultdict(list)
+
+        for pop_name in decoded_pos_matrix_dict:
+            this_decoded_pos_matrix = (decoded_pos_matrix_dict[pop_name] - track_start) / track_length
+            clean_indexes = ~np.isnan(this_decoded_pos_matrix)
+            all_decoded_pos_dict[pop_name] = this_decoded_pos_matrix[clean_indexes]
+            this_decoded_pos_diff = np.diff(this_decoded_pos_matrix, axis=1)
+            for trial in range(this_decoded_pos_diff.shape[0]):
+                this_trial_diff = this_decoded_pos_diff[trial, :]
+                clean_indexes = ~np.isnan(this_trial_diff)
+                if len(clean_indexes) > 0:
+                    this_trial_diff = this_trial_diff[clean_indexes]
+                    this_trial_diff[np.where(this_trial_diff < -0.5)] += 1.
+                    this_trial_diff[np.where(this_trial_diff > 0.5)] -= 1.
+                    this_path_len = np.sum(np.abs(this_trial_diff))
+                    decoded_path_len_dict[pop_name].append(this_path_len)
+                    this_distance = np.sum(this_trial_diff)
+                    decoded_distance_dict[pop_name].append(this_distance)
+                    if len(clean_indexes) > 1:
+                        this_trial_diff_var = np.var(this_trial_diff)
+                        decoded_pos_diff_var_dict[pop_name].append(this_trial_diff_var)
+            all_decoded_pos_dict_instances_list[pop_name].append(all_decoded_pos_dict[pop_name])
+            decoded_path_len_dict_instances_list[pop_name].append(decoded_path_len_dict[pop_name])
+            decoded_distance_dict_instances_list[pop_name].append(decoded_distance_dict[pop_name])
+            decoded_pos_diff_var_dict_instances_list[pop_name].append(decoded_pos_diff_var_dict[pop_name])
+        for band in band_freq_dict:
+            for pop_name in band_freq_dict[band]:
+                band_freq_dict_instances_list[band][pop_name].append(band_freq_dict[band][pop_name])
+        for band in band_tuning_index_dict:
+            for pop_name in band_tuning_index_dict[band]:
+                band_tuning_index_dict_instances_list[band][pop_name].append(band_tuning_index_dict[band][pop_name])
 
     if plot:
         ordered_pop_names = ['FF', 'E', 'I']
         for pop_name in ordered_pop_names:
-            if pop_name not in decoded_pos_matrix_dict:
+            if pop_name not in all_decoded_pos_dict_instances_list:
                 ordered_pop_names.remove(pop_name)
-        for pop_name in decoded_pos_matrix_dict:
+        for pop_name in all_decoded_pos_dict_instances_list:
             if pop_name not in ordered_pop_names:
                 ordered_pop_names.append(pop_name)
         fig, axes = plt.subplots(3, 2, figsize=(8.5, 10.5), constrained_layout=True)
 
-        for pop_name in ordered_pop_names:
-            hist, edges = np.histogram(all_decoded_pos_dict[pop_name], bins=np.linspace(0., 1., 21), density=True)
-            bin_width = (edges[1] - edges[0])
-            axes[1][0].plot(edges[1:] - bin_width / 2., hist * bin_width, label=pop_name)
-        axes[1][0].set_xlim((0., 1.))
-        axes[1][0].set_ylim((0., axes[1][0].get_ylim()[1]))
-        axes[1][0].set_xlabel('Decoded position')
-        axes[1][0].set_ylabel('Probability')
-        axes[1][0].legend(loc='best', frameon=False, framealpha=0.5)
-        axes[1][0].set_title('Decoded positions')
+        max_variance = np.max(list(decoded_pos_diff_var_dict_instances_list.values()))
+        max_path_len = np.max(list(decoded_path_len_dict_instances_list.values()))
+        max_distance = np.max(np.abs(list(decoded_distance_dict_instances_list.values())))
+        min_freq = np.min(list(band_freq_dict_instances_list['Ripple'].values()))
+        max_freq = np.max(list(band_freq_dict_instances_list['Ripple'].values()))
+        min_tuning_index = np.min(list(band_tuning_index_dict_instances_list['Ripple'].values()))
+        max_tuning_index = np.max(list(band_tuning_index_dict_instances_list['Ripple'].values()))
 
-        max_variance = np.max(list(decoded_pos_diff_var_dict.values()))
         for pop_name in ordered_pop_names:
-            hist, edges = np.histogram(decoded_pos_diff_var_dict[pop_name], bins=np.linspace(0., max_variance, 21),
-                                       density=True)
-            bin_width = (edges[1] - edges[0])
-            axes[0][1].plot(edges[1:] - bin_width / 2., hist * bin_width, label=pop_name)
-        axes[0][1].set_xlim((0., max_variance))
-        axes[0][1].set_ylim((0., axes[0][1].get_ylim()[1]))
-        axes[0][1].set_xlabel('Variance')
-        axes[0][1].set_ylabel('Probability')
-        axes[0][1].legend(loc='best', frameon=False, framealpha=0.5)
-        axes[0][1].set_title('Variance of steps within decoded trajectory')
+            hist_list = []
+            for all_decoded_pos in all_decoded_pos_dict_instances_list[pop_name]:
+                hist, edges = np.histogram(all_decoded_pos, bins=np.linspace(0., 1., 21), density=True)
+                bin_width = (edges[1] - edges[0])
+                hist *= bin_width
+                hist_list.append(hist)
+            if num_instances == 1:
+                axes[1][0].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
+            else:
+                mean_hist = np.mean(hist_list, axis=0)
+                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
+                axes[1][0].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
+                axes[1][0].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                                        alpha=0.25, linewidth=0)
 
-        max_path_len = np.max(list(decoded_path_len_dict.values()))
-        for pop_name in ordered_pop_names:
-            hist, edges = np.histogram(decoded_path_len_dict[pop_name], bins=np.linspace(0., max_path_len, 21),
-                                       density=True)
-            bin_width = (edges[1] - edges[0])
-            axes[0][0].plot(edges[1:] - bin_width / 2., hist * bin_width, label=pop_name)
+            hist_list = []
+            for decoded_pos_diff_var in decoded_pos_diff_var_dict_instances_list[pop_name]:
+                hist, edges = np.histogram(decoded_pos_diff_var, bins=np.linspace(0., max_variance, 21),
+                                           density=True)
+                bin_width = (edges[1] - edges[0])
+                hist *= bin_width
+                hist_list.append(hist)
+            if num_instances == 1:
+                axes[0][1].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
+            else:
+                mean_hist = np.mean(hist_list, axis=0)
+                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
+                axes[0][1].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
+                axes[0][1].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                                        alpha=0.25, linewidth=0)
+
+            hist_list = []
+            for decoded_path_len in decoded_path_len_dict_instances_list[pop_name]:
+                hist, edges = np.histogram(decoded_path_len, bins=np.linspace(0., max_path_len, 21),
+                                           density=True)
+                bin_width = (edges[1] - edges[0])
+                hist *= bin_width
+                hist_list.append(hist)
+            if num_instances == 1:
+                axes[0][0].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
+            else:
+                mean_hist = np.mean(hist_list, axis=0)
+                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
+                axes[0][0].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
+                axes[0][0].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                                        alpha=0.25, linewidth=0)
+
+            hist_list = []
+            for decoded_distance in decoded_distance_dict_instances_list[pop_name]:
+                hist, edges = np.histogram(decoded_distance,
+                                           bins=np.linspace(-max_distance, max_distance, 21),
+                                           density=True)
+                bin_width = (edges[1] - edges[0])
+                hist *= bin_width
+                hist_list.append(hist)
+            if num_instances == 1:
+                axes[1][1].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
+            else:
+                mean_hist = np.mean(hist_list, axis=0)
+                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
+                axes[1][1].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
+                axes[1][1].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                                        alpha=0.25, linewidth=0)
+
+            hist_list = []
+            for band_freq in band_freq_dict_instances_list['Ripple'][pop_name]:
+                hist, edges = np.histogram(band_freq, bins=np.linspace(min_freq, max_freq, 21),
+                                           density=True)
+                bin_width = (edges[1] - edges[0])
+                hist *= bin_width
+                hist_list.append(hist)
+            if num_instances == 1:
+                axes[2][0].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
+            else:
+                mean_hist = np.mean(hist_list, axis=0)
+                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
+                axes[2][0].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
+                axes[2][0].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                                        alpha=0.25, linewidth=0)
+
+            hist_list = []
+            for band_tuning_index in band_tuning_index_dict_instances_list['Ripple'][pop_name]:
+                hist, edges = np.histogram(band_tuning_index,
+                                           bins=np.linspace(min_tuning_index, max_tuning_index, 51),
+                                           density=True)
+                bin_width = (edges[1] - edges[0])
+                hist *= bin_width
+                hist_list.append(hist)
+            if num_instances == 1:
+                axes[2][1].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
+            else:
+                mean_hist = np.mean(hist_list, axis=0)
+                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
+                axes[2][1].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
+                axes[2][1].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                                        alpha=0.25, linewidth=0)
+
         axes[0][0].set_xlim((0., max_path_len))
         axes[0][0].set_ylim((0., axes[0][0].get_ylim()[1]))
         axes[0][0].set_xlabel('Path length')
@@ -561,13 +663,20 @@ def analyze_decoded_position_replay_from_file(replay_data_file_path, run_range, 
         axes[0][0].legend(loc='best', frameon=False, framealpha=0.5)
         axes[0][0].set_title('Path length of decoded trajectory')
 
-        max_distance = np.max(np.abs(list(decoded_distance_dict.values())))
-        for pop_name in ordered_pop_names:
-            hist, edges = np.histogram(decoded_distance_dict[pop_name],
-                                       bins=np.linspace(-max_distance, max_distance, 21),
-                                       density=True)
-            bin_width = (edges[1] - edges[0])
-            axes[1][1].plot(edges[1:] - bin_width / 2., hist * bin_width, label=pop_name)
+        axes[0][1].set_xlim((0., max_variance))
+        axes[0][1].set_ylim((0., axes[0][1].get_ylim()[1]))
+        axes[0][1].set_xlabel('Variance')
+        axes[0][1].set_ylabel('Probability')
+        axes[0][1].legend(loc='best', frameon=False, framealpha=0.5)
+        axes[0][1].set_title('Variance of steps within decoded trajectory')
+
+        axes[1][0].set_xlim((0., 1.))
+        axes[1][0].set_ylim((0., axes[1][0].get_ylim()[1]))
+        axes[1][0].set_xlabel('Decoded position')
+        axes[1][0].set_ylabel('Probability')
+        axes[1][0].legend(loc='best', frameon=False, framealpha=0.5)
+        axes[1][0].set_title('Decoded positions')
+
         axes[1][1].set_xlim((-max_distance, max_distance))
         axes[1][1].set_ylim((0., axes[1][1].get_ylim()[1]))
         axes[1][1].set_xlabel('Distance')
@@ -575,13 +684,6 @@ def analyze_decoded_position_replay_from_file(replay_data_file_path, run_range, 
         axes[1][1].legend(loc='best', frameon=False, framealpha=0.5)
         axes[1][1].set_title('Distance traveled by decoded trajectory')
 
-        min_freq = np.min(list(band_freq_dict['Ripple'].values()))
-        max_freq = np.max(list(band_freq_dict['Ripple'].values()))
-        for pop_name in ordered_pop_names:
-            hist, edges = np.histogram(band_freq_dict['Ripple'][pop_name], bins=np.linspace(min_freq, max_freq, 21),
-                                       density=True)
-            bin_width = (edges[1] - edges[0])
-            axes[2][0].plot(edges[1:] - bin_width / 2., hist * bin_width, label=pop_name)
         axes[2][0].set_xlim((min_freq, max_freq))
         axes[2][0].set_ylim((0., axes[2][0].get_ylim()[1]))
         axes[2][0].set_xlabel('Frequency (Hz)')
@@ -589,14 +691,6 @@ def analyze_decoded_position_replay_from_file(replay_data_file_path, run_range, 
         axes[2][0].legend(loc='best', frameon=False, framealpha=0.5)
         axes[2][0].set_title('Oscillation frequency')
 
-        min_tuning_index = np.min(list(band_tuning_index_dict['Ripple'].values()))
-        max_tuning_index = np.max(list(band_tuning_index_dict['Ripple'].values()))
-        for pop_name in ordered_pop_names:
-            hist, edges = np.histogram(band_tuning_index_dict['Ripple'][pop_name],
-                                       bins=np.linspace(min_tuning_index, max_tuning_index, 21),
-                                       density=True)
-            bin_width = (edges[1] - edges[0])
-            axes[2][1].plot(edges[1:] - bin_width / 2., hist * bin_width, label=pop_name)
         axes[2][1].set_xlim((min_tuning_index, max_tuning_index))
         axes[2][1].set_ylim((0., axes[2][1].get_ylim()[1]))
         axes[2][1].set_xlabel('Frequency tuning index')

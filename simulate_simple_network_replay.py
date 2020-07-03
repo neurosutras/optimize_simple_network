@@ -12,6 +12,7 @@ context = Context()
 @click.option("--export", is_flag=True)
 @click.option("--output-dir", type=str, default='data')
 @click.option("--export-file-path", type=str, default=None)
+@click.option("--export-data-key", type=str, default='0')
 @click.option("--label", type=str, default=None)
 @click.option("--interactive", is_flag=True)
 @click.option("--verbose", type=int, default=2)
@@ -20,8 +21,8 @@ context = Context()
 @click.option("--simulate", type=bool, default=True)
 @click.option("--merge-output-files", is_flag=True)
 @click.pass_context
-def main(cli, config_file_path, export, output_dir, export_file_path, label, interactive, verbose, plot, debug,
-         simulate, merge_output_files):
+def main(cli, config_file_path, export, output_dir, export_file_path, export_data_key, label, interactive, verbose,
+         plot, debug, simulate, merge_output_files):
     """
 
     :param cli: contains unrecognized args as list of str
@@ -29,6 +30,7 @@ def main(cli, config_file_path, export, output_dir, export_file_path, label, int
     :param export: bool
     :param output_dir: str
     :param export_file_path: str
+    :param export_data_key: str
     :param label: str
     :param interactive: bool
     :param verbose: int
@@ -50,8 +52,9 @@ def main(cli, config_file_path, export, output_dir, export_file_path, label, int
     context.interface.ensure_controller()
 
     config_parallel_interface(__file__, config_file_path=config_file_path, output_dir=output_dir, export=export,
-                              export_file_path=export_file_path, label=label, disp=context.disp,
-                              interface=context.interface, verbose=verbose, plot=plot, debug=debug, **kwargs)
+                              export_file_path=export_file_path, export_data_key=export_data_key, label=label,
+                              disp=context.disp, interface=context.interface, verbose=verbose, plot=plot, debug=debug,
+                              **kwargs)
 
     if simulate:
         args = context.interface.execute(get_args_static_event_ids)
@@ -127,12 +130,16 @@ def config_worker():
         context.network_id = 0
     else:
         context.network_id = int(context.network_id)
+    if 'network_instance' not in context():
+        context.network_instance = 0
+    else:
+        context.network_instance = int(context.network_instance)
     if 'trial_offset' not in context():
         context.trial_offset = 0
     else:
         context.trial_offset = int(context.trial_offset)
 
-    context.stim_type_seed = 0
+    context.stim_type_seed = 1
     context.base_seed = [context.network_id, context.network_instance]
     context.connection_seed = context.base_seed + [1]
     context.spikes_seed = context.base_seed + [2, context.stim_type_seed]
@@ -164,8 +171,8 @@ def config_worker():
     buffer = 100.  # ms
     duration = 250.  # ms
     stim_edge_duration = (150., 25.)  # ms
-    tuning_duration = 3000.  # ms
     tstop = int(equilibrate + duration + 2. * buffer)  # ms
+    tuning_duration = 3000.  # ms
     dt = 0.025
     binned_dt = 1.  # ms
     filter_dt = 1.  # ms
@@ -175,7 +182,7 @@ def config_worker():
     baks_pad_dur = 0.  # ms
     baks_wrap_around = False
     track_wrap_around = True
-    filter_bands = {'Ripple': [30., 150.]}
+    filter_bands = {'Ripple': [50., 150.]}
     max_num_cells_export_voltage_rec = 500
 
     if context.comm.rank == 0:
@@ -401,17 +408,15 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
     binned_t = np.arange(0., context.duration + context.binned_dt / 2., context.binned_dt)
 
     full_spike_times_dict = network.get_spike_times_dict()
+    buffered_firing_rates_dict = \
+        infer_firing_rates_baks(full_spike_times_dict, buffered_binned_t, alpha=context.baks_alpha,
+                                beta=context.baks_beta, pad_dur=context.baks_pad_dur,
+                                wrap_around=context.baks_wrap_around)
     full_binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict, full_binned_t)
-    inferred_binned_t, buffered_firing_rates_from_binned_spike_count_dict = \
-        infer_firing_rates_from_spike_count(full_binned_spike_count_dict, input_t=full_binned_t,
-                                            output_range=(buffered_binned_t[0], buffered_binned_t[-1]), align_to_t=0.,
-                                            window_dur=20., step_dur=20.,
-                                            debug=context.debug and context.comm.rank == 0)
 
     gathered_full_spike_times_dict_list = context.comm.gather(full_spike_times_dict, root=0)
+    gathered_buffered_firing_rates_dict_list = context.comm.gather(buffered_firing_rates_dict, root=0)
     gathered_full_binned_spike_count_dict_list = context.comm.gather(full_binned_spike_count_dict, root=0)
-    gathered_buffered_firing_rates_from_binned_spike_count_dict_list = \
-        context.comm.gather(buffered_firing_rates_from_binned_spike_count_dict, root=0)
 
     full_voltage_rec_dict = network.get_voltage_rec_dict()
     voltages_exceed_threshold = check_voltages_exceed_threshold(full_voltage_rec_dict, input_t=full_rec_t,
@@ -454,9 +459,8 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
 
     if context.comm.rank == 0:
         full_spike_times_dict = merge_list_of_dict(gathered_full_spike_times_dict_list)
+        buffered_firing_rates_dict = merge_list_of_dict(gathered_buffered_firing_rates_dict_list)
         full_binned_spike_count_dict = merge_list_of_dict(gathered_full_binned_spike_count_dict_list)
-        buffered_firing_rates_from_binned_spike_count_dict = \
-            merge_list_of_dict(gathered_buffered_firing_rates_from_binned_spike_count_dict_list)
 
         if plot or export:
             subset_full_voltage_rec_dict = merge_list_of_dict(gathered_subset_full_voltage_rec_dict_list)
@@ -474,14 +478,14 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
         full_pop_mean_rate_from_binned_spike_count_dict = \
             get_pop_mean_rate_from_binned_spike_count(full_binned_spike_count_dict, dt=context.binned_dt)
         mean_min_rate_dict, mean_peak_rate_dict, mean_rate_active_cells_dict, pop_fraction_active_dict = \
-            get_pop_activity_stats(buffered_firing_rates_from_binned_spike_count_dict, input_t=inferred_binned_t,
-                                   valid_t=inferred_binned_t, threshold=context.active_rate_threshold, plot=plot)
-        filtered_mean_rate_dict, filter_envelope_dict, filter_envelope_ratio_dict, centroid_freq_dict, \
-            freq_tuning_index_dict = \
+            get_pop_activity_stats(buffered_firing_rates_dict, input_t=buffered_binned_t, valid_t=binned_t,
+                                   threshold=context.active_rate_threshold, plot=plot)
+        filtered_mean_rate_dict, filter_psd_f_dict, filter_psd_power_dict, filter_envelope_dict, \
+        filter_envelope_ratio_dict, centroid_freq_dict, freq_tuning_index_dict = \
             get_pop_bandpass_filtered_signal_stats(full_pop_mean_rate_from_binned_spike_count_dict,
                                                    context.filter_bands, input_t=full_binned_t,
                                                    valid_t=binned_t, output_t=binned_t,
-                                                   plot=False, verbose=context.verbose > 1)
+                                                   plot=plot, verbose=context.verbose > 1)
 
         if context.debug and context.verbose > 0:
             print('simulate_simple_network_replay: pid: %i; trial: %i; additional data analysis took %.2f s' %
@@ -489,10 +493,10 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
             sys.stdout.flush()
 
         if plot:
-            plot_firing_rate_heatmaps(buffered_firing_rates_from_binned_spike_count_dict, input_t=inferred_binned_t,
-                                      valid_t=inferred_binned_t, tuning_peak_locs=context.tuning_peak_locs)
-            if context.connectivity_type == 'gaussian':
-                plot_2D_connection_distance(context.pop_syn_proportions, context.pop_cell_positions, connectivity_dict)
+            plot_voltage_traces(subset_full_voltage_rec_dict, full_rec_t, valid_t=rec_t,
+                                spike_times_dict=full_spike_times_dict)
+            plot_firing_rate_heatmaps(buffered_firing_rates_dict, input_t=buffered_binned_t, valid_t=binned_t,
+                                      tuning_peak_locs=context.tuning_peak_locs)
 
         if any(voltages_exceed_threshold_list):
             voltages_exceed_threshold = True
@@ -506,71 +510,74 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
         if export:
             current_time = time.time()
             with h5py.File(context.temp_output_path, 'a') as f:
+                run_group_key = 'simple_network_exported_replay_data'
+                group = get_h5py_group(f, [context.export_data_key, run_group_key], create=True)
                 shared_context_key = 'shared_context'
-                if trial == 0 and 'shared_context' not in f:
-                    group = f.create_group('shared_context')
-                    group.create_dataset('param_names', data=np.array(context.param_names, dtype='S'),
+                if trial == 0 and shared_context_key not in group:
+                    subgroup = group.create_group(shared_context_key)
+                    subgroup.create_dataset('param_names', data=np.array(context.param_names, dtype='S'),
                                          compression='gzip')
-                    group.create_dataset('x0', data=context.x0_array, compression='gzip')
-                    set_h5py_attr(group.attrs, 'network_id', context.network_id)
-                    set_h5py_attr(group.attrs, 'trial_offset', context.trial_offset)
-                    set_h5py_attr(group.attrs, 'connectivity_type', context.connectivity_type)
-                    group.attrs['active_rate_threshold'] = context.active_rate_threshold
-                    subgroup = group.create_group('pop_gid_ranges')
+                    subgroup.create_dataset('x0', data=context.x0_array, compression='gzip')
+                    set_h5py_attr(subgroup.attrs, 'network_id', context.network_id)
+                    set_h5py_attr(subgroup.attrs, 'network_instance', context.network_instance)
+                    set_h5py_attr(subgroup.attrs, 'trial_offset', context.trial_offset)
+                    set_h5py_attr(subgroup.attrs, 'connectivity_type', context.connectivity_type)
+                    set_h5py_attr(subgroup.attrs, 'duration', context.duration)
+                    subgroup.attrs['active_rate_threshold'] = context.active_rate_threshold
+                    data_group = subgroup.create_group('pop_gid_ranges')
                     for pop_name in context.pop_gid_ranges:
-                        subgroup.create_dataset(pop_name, data=context.pop_gid_ranges[pop_name])
-                    group.create_dataset('full_binned_t', data=full_binned_t, compression='gzip')
-                    group.create_dataset('buffered_binned_t', data=buffered_binned_t, compression='gzip')
-                    group.create_dataset('binned_t', data=binned_t, compression='gzip')
-                    subgroup = group.create_group('filter_bands')
+                        data_group.create_dataset(pop_name, data=context.pop_gid_ranges[pop_name])
+                    subgroup.create_dataset('buffered_binned_t', data=buffered_binned_t, compression='gzip')
+                    subgroup.create_dataset('binned_t', data=binned_t, compression='gzip')
+                    data_group = subgroup.create_group('filter_bands')
                     for filter, band in viewitems(context.filter_bands):
-                        subgroup.create_dataset(filter, data=band)
-                    subgroup = group.create_group('connection_weights')
+                        data_group.create_dataset(filter, data=band)
+                    data_group = subgroup.create_group('connection_weights')
                     for target_pop_name in connection_weights_dict:
-                        subgroup.create_group(target_pop_name)
+                        data_group.create_group(target_pop_name)
                         for source_pop_name in connection_weights_dict[target_pop_name]:
-                            subgroup[target_pop_name].create_dataset(
+                            data_group[target_pop_name].create_dataset(
                                 source_pop_name, data=connection_weights_dict[target_pop_name][source_pop_name],
                                 compression='gzip')
                     if len(context.tuning_peak_locs) > 0:
-                        subgroup = group.create_group('tuning_peak_locs')
+                        data_group = subgroup.create_group('tuning_peak_locs')
                         for pop_name in context.tuning_peak_locs:
                             if len(context.tuning_peak_locs[pop_name]) > 0:
-                                data_group = subgroup.create_group(pop_name)
+                                data_group.create_group(pop_name)
                                 target_gids = np.array(list(context.tuning_peak_locs[pop_name].keys()))
                                 peak_locs = np.array(list(context.tuning_peak_locs[pop_name].values()))
-                                data_group.create_dataset('target_gids', data=target_gids, compression='gzip')
-                                data_group.create_dataset('peak_locs', data=peak_locs, compression='gzip')
-                    subgroup = group.create_group('connectivity')
+                                data_group[pop_name].create_dataset('target_gids', data=target_gids, compression='gzip')
+                                data_group[pop_name].create_dataset('peak_locs', data=peak_locs, compression='gzip')
+                    data_group = subgroup.create_group('connectivity')
                     for target_pop_name in connectivity_dict:
-                        subgroup.create_group(target_pop_name)
+                        data_group.create_group(target_pop_name)
                         for target_gid in connectivity_dict[target_pop_name]:
-                            data_group = subgroup[target_pop_name].create_group(str(target_gid))
+                            data_subgroup = data_group[target_pop_name].create_group(str(target_gid))
                             for source_pop_name in connectivity_dict[target_pop_name][target_gid]:
-                                data_group.create_dataset(source_pop_name,
-                                                          data=connectivity_dict[target_pop_name][target_gid][
-                                                              source_pop_name])
-                    subgroup = group.create_group('pop_syn_proportions')
+                                data_subgroup.create_dataset(source_pop_name,
+                                                             data=connectivity_dict[target_pop_name][target_gid][
+                                                                 source_pop_name])
+                    data_group = subgroup.create_group('pop_syn_proportions')
                     for target_pop_name in context.pop_syn_proportions:
-                        subgroup.create_group(target_pop_name)
+                        data_group.create_group(target_pop_name)
                         for syn_type in context.pop_syn_proportions[target_pop_name]:
-                            data_group = subgroup[target_pop_name].create_group(syn_type)
+                            data_subgroup = data_group[target_pop_name].create_group(syn_type)
                             source_pop_names = \
                                 np.array(list(context.pop_syn_proportions[target_pop_name][syn_type].keys()), dtype='S')
                             syn_proportions = \
                                 np.array(list(context.pop_syn_proportions[target_pop_name][syn_type].values()))
-                            data_group.create_dataset('source_pop_names', data=source_pop_names)
-                            data_group.create_dataset('syn_proportions', data=syn_proportions)
-                    subgroup = group.create_group('pop_cell_positions')
+                            data_subgroup.create_dataset('source_pop_names', data=source_pop_names)
+                            data_subgroup.create_dataset('syn_proportions', data=syn_proportions)
+                    data_group = subgroup.create_group('pop_cell_positions')
                     for pop_name in context.pop_cell_positions:
-                        data_group = subgroup.create_group(pop_name)
+                        data_subgroup = data_group.create_group(pop_name)
                         gids = np.array(list(context.pop_cell_positions[pop_name].keys()))
                         positions = np.array(list(context.pop_cell_positions[pop_name].values()))
-                        data_group.create_dataset('gids', data=gids, compression='gzip')
-                        data_group.create_dataset('positions', data=positions, compression='gzip')
-                exported_data_key = 'simple_network_exported_data'
-                group = get_h5py_group(f, [trial, exported_data_key], create=True)
-                set_h5py_attr(group.attrs, 'ensemble_id', ensemble_id)
+                        data_subgroup.create_dataset('gids', data=gids, compression='gzip')
+                        data_subgroup.create_dataset('positions', data=positions, compression='gzip')
+                group = get_h5py_group(group, [trial], create=True)
+                set_h5py_attr(group.attrs, 'ensemble_id', int(ensemble_id))
+                set_h5py_attr(group.attrs, 'trial_id', int(trial))
                 set_h5py_attr(group.attrs, 'voltages_exceed_threshold', voltages_exceed_threshold)
                 subgroup = group.create_group('full_spike_times')
                 for pop_name in full_spike_times_dict:
@@ -589,6 +596,16 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
                     data_group.create_group(band)
                     for pop_name in centroid_freq_dict[band]:
                         data_group[band].attrs[pop_name] = centroid_freq_dict[band][pop_name]
+                data_group = subgroup.create_group('psd_f')
+                for band in filter_psd_f_dict:
+                    data_group.create_group(band)
+                    for pop_name in filter_psd_f_dict[band]:
+                        data_group[band].attrs[pop_name] = filter_psd_f_dict[band][pop_name]
+                data_group = subgroup.create_group('psd_power')
+                for band in filter_psd_power_dict:
+                    data_group.create_group(band)
+                    for pop_name in filter_psd_power_dict[band]:
+                        data_group[band].attrs[pop_name] = filter_psd_power_dict[band][pop_name]
 
             print('simulate_simple_network_replay: pid: %i; trial: %i; exporting data to file: %s took %.2f s' %
                   (os.getpid(), trial, context.temp_output_path, time.time() - current_time))

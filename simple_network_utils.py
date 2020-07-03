@@ -1485,7 +1485,7 @@ def get_bandpass_filtered_signal_stats(signal, input_t, sos, filter_band, buffer
         fig.subplots_adjust(top=0.75, hspace=0.3)
         fig.show()
 
-    return filtered_signal, envelope, envelope_ratio, centroid_freq, freq_tuning_index
+    return filtered_signal, f, power, envelope, envelope_ratio, centroid_freq, freq_tuning_index
 
 
 def get_pop_bandpass_filtered_signal_stats(signal_dict, filter_band_dict, input_t, valid_t=None, output_t=None,
@@ -1505,6 +1505,8 @@ def get_pop_bandpass_filtered_signal_stats(signal_dict, filter_band_dict, input_
     dt = input_t[1] - input_t[0]  # ms
     sampling_rate = 1000. / dt  # Hz
     filtered_signal_dict = {}
+    psd_f_dict = {}
+    psd_power_dict = {}
     envelope_dict = {}
     envelope_ratio_dict = {}
     centroid_freq_dict = {}
@@ -1516,6 +1518,8 @@ def get_pop_bandpass_filtered_signal_stats(signal_dict, filter_band_dict, input_
         valid_indexes = np.where((input_t >= valid_t[0]) & (input_t <= valid_t[-1]))[0]
     for filter_label, filter_band in viewitems(filter_band_dict):
         filtered_signal_dict[filter_label] = {}
+        psd_f_dict[filter_label] = {}
+        psd_power_dict[filter_label] = {}
         envelope_dict[filter_label] = {}
         envelope_ratio_dict[filter_label] = {}
         centroid_freq_dict[filter_label] = {}
@@ -1526,7 +1530,8 @@ def get_pop_bandpass_filtered_signal_stats(signal_dict, filter_band_dict, input_
                                                   order=order, plot=False)
         for pop_name in signal_dict:
             signal = signal_dict[pop_name][valid_indexes]
-            filtered_signal_dict[filter_label][pop_name], envelope_dict[filter_label][pop_name], \
+            filtered_signal_dict[filter_label][pop_name], psd_f_dict[filter_label][pop_name], \
+            psd_power_dict[filter_label][pop_name], envelope_dict[filter_label][pop_name], \
             envelope_ratio_dict[filter_label][pop_name], centroid_freq_dict[filter_label][pop_name], \
             freq_tuning_index_dict[filter_label][pop_name] = \
                 get_bandpass_filtered_signal_stats(signal, valid_t, sos, filter_band, buffered_sos=buffered_sos,
@@ -1534,7 +1539,8 @@ def get_pop_bandpass_filtered_signal_stats(signal_dict, filter_band_dict, input_
                                                    signal_label='Population: %s' % pop_name, filter_label=filter_label,
                                                    axis_label='Firing rate', units='Hz', plot=plot, verbose=verbose)
 
-    return filtered_signal_dict, envelope_dict, envelope_ratio_dict, centroid_freq_dict, freq_tuning_index_dict
+    return filtered_signal_dict, psd_f_dict, psd_power_dict, envelope_dict, envelope_ratio_dict, centroid_freq_dict, \
+           freq_tuning_index_dict
 
 
 def get_lowpass_filtered_signal_stats(signal, input_t, sos, cutoff_freq, output_t=None, bins=100, signal_label='',
