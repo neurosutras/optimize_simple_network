@@ -1385,7 +1385,11 @@ def get_bandpass_filtered_signal_stats(signal, input_t, sos, filter_band, buffer
             print('%s\n%s bandpass filter (%.1f:%.1f Hz); Failed - no signal' %
                   (signal_label, filter_label, min(filter_band), max(filter_band)))
             sys.stdout.flush()
-        return signal, np.zeros_like(signal), 0., 0., 0.
+        if buffered_filter_band is not None:
+            f = np.linspace(buffered_filter_band[0], buffered_filter_band[1], bins)
+            power = np.empty_like(f)
+            power[:] = np.nan
+        return signal, f, power, np.zeros_like(signal), 0., 0., 0.
     dt = input_t[1] - input_t[0]  # ms
     fs = 1000. / dt
 
