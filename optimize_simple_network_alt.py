@@ -880,20 +880,27 @@ def analyze_network_output_replay(network, ensemble_id=None, trial=None, model_i
                 group.create_dataset('full_rec_t', data=full_rec_t, compression='gzip')
                 group.create_dataset('buffered_rec_t', data=buffered_rec_t, compression='gzip')
                 group.create_dataset('rec_t', data=rec_t, compression='gzip')
-
-            print('optimize_simple_network_replay: analyze_network_output_replay: pid: %i; trial: %i; exporting data to '
-                  'file: %s took %.2f s' % (os.getpid(), trial, context.temp_output_path, time.time() - current_time))
-            sys.stdout.flush()
+            if context.verbose > 0:
+                print('optimize_simple_network_replay: analyze_network_output_replay: pid: %i; trial: %i; exporting '
+                      'data to file: %s took %.2f s' % (os.getpid(), trial, context.temp_output_path,
+                                                        time.time() - current_time))
+                sys.stdout.flush()
 
         result = dict()
 
         result['FF_frac_active_replay'] = np.mean(pop_fraction_active_dict['FF'])
         result['E_frac_active_replay'] = np.mean(pop_fraction_active_dict['E'])
         result['I_frac_active_replay'] = np.mean(pop_fraction_active_dict['I'])
-        result['E_centroid_ripple_freq_replay'] = centroid_freq_dict['Ripple']['E']
-        result['I_centroid_ripple_freq_replay'] = centroid_freq_dict['Ripple']['I']
         result['E_ripple_tuning_index_replay'] = freq_tuning_index_dict['Ripple']['E']
         result['I_ripple_tuning_index_replay'] = freq_tuning_index_dict['Ripple']['I']
+        if result['E_ripple_tuning_index_replay'] >= 2.:
+            result['E_centroid_ripple_freq_replay'] = centroid_freq_dict['Ripple']['E']
+        else:
+            result['E_centroid_ripple_freq_replay'] = np.nan
+        if result['I_ripple_tuning_index_replay'] >= 2.:
+            result['I_centroid_ripple_freq_replay'] = centroid_freq_dict['Ripple']['I']
+        else:
+            result['I_centroid_ripple_freq_replay'] = np.nan
 
         if any(voltages_exceed_threshold_list):
             if context.verbose > 0:
@@ -922,7 +929,9 @@ def filter_features_replay(primitives, features, model_id=None, export=False):
             feature_lists[key].append(val)
     new_features = {}
     for key in feature_lists:
-        new_features[key] = np.mean(feature_lists[key])
+        val = np.nanmean(feature_lists[key])
+        if not np.isnan(val):
+            new_features[key] = np.nanmean(feature_lists[key])
 
     return new_features
 
