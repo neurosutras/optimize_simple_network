@@ -9,6 +9,7 @@ context = Context()
 @click.command(context_settings=dict(ignore_unknown_options=True, allow_extra_args=True, ))
 @click.option("--run-data-file-path", type=click.Path(exists=True, file_okay=True, dir_okay=False), required=True)
 @click.option("--replay-data-file-path", type=click.Path(exists=True, file_okay=True, dir_okay=False), required=True)
+@click.option("--export-data-key", type=int, default=0)
 @click.option("--plot-n-trials", type=int, default=10)
 @click.option("--window-dur", type=float, default=20.)
 @click.option("--step-dur", type=float, default=20.)
@@ -17,13 +18,14 @@ context = Context()
 @click.option("--plot", is_flag=True)
 @click.option("--debug", is_flag=True)
 @click.pass_context
-def main(cli, run_data_file_path, replay_data_file_path, plot_n_trials, window_dur, step_dur, interactive, verbose,
-         plot, debug):
+def main(cli, run_data_file_path, replay_data_file_path, export_data_key, plot_n_trials, window_dur, step_dur,
+         interactive, verbose, plot, debug):
     """
 
     :param cli: contains unrecognized args as list of str
     :param run_data_file_path: str (path)
     :param replay_data_file_path: str (path)
+    :param export_data_key: str
     :param plot_n_trials: int
     :param window_dur: float
     :param step_dur: float
@@ -42,7 +44,7 @@ def main(cli, run_data_file_path, replay_data_file_path, plot_n_trials, window_d
     context.interface.ensure_controller()
 
     config_parallel_interface(__file__, disp=context.disp, interface=context.interface, verbose=verbose, plot=plot,
-                              debug=debug, **kwargs)
+                              debug=debug, export_data_key=export_data_key, **kwargs)
 
     if context.debug:
         return
@@ -95,30 +97,41 @@ def config_controller():
     if not os.path.isfile(context.run_data_file_path):
         raise IOError('decode_simple_network_replay: invalid run_data_file_path: %s' %
                       context.run_data_file_path)
+
+    run_group_key = 'simple_network_exported_run_data'
+    processed_group_key = 'simple_network_processed_data'
+    shared_context_key = 'shared_context'
     with h5py.File(context.run_data_file_path, 'r') as f:
-        group = get_h5py_group(f, ['shared_context'])
-        if 'duration' in group.attrs:
-            baks_pad_dur = group.attrs['duration']
-        if 'trial_averaged_firing_rate_matrix' in group:
+        group = get_h5py_group(f, [context.export_data_key, run_group_key])
+        subgroup = get_h5py_group(group, [shared_context_key])
+        if 'duration' in subgroup.attrs:
+            baks_pad_dur = subgroup.attrs['duration']
+        run_binned_t = subgroup['binned_t'][:]
+        run_trial_keys = [key for key in group if key != shared_context_key]
+
+        group = get_h5py_group(f, [context.export_data_key])
+        if processed_group_key in group and shared_context_key in group[processed_group_key] and \
+                'trial_averaged_firing_rate_matrix' in group[processed_group_key][shared_context_key]:
             run_data_is_processed = True
         else:
             run_data_is_processed = False
-        run_binned_t = group['binned_t'][:]
-        run_data_group_key = 'simple_network_exported_data'
-        run_trial_keys = [key for key in f if run_data_group_key in f[key]]
 
     if not os.path.isfile(context.replay_data_file_path):
         raise IOError('decode_simple_network_replay: invalid replay_data_file_path: %s' %
                       context.replay_data_file_path)
+    replay_group_key = 'simple_network_exported_replay_data'
     with h5py.File(context.replay_data_file_path, 'r') as f:
-        group = get_h5py_group(f, ['shared_context'])
-        replay_binned_t = group['buffered_binned_t'][:]
-        replay_data_group_key = 'simple_network_exported_data'
-        replay_trial_keys = [key for key in f if replay_data_group_key in f[key]]
+        group = get_h5py_group(f, [context.export_data_key, replay_group_key])
+        subgroup = get_h5py_group(group, [shared_context_key])
+        replay_binned_t = subgroup['buffered_binned_t'][:]
+        replay_trial_keys = [key for key in group if key != shared_context_key]
         context.plot_n_trials = min(int(context.plot_n_trials), len(replay_trial_keys))
         plot_replay_trial_keys = \
             list(np.random.choice(replay_trial_keys, context.plot_n_trials, replace=False))
-        if 'decoded_pos_matrix' in group:
+
+        group = get_h5py_group(f, [context.export_data_key])
+        if processed_group_key in group and shared_context_key in group[processed_group_key] and \
+                'decoded_pos_matrix' in group[processed_group_key][shared_context_key]:
             replay_data_is_processed = True
         else:
             replay_data_is_processed = False
@@ -185,25 +198,27 @@ def export_processed_run_trial_data(trial_key):
     :param trial_key: str
     """
     start_time = time.time()
-
     full_spike_times_dict = dict()
     tuning_peak_locs = dict()
-    run_data_group_key = 'simple_network_exported_data'
+
+    group_key = 'simple_network_exported_run_data'
+    shared_context_key = 'shared_context'
     with h5py.File(context.run_data_file_path, 'r') as f:
-        group = get_h5py_group(f, ['shared_context'])
-        if 'tuning_peak_locs' in group and len(group['tuning_peak_locs']) > 0:
-            subgroup = group['tuning_peak_locs']
-            for pop_name in subgroup:
+        group = get_h5py_group(f, [context.export_data_key, group_key])
+        subgroup = group[shared_context_key]
+        if 'tuning_peak_locs' in subgroup and len(subgroup['tuning_peak_locs']) > 0:
+            data_group = subgroup['tuning_peak_locs']
+            for pop_name in data_group:
                 tuning_peak_locs[pop_name] = dict()
-                for target_gid, peak_loc in zip(subgroup[pop_name]['target_gids'], subgroup[pop_name]['peak_locs']):
+                for target_gid, peak_loc in zip(data_group[pop_name]['target_gids'], data_group[pop_name]['peak_locs']):
                     tuning_peak_locs[pop_name][target_gid] = peak_loc
-        run_binned_t = group['binned_t'][:]
-        group = get_h5py_group(f, [trial_key, run_data_group_key])
-        subgroup = group['full_spike_times']
-        for pop_name in subgroup:
+        run_binned_t = subgroup['binned_t'][:]
+        subgroup = get_h5py_group(group, [trial_key])
+        data_group = subgroup['full_spike_times']
+        for pop_name in data_group:
             full_spike_times_dict[pop_name] = dict()
-            for gid_key in subgroup[pop_name]:
-                full_spike_times_dict[pop_name][int(gid_key)] = subgroup[pop_name][gid_key][:]
+            for gid_key in data_group[pop_name]:
+                full_spike_times_dict[pop_name][int(gid_key)] = data_group[pop_name][gid_key][:]
 
     if context.disp:
         print('export_processed_run_trial_data: pid: %i took %.1f s to load spikes times for trial: %s' %
@@ -237,17 +252,19 @@ def export_processed_run_trial_data(trial_key):
               (os.getpid(), time.time() - current_time, trial_key))
         sys.stdout.flush()
 
+    group_key = 'simple_network_processed_data'
+    shared_context_key = 'shared_context'
     with h5py.File(context.temp_output_path, 'a') as f:
-        if 'shared_context' not in f:
-            group = get_h5py_group(f, ['shared_context'], create=True)
-            subgroup = group.create_group('sorted_gids')
+        group = get_h5py_group(f, [context.export_data_key, group_key], create=True)
+        if shared_context_key not in group:
+            subgroup = get_h5py_group(group, [shared_context_key], create=True)
+            data_group = subgroup.create_group('sorted_gids')
             for pop_name in sorted_gid_dict:
-                subgroup.create_dataset(pop_name, data=sorted_gid_dict[pop_name], compression='gzip')
-        exported_data_key = 'simple_network_processed_data'
-        group = get_h5py_group(f, [trial_key, exported_data_key], create=True)
-        subgroup = group.create_group('firing_rates_matrix')
+                data_group.create_dataset(pop_name, data=sorted_gid_dict[pop_name], compression='gzip')
+        subgroup = get_h5py_group(group, [trial_key], create=True)
+        data_group = subgroup.create_group('firing_rates_matrix')
         for pop_name in firing_rates_matrix_dict:
-            subgroup.create_dataset(pop_name, data=firing_rates_matrix_dict[pop_name], compression='gzip')
+            data_group.create_dataset(pop_name, data=firing_rates_matrix_dict[pop_name], compression='gzip')
 
     if context.disp:
         print('export_processed_run_trial_data: pid: %i exported data for trial: %s to temp_output_path: %s' %
@@ -265,21 +282,23 @@ def append_processed_run_data_to_file():
 
     run_trial_firing_rates_matrix_list_dict = dict()
     first = True
+    group_key = 'simple_network_processed_data'
+    shared_context_key = 'shared_context'
     for temp_output_path in temp_output_path_list:
         with h5py.File(temp_output_path, 'r') as f:
+            group = get_h5py_group(f, [context.export_data_key, group_key])
             if first:
-                group = get_h5py_group(f, ['shared_context'])
+                subgroup = get_h5py_group(group, [shared_context_key])
                 sorted_gid_dict = dict()
-                subgroup = group['sorted_gids']
-                for pop_name in subgroup:
-                    sorted_gid_dict[pop_name] = subgroup[pop_name][:]
+                data_group = subgroup['sorted_gids']
+                for pop_name in data_group:
+                    sorted_gid_dict[pop_name] = data_group[pop_name][:]
                 first = False
-            exported_data_key = 'simple_network_processed_data'
-            for trial_key in (key for key in f if exported_data_key in f[key]):
-                group = get_h5py_group(f, [trial_key, exported_data_key])
-                subgroup = group['firing_rates_matrix']
-                for pop_name in subgroup:
-                    this_run_trial_firing_rates_matrix = subgroup[pop_name][:]
+            for trial_key in (key for key in group if key != shared_context_key):
+                subgroup = get_h5py_group(group, [trial_key])
+                data_group = subgroup['firing_rates_matrix']
+                for pop_name in data_group:
+                    this_run_trial_firing_rates_matrix = data_group[pop_name][:]
                     if pop_name not in run_trial_firing_rates_matrix_list_dict:
                         run_trial_firing_rates_matrix_list_dict[pop_name] = []
                     run_trial_firing_rates_matrix_list_dict[pop_name].append(this_run_trial_firing_rates_matrix)
@@ -289,8 +308,10 @@ def append_processed_run_data_to_file():
         trial_averaged_run_firing_rate_matrix_dict[pop_name] = \
             np.mean(run_trial_firing_rates_matrix_list_dict[pop_name], axis=0)
 
+    group_key = 'simple_network_processed_data'
+    shared_context_key = 'shared_context'
     with h5py.File(context.run_data_file_path, 'a') as f:
-        group = get_h5py_group(f, ['shared_context'])
+        group = get_h5py_group(f, [context.export_data_key, group_key, shared_context_key], create=True)
         subgroup = group.create_group('sorted_gids')
         for pop_name in sorted_gid_dict:
             subgroup.create_dataset(pop_name, data=sorted_gid_dict[pop_name], compression='gzip')
@@ -313,9 +334,13 @@ def load_processed_run_data_from_file():
     """
     sorted_gid_dict = dict()
     run_firing_rate_matrix_dict = dict()
+    run_group_key = 'simple_network_exported_run_data'
+    processed_group_key = 'simple_network_processed_data'
+    shared_context_key = 'shared_context'
     with h5py.File(context.run_data_file_path, 'r') as f:
-        group = get_h5py_group(f, ['shared_context'])
+        group = get_h5py_group(f, [context.export_data_key, run_group_key, shared_context_key])
         run_binned_t = group['binned_t'][:]
+        group = get_h5py_group(f, [context.export_data_key, processed_group_key, shared_context_key])
         subgroup = group['sorted_gids']
         for pop_name in subgroup:
             sorted_gid_dict[pop_name] = subgroup[pop_name][:]
@@ -335,9 +360,9 @@ def process_replay_trial_data(trial_key, export=True):
 
     replay_full_spike_times_dict = dict()
     replay_binned_spike_count_matrix_dict = dict()
-    replay_data_group_key = 'simple_network_exported_data'
+    replay_group_key = 'simple_network_exported_replay_data'
     with h5py.File(context.replay_data_file_path, 'r') as f:
-        group = get_h5py_group(f, [trial_key, replay_data_group_key, 'full_spike_times'])
+        group = get_h5py_group(f, [context.export_data_key, replay_group_key, trial_key, 'full_spike_times'])
         for pop_name in group:
             if pop_name not in replay_full_spike_times_dict:
                 replay_full_spike_times_dict[pop_name] = dict()
@@ -376,9 +401,9 @@ def process_replay_trial_data(trial_key, export=True):
         sys.stdout.flush()
 
     if export:
+        group_key = 'simple_network_processed_data'
         with h5py.File(context.temp_output_path, 'a') as f:
-            exported_data_key = 'simple_network_processed_data'
-            group = get_h5py_group(f, [trial_key, exported_data_key], create=True)
+            group = get_h5py_group(f, [context.export_data_key, group_key, trial_key], create=True)
             subgroup = group.create_group('decoded_position')
             for pop_name in decoded_pos_dict:
                 subgroup.create_dataset(pop_name, data=decoded_pos_dict[pop_name], compression='gzip')
@@ -428,14 +453,16 @@ def append_processed_replay_data_to_file():
                              if os.path.isfile(temp_output_path)]
 
     decoded_pos_list_dict = dict()
+    group_key = 'simple_network_processed_data'
+    shared_context_key = 'shared_context'
     for temp_output_path in temp_output_path_list:
         with h5py.File(temp_output_path, 'r') as f:
-            exported_data_key = 'simple_network_processed_data'
-            for trial_key in (key for key in f if exported_data_key in f[key]):
-                group = get_h5py_group(f, [trial_key, exported_data_key])
-                subgroup = group['decoded_position']
-                for pop_name in subgroup:
-                    this_decoded_position = subgroup[pop_name][:]
+            group = get_h5py_group(f, [context.export_data_key, group_key])
+            for trial_key in (key for key in group if key != shared_context_key):
+                subgroup = get_h5py_group(group, [trial_key])
+                data_group = subgroup['decoded_position']
+                for pop_name in data_group:
+                    this_decoded_position = data_group[pop_name][:]
                     if pop_name not in decoded_pos_list_dict:
                         decoded_pos_list_dict[pop_name] = []
                     decoded_pos_list_dict[pop_name].append(this_decoded_position)
@@ -444,7 +471,7 @@ def append_processed_replay_data_to_file():
         context.update(decoded_pos_list_dict=decoded_pos_list_dict)
 
     with h5py.File(context.replay_data_file_path, 'a') as f:
-        group = get_h5py_group(f, ['shared_context'])
+        group = get_h5py_group(f, [context.export_data_key, group_key, shared_context_key])
         group.create_dataset('decode_binned_t', data=context.decode_binned_t, compression='gzip')
         subgroup = group.create_group('decoded_pos_matrix')
         for pop_name in decoded_pos_list_dict:
@@ -485,25 +512,29 @@ def analyze_decoded_position_replay_from_file(replay_data_file_path, run_range, 
     decoded_distance_dict_instances_list = defaultdict(list)
     first = True
 
+    processed_group_key = 'simple_network_processed_data'
+    replay_group_key = 'simple_network_exported_replay_data'
+    shared_context_key = 'shared_context'
     for replay_data_file_path in replay_data_file_path_list:
         decoded_pos_matrix_dict = dict()
         band_freq_dict = defaultdict(lambda: defaultdict(list))
         band_tuning_index_dict = defaultdict(lambda: defaultdict(list))
         with h5py.File(replay_data_file_path, 'r') as f:
-            group = get_h5py_group(f, ['shared_context', 'decoded_pos_matrix'])
-            for pop_name in group:
-                decoded_pos_matrix_dict[pop_name] = group[pop_name][:]
-            exported_data_group_key = 'simple_network_exported_data'
-            for trial_key in (key for key in f if exported_data_group_key in f[key]):
-                group = get_h5py_group(f, [trial_key, exported_data_group_key, 'filter_results'])
-                subgroup = group['centroid_freq']
-                for band in subgroup:
-                    for pop_name in subgroup[band].attrs:
-                        band_freq_dict[band][pop_name].append(subgroup[band].attrs[pop_name])
-                subgroup = group['freq_tuning_index']
-                for band in subgroup:
-                    for pop_name in subgroup[band].attrs:
-                        band_tuning_index_dict[band][pop_name].append(subgroup[band].attrs[pop_name])
+            group = get_h5py_group(f, [context.export_data_key, processed_group_key])
+            subgroup = get_h5py_group(group, [shared_context_key, 'decoded_pos_matrix'])
+            for pop_name in subgroup:
+                decoded_pos_matrix_dict[pop_name] = subgroup[pop_name][:]
+            group = get_h5py_group(f, [context.export_data_key, replay_group_key])
+            for trial_key in (key for key in group if key != shared_context_key):
+                subgroup = get_h5py_group(group, [trial_key, 'filter_results'])
+                data_group = subgroup['centroid_freq']
+                for band in data_group:
+                    for pop_name in data_group[band].attrs:
+                        band_freq_dict[band][pop_name].append(data_group[band].attrs[pop_name])
+                data_group = subgroup['freq_tuning_index']
+                for band in data_group:
+                    for pop_name in data_group[band].attrs:
+                        band_tuning_index_dict[band][pop_name].append(data_group[band].attrs[pop_name])
 
         all_decoded_pos_dict = dict()
         decoded_path_len_dict = defaultdict(list)

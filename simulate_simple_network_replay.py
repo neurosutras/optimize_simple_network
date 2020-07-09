@@ -495,8 +495,11 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
         if plot:
             plot_voltage_traces(subset_full_voltage_rec_dict, full_rec_t, valid_t=rec_t,
                                 spike_times_dict=full_spike_times_dict)
-            plot_firing_rate_heatmaps(buffered_firing_rates_dict, input_t=buffered_binned_t, valid_t=binned_t,
-                                      tuning_peak_locs=context.tuning_peak_locs)
+            plot_firing_rate_heatmaps(buffered_firing_rates_dict, input_t=buffered_binned_t,
+                                      valid_t=binned_t, tuning_peak_locs=context.tuning_peak_locs)
+            plot_population_spike_rasters(full_binned_spike_count_dict, input_t=full_binned_t,
+                                          valid_t=buffered_binned_t,
+                                          tuning_peak_locs=context.tuning_peak_locs)
 
         if any(voltages_exceed_threshold_list):
             voltages_exceed_threshold = True
@@ -523,7 +526,12 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
                     set_h5py_attr(subgroup.attrs, 'trial_offset', context.trial_offset)
                     set_h5py_attr(subgroup.attrs, 'connectivity_type', context.connectivity_type)
                     set_h5py_attr(subgroup.attrs, 'duration', context.duration)
+                    set_h5py_attr(subgroup.attrs, 'baks_alpha', context.baks_alpha)
+                    set_h5py_attr(subgroup.attrs, 'baks_beta', context.baks_beta)
+                    set_h5py_attr(subgroup.attrs, 'baks_pad_dur', context.baks_pad_dur)
+                    set_h5py_attr(subgroup.attrs, 'baks_wrap_around', context.baks_wrap_around)
                     subgroup.attrs['active_rate_threshold'] = context.active_rate_threshold
+                    subgroup.create_dataset('full_binned_t', data=full_binned_t, compression='gzip')
                     data_group = subgroup.create_group('pop_gid_ranges')
                     for pop_name in context.pop_gid_ranges:
                         data_group.create_dataset(pop_name, data=context.pop_gid_ranges[pop_name])

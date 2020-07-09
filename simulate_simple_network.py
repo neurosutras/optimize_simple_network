@@ -405,14 +405,14 @@ def analyze_network_output(network, trial=None, export=False, plot=False):
     binned_t = np.arange(0., context.duration + context.binned_dt / 2., context.binned_dt)
 
     full_spike_times_dict = network.get_spike_times_dict()
-    buffered_firing_rates_dict = \
-        infer_firing_rates_baks(full_spike_times_dict, buffered_binned_t, alpha=context.baks_alpha,
+    binned_firing_rates_dict = \
+        infer_firing_rates_baks(full_spike_times_dict, binned_t, alpha=context.baks_alpha,
                                 beta=context.baks_beta, pad_dur=context.baks_pad_dur,
                                 wrap_around=context.baks_wrap_around)
     full_binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict, full_binned_t)
 
     gathered_full_spike_times_dict_list = context.comm.gather(full_spike_times_dict, root=0)
-    gathered_buffered_firing_rates_dict_list = context.comm.gather(buffered_firing_rates_dict, root=0)
+    gathered_binned_firing_rates_dict_list = context.comm.gather(binned_firing_rates_dict, root=0)
     gathered_full_binned_spike_count_dict_list = context.comm.gather(full_binned_spike_count_dict, root=0)
 
     full_voltage_rec_dict = network.get_voltage_rec_dict()
@@ -456,7 +456,7 @@ def analyze_network_output(network, trial=None, export=False, plot=False):
 
     if context.comm.rank == 0:
         full_spike_times_dict = merge_list_of_dict(gathered_full_spike_times_dict_list)
-        buffered_firing_rates_dict = merge_list_of_dict(gathered_buffered_firing_rates_dict_list)
+        binned_firing_rates_dict = merge_list_of_dict(gathered_binned_firing_rates_dict_list)
         full_binned_spike_count_dict = merge_list_of_dict(gathered_full_binned_spike_count_dict_list)
 
         if plot or export:
@@ -475,7 +475,7 @@ def analyze_network_output(network, trial=None, export=False, plot=False):
         full_pop_mean_rate_from_binned_spike_count_dict = \
             get_pop_mean_rate_from_binned_spike_count(full_binned_spike_count_dict, dt=context.binned_dt)
         mean_min_rate_dict, mean_peak_rate_dict, mean_rate_active_cells_dict, pop_fraction_active_dict = \
-            get_pop_activity_stats(buffered_firing_rates_dict, input_t=buffered_binned_t, valid_t=binned_t,
+            get_pop_activity_stats(binned_firing_rates_dict, input_t=binned_t,
                                    threshold=context.active_rate_threshold, plot=plot)
         filtered_mean_rate_dict, filter_psd_f_dict, filter_psd_power_dict, filter_envelope_dict, \
         filter_envelope_ratio_dict, centroid_freq_dict, freq_tuning_index_dict = \
@@ -490,13 +490,13 @@ def analyze_network_output(network, trial=None, export=False, plot=False):
             sys.stdout.flush()
 
         if plot:
-            plot_inferred_spike_rates(full_spike_times_dict, buffered_firing_rates_dict, input_t=buffered_binned_t,
-                                      valid_t=binned_t, active_rate_threshold=context.active_rate_threshold)
+            plot_inferred_spike_rates(full_spike_times_dict, binned_firing_rates_dict, input_t=binned_t,
+                                      active_rate_threshold=context.active_rate_threshold)
             plot_voltage_traces(subset_full_voltage_rec_dict, full_rec_t, valid_t=rec_t,
                                 spike_times_dict=full_spike_times_dict)
             plot_weight_matrix(connection_weights_dict, pop_gid_ranges=context.pop_gid_ranges,
                                tuning_peak_locs=context.tuning_peak_locs)
-            plot_firing_rate_heatmaps(buffered_firing_rates_dict, input_t=buffered_binned_t, valid_t=binned_t,
+            plot_firing_rate_heatmaps(binned_firing_rates_dict, input_t=binned_t,
                                       tuning_peak_locs=context.tuning_peak_locs)
             if context.connectivity_type == 'gaussian':
                 plot_2D_connection_distance(context.pop_syn_proportions, context.pop_cell_positions, connectivity_dict)
@@ -525,7 +525,11 @@ def analyze_network_output(network, trial=None, export=False, plot=False):
                     set_h5py_attr(subgroup.attrs, 'network_instance', context.network_instance)
                     set_h5py_attr(subgroup.attrs, 'connectivity_type', context.connectivity_type)
                     set_h5py_attr(subgroup.attrs, 'duration', context.duration)
-                    subgroup.attrs['active_rate_threshold'] = context.active_rate_threshold
+                    set_h5py_attr(subgroup.attrs, 'active_rate_threshold', context.active_rate_threshold)
+                    set_h5py_attr(subgroup.attrs, 'baks_alpha', context.baks_alpha)
+                    set_h5py_attr(subgroup.attrs, 'baks_beta', context.baks_beta)
+                    set_h5py_attr(subgroup.attrs, 'baks_pad_dur', context.baks_pad_dur)
+                    set_h5py_attr(subgroup.attrs, 'baks_wrap_around', context.baks_wrap_around)
                     data_group = subgroup.create_group('pop_gid_ranges')
                     for pop_name in context.pop_gid_ranges:
                         data_group.create_dataset(pop_name, data=context.pop_gid_ranges[pop_name])

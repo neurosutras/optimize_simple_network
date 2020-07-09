@@ -1,0 +1,24 @@
+J:
+  E_E_FF_syn_proportion: 5.719615E-01
+  E_E_mean_weight: 7.166014E-01
+  E_E_syn_proportion: 6.616332E-01
+  E_E_tau_offset: 3.108798E+00
+  E_E_weight_norm_sigma: 7.324774E-01
+  E_FF_mean_weight: 7.720053E-01
+  E_FF_weight_norm_sigma: 7.447685E-01
+  E_I_mean_weight: 8.823921E-01
+  E_I_tau_offset: 5.142646E+00
+  E_I_weight_norm_sigma: 4.084318E-01
+  E_norm_syn_count: 4.691441E-01
+  E_peak_delta_weight: 3.757968E+00
+  I_E_FF_syn_proportion: 5.036410E-01
+  I_E_mean_weight: 2.264010E+00
+  I_E_syn_proportion: 1.953816E-01
+  I_E_tau_offset: 1.665738E+01
+  I_E_weight_norm_sigma: 1.357344E-01
+  I_FF_mean_weight: 1.843735E+00
+  I_FF_weight_norm_sigma: 4.747683E-01
+  I_I_mean_weight: 1.892966E-01
+  I_I_tau_offset: 1.192676E+01
+  I_I_weight_norm_sigma: 6.821238E-01
+  I_norm_syn_count: 2.838445E-01
