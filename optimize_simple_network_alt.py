@@ -603,10 +603,10 @@ def analyze_network_output_run(network, model_id=None, export=False, plot=False)
                 group.create_dataset('full_rec_t', data=full_rec_t, compression='gzip')
                 group.create_dataset('buffered_rec_t', data=buffered_rec_t, compression='gzip')
                 group.create_dataset('rec_t', data=rec_t, compression='gzip')
-
-            print('optimize_simple_network: pid: %i; exporting data to file: %s took %.2f s' %
-                  (os.getpid(), context.temp_output_path, time.time() - current_time))
-            sys.stdout.flush()
+            if context.debug and context.verbose > 0:
+                print('optimize_simple_network: analyze_network_output_run: pid: %i; exporting data to file: %s took '
+                      '%.2f s' % (os.getpid(), context.temp_output_path, time.time() - current_time))
+                sys.stdout.flush()
 
         result = dict()
 
@@ -932,6 +932,8 @@ def filter_features_replay(primitives, features, model_id=None, export=False):
         val = np.nanmean(feature_lists[key])
         if not np.isnan(val):
             new_features[key] = np.nanmean(feature_lists[key])
+        else:
+            return dict()
 
     return new_features
 
