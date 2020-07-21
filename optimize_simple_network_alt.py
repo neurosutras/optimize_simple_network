@@ -215,8 +215,8 @@ def config_worker():
     replay_baks_pad_dur = 0.  # ms
     replay_baks_wrap_around = False
     track_wrap_around = True
-    run_filter_bands = {'Theta': [4., 10.], 'Gamma': [30., 100.]}
-    replay_filter_bands = {'Ripple': [50., 150.]}
+    run_filter_bands = {'Theta': [4., 10.], 'Gamma': [30., 100.], 'Ripple': [100., 200.]}
+    replay_filter_bands = {'Ripple': [100., 200.]}
     max_num_cells_export_voltage_rec = 500
 
     if context.comm.rank == 0:
@@ -461,12 +461,17 @@ def analyze_network_output_run(network, model_id=None, export=False, plot=False)
         mean_min_rate_dict, mean_peak_rate_dict, mean_rate_active_cells_dict, pop_fraction_active_dict = \
             get_pop_activity_stats(binned_firing_rates_dict, input_t=binned_t,
                                    threshold=context.active_rate_threshold, plot=plot)
-        filtered_mean_rate_dict, filter_psd_f_dict, filter_psd_power_dict, filter_envelope_dict, \
+
+        fft_f_dict, fft_power_dict, filter_psd_f_dict, filter_psd_power_dict, filter_envelope_dict, \
         filter_envelope_ratio_dict, centroid_freq_dict, freq_tuning_index_dict = \
             get_pop_bandpass_filtered_signal_stats(full_pop_mean_rate_from_binned_spike_count_dict,
                                                    context.filter_bands, input_t=full_binned_t,
-                                                   valid_t=buffered_binned_t, output_t=binned_t,
+                                                   valid_t=buffered_binned_t, output_t=binned_t, pad=True,
                                                    plot=plot, verbose=context.verbose > 1)
+
+        if context.debug:
+            context.update(locals())
+            return
 
         if context.debug and context.verbose > 0:
             print('optimize_simple_network: analyze_network_output_run: pid: %i; additional data analysis took %.2f s' %
@@ -630,6 +635,10 @@ def analyze_network_output_run(network, model_id=None, export=False, plot=False)
         result['I_theta_tuning_index_run'] = freq_tuning_index_dict['Theta']['I']
         result['E_gamma_tuning_index_run'] = freq_tuning_index_dict['Gamma']['E']
         result['I_gamma_tuning_index_run'] = freq_tuning_index_dict['Gamma']['I']
+        result['E_ripple_psd_area_run'] = np.trapz(filter_psd_power_dict['Ripple']['E'],
+                                                   x=filter_psd_f_dict['Ripple']['E'])
+        result['I_ripple_psd_area_run'] = np.trapz(filter_psd_power_dict['Ripple']['I'],
+                                                   x=filter_psd_f_dict['Ripple']['I'])
 
         if any(voltages_exceed_threshold_list):
             if context.verbose > 0:
@@ -742,11 +751,12 @@ def analyze_network_output_replay(network, ensemble_id=None, trial=None, model_i
         mean_min_rate_dict, mean_peak_rate_dict, mean_rate_active_cells_dict, pop_fraction_active_dict = \
             get_pop_activity_stats(buffered_firing_rates_dict, input_t=buffered_binned_t, valid_t=binned_t,
                                    threshold=context.active_rate_threshold, plot=plot)
-        filtered_mean_rate_dict, filter_psd_f_dict, filter_psd_power_dict, filter_envelope_dict, \
+
+        fft_f_dict, fft_power_dict, filter_psd_f_dict, filter_psd_power_dict, filter_envelope_dict, \
         filter_envelope_ratio_dict, centroid_freq_dict, freq_tuning_index_dict = \
             get_pop_bandpass_filtered_signal_stats(full_pop_mean_rate_from_binned_spike_count_dict,
                                                    context.filter_bands, input_t=full_binned_t,
-                                                   valid_t=binned_t, output_t=binned_t,
+                                                   valid_t=buffered_binned_t, output_t=binned_t, pad=False,
                                                    plot=plot, verbose=context.verbose > 1)
 
         if context.debug and context.verbose > 0:
@@ -891,16 +901,10 @@ def analyze_network_output_replay(network, ensemble_id=None, trial=None, model_i
         result['FF_frac_active_replay'] = np.mean(pop_fraction_active_dict['FF'])
         result['E_frac_active_replay'] = np.mean(pop_fraction_active_dict['E'])
         result['I_frac_active_replay'] = np.mean(pop_fraction_active_dict['I'])
-        result['E_ripple_tuning_index_replay'] = freq_tuning_index_dict['Ripple']['E']
-        result['I_ripple_tuning_index_replay'] = freq_tuning_index_dict['Ripple']['I']
-        if result['E_ripple_tuning_index_replay'] >= 2.:
-            result['E_centroid_ripple_freq_replay'] = centroid_freq_dict['Ripple']['E']
-        else:
-            result['E_centroid_ripple_freq_replay'] = np.nan
-        if result['I_ripple_tuning_index_replay'] >= 2.:
-            result['I_centroid_ripple_freq_replay'] = centroid_freq_dict['Ripple']['I']
-        else:
-            result['I_centroid_ripple_freq_replay'] = np.nan
+        result['E_ripple_psd_area_replay'] = np.trapz(filter_psd_power_dict['Ripple']['E'],
+                                                      x=filter_psd_f_dict['Ripple']['E'])
+        result['I_ripple_psd_area_replay'] = np.trapz(filter_psd_power_dict['Ripple']['I'],
+                                                      x=filter_psd_f_dict['Ripple']['I'])
 
         if any(voltages_exceed_threshold_list):
             if context.verbose > 0:
@@ -929,11 +933,7 @@ def filter_features_replay(primitives, features, model_id=None, export=False):
             feature_lists[key].append(val)
     new_features = {}
     for key in feature_lists:
-        val = np.nanmean(feature_lists[key])
-        if not np.isnan(val):
-            new_features[key] = np.nanmean(feature_lists[key])
-        else:
-            return dict()
+        new_features[key] = np.mean(feature_lists[key])
 
     return new_features
 
@@ -1145,9 +1145,29 @@ def get_objectives(features, model_id=None, export=False):
     if context.comm.rank == 0:
         objectives = {}
         for objective_name in context.objective_names:
-            if (objective_name.find('tuning_index') != -1 or objective_name.find('centroid_ripple_freq') != -1) \
-                    and features[objective_name] >= context.target_val[objective_name]:
+            if (objective_name.find('tuning_index') != -1 and
+                    features[objective_name] >= context.target_val[objective_name]):
                 objectives[objective_name] = 0.
+            elif objective_name.find('ripple_psd_area') != -1:
+                base_name = 'ripple_psd_area'
+                if objective_name == 'E_ripple_psd_area_ratio':
+                    pop_name = 'E'
+                elif objective_name == 'I_ripple_psd_area_ratio':
+                    pop_name = 'I'
+                run_val = features['%s_%s_run' % (pop_name, base_name)]
+                replay_val = features['%s_%s_replay' % (pop_name, base_name)]
+                if run_val == 0.:
+                    if replay_val == 0.:
+                        return dict(), dict()
+                    else:
+                        objectives[objective_name] = 0.
+                else:
+                    this_ratio = replay_val / run_val
+                    if this_ratio >= context.target_val[objective_name]:
+                        objectives[objective_name] = 0.
+                    else:
+                        objectives[objective_name] = ((context.target_val[objective_name] - this_ratio) /
+                                                      context.target_range[objective_name]) ** 2.
             else:
                 objectives[objective_name] = ((context.target_val[objective_name] - features[objective_name]) /
                                               context.target_range[objective_name]) ** 2.

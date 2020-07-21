@@ -1357,74 +1357,22 @@ def PSTI(f, power, band=None, verbose=False):
     return this_PSTI
 
 
-def get_bandpass_filtered_signal_stats(signal, input_t, sos, filter_band, buffered_sos=None, buffered_filter_band=None,
-                                       output_t=None, bins=100, signal_label='', filter_label='',
-                                       axis_label='Amplitude', units='a.u.', pad=True, pad_len=None, plot=False,
-                                       verbose=False):
+def get_freq_tuning_stats(fft_f, fft_power, filter_band, buffered_filter_band=None, bins=100, verbose=False):
     """
 
-    :param signal: array
-    :param input_t: array (ms)
-    :param sos: array
+    :param fft_f: array (Hz)
+    :param fft_power: array (units**2/Hz)
     :param filter_band: list of float (Hz)
-    :param buffered_sos: array
     :param buffered_filter_band: list of float (Hz)
-    :param output_t: array (ms)
-    :param bins: number of frequency bins to compute in band
-    :param signal_label: str
-    :param filter_label: str
-    :param axis_label: str
-    :param units: str
-    :param pad: bool
-    :param pad_len: int
-    :param plot: bool
+    :param bins: int
     :param verbose: bool
     :return: tuple of array
     """
-    if np.all(signal == 0.):
-        if verbose > 0:
-            print('%s\n%s bandpass filter (%.1f:%.1f Hz); Failed - no signal' %
-                  (signal_label, filter_label, min(filter_band), max(filter_band)))
-            sys.stdout.flush()
-        if buffered_filter_band is not None:
-            f = np.linspace(buffered_filter_band[0], buffered_filter_band[1], bins)
-            power = np.empty_like(f)
-            power[:] = np.nan
-        return signal, f, power, np.zeros_like(signal), 0., 0., 0.
-    dt = input_t[1] - input_t[0]  # ms
-    fs = 1000. / dt
-
     if buffered_filter_band is not None:
-        if buffered_sos is None:
-            raise RuntimeError('get_bandpass_filtered_signal_stats: when specifying a buffered_filter_band, a'
-                               'buffered filter must also be provided')
-        bandwidth = buffered_filter_band[1] - buffered_filter_band[0]
+        f = np.linspace(buffered_filter_band[0], buffered_filter_band[1], bins)
     else:
-        bandwidth = filter_band[1] - filter_band[0]
-    nfft = int(fs * bins / bandwidth)
-
-    if pad and pad_len is None:
-        pad_dur = min(10. * 1000. / np.min(filter_band), len(input_t) * dt)  # ms
-        pad_len = min(int(pad_dur / dt), len(input_t) - 1)
-    if pad:
-        padded_signal = get_mirror_padded_signal(signal, pad_len)
-    else:
-        padded_signal = np.array(signal)
-
-    filtered_padded_signal = sosfiltfilt(sos, padded_signal)
-    filtered_signal = filtered_padded_signal[pad_len:-pad_len]
-    padded_envelope = np.abs(hilbert(filtered_padded_signal))
-    envelope = padded_envelope[pad_len:-pad_len]
-
-    if buffered_sos is not None:
-        if buffered_filter_band is None:
-            raise RuntimeError('get_bandpass_filtered_signal_stats: when specifying a buffered filter, a'
-                               'buffered_filter_band must also be provided')
-        buffered_filtered_padded_signal = sosfiltfilt(buffered_sos, padded_signal)
-        buffered_filtered_signal = buffered_filtered_padded_signal[pad_len:-pad_len]
-        f, power = periodogram(buffered_filtered_signal, fs=fs, nfft=nfft)
-    else:
-        f, power = periodogram(filtered_signal, fs=fs, nfft=nfft)
+        f = np.linspace(filter_band[0], filter_band[1], bins)
+    power = np.interp(f, fft_f, fft_power)
 
     com_index = get_mass_index(power, 0.5)
     if com_index is None:
@@ -1439,62 +1387,65 @@ def get_bandpass_filtered_signal_stats(signal, input_t, sos, filter_band, buffer
         else:
             freq_tuning_index = PSTI(f, power, band=filter_band, verbose=verbose)
 
-    if output_t is None:
-        t = input_t
+    return f, power, centroid_freq, freq_tuning_index
+
+
+def get_bandpass_filtered_signal_stats(signal, input_t, sos, filter_band, output_t=None, pad=True, filter_label='',
+                                       signal_label='', verbose=False):
+    """
+
+    :param signal: array
+    :param input_t: array (ms)
+    :param sos: array
+    :param filter_band: list of float (Hz)
+    :param output_t: array (ms)
+    :param pad: bool
+    :param filter_label: str
+    :param signal_label: str
+    :param verbose: bool
+    :return: tuple of array
+    """
+    if np.all(signal == 0.):
+        if verbose > 0:
+            print('%s\n%s bandpass filter (%.1f:%.1f Hz); Failed - no signal' %
+                  (signal_label, filter_label, min(filter_band), max(filter_band)))
+            sys.stdout.flush()
+        output_signal = np.interp(output_t, input_t, signal)
+        return output_signal, np.zeros_like(output_signal), 0.
+    dt = input_t[1] - input_t[0]  # ms
+
+    if pad:
+        pad_dur = min(10. * 1000. / np.min(filter_band), len(input_t) * dt)  # ms
+        pad_len = min(int(pad_dur / dt), len(input_t) - 1)
+        intermediate_signal = get_mirror_padded_signal(signal, pad_len)
     else:
-        t = output_t
-        signal = np.interp(output_t, input_t, signal)
+        intermediate_signal = np.array(signal)
+
+    filtered_signal = sosfiltfilt(sos, intermediate_signal)
+    envelope = np.abs(hilbert(filtered_signal))
+    if pad:
+        filtered_signal = filtered_signal[pad_len:-pad_len]
+        envelope = envelope[pad_len:-pad_len]
+
+    if output_t is not None:
+        output_signal = np.interp(output_t, input_t, signal)
         filtered_signal = np.interp(output_t, input_t, filtered_signal)
         envelope = np.interp(output_t, input_t, envelope)
+    else:
+        output_signal = signal
 
     mean_envelope = np.mean(envelope)
-    mean_signal = np.mean(signal)
+    mean_signal = np.mean(output_signal)
     if mean_signal == 0.:
         envelope_ratio = 0.
     else:
         envelope_ratio = mean_envelope / mean_signal
 
-    if plot:
-        fig, axes = plt.subplots(2,2, figsize=(8.5,7))
-        axes[0][0].plot(t, np.subtract(signal, np.mean(signal)), c='grey', alpha=0.5, label='Original signal')
-        axes[0][0].plot(t, filtered_signal, c='r', label='Filtered signal', alpha=0.5)
-        axes[0][1].plot(t, signal, label='Original signal', c='grey', alpha=0.5, zorder=2)
-        axes[0][1].plot(t, np.ones_like(t) * mean_signal, c='k', zorder=1)
-        axes[0][1].plot(t, envelope, label='Envelope amplitude', c='r', alpha=0.5, zorder=2)
-        axes[0][1].plot(t, np.ones_like(t) * mean_envelope, c='darkred', zorder=0)
-        axes[0][0].set_ylabel('%s\n(mean subtracted) (%s)' % (axis_label, units))
-        axes[0][1].set_ylabel('%s (%s)' % (axis_label, units))
-        box = axes[0][0].get_position()
-        axes[0][0].set_position([box.x0, box.y0, box.width, box.height * 0.8])
-        axes[0][0].legend(loc='lower center', bbox_to_anchor=(0.5, 1.0), frameon=False, framealpha=0.5)
-        axes[0][0].set_xlabel('Time (ms)')
-        box = axes[0][1].get_position()
-        axes[0][1].set_position([box.x0, box.y0, box.width, box.height * 0.8])
-        axes[0][1].legend(loc='lower center', bbox_to_anchor=(0.5, 1.0), frameon=False, framealpha=0.5)
-        axes[0][1].set_xlabel('Time (ms)')
-
-        axes[1][0].plot(f, power, c='k')
-        axes[1][0].set_xlabel('Frequency (Hz)')
-        axes[1][0].set_ylabel('Spectral density\n(units$^{2}$/Hz)')
-        if buffered_filter_band is not None:
-            axes[1][0].set_xlim(min(buffered_filter_band), max(buffered_filter_band))
-        else:
-            axes[1][0].set_xlim(min(filter_band), max(filter_band))
-
-        clean_axes(axes)
-        fig.suptitle('%s: %s bandpass filter (%.1f:%.1f Hz)\nEnvelope ratio: %.3f; Centroid freq: %.3f Hz\n'
-                     'Frequency tuning index: %.3f' % (signal_label, filter_label, min(filter_band), max(filter_band),
-                                                       envelope_ratio, centroid_freq, freq_tuning_index),
-                     fontsize=mpl.rcParams['font.size'])
-        fig.tight_layout()
-        fig.subplots_adjust(top=0.75, hspace=0.3)
-        fig.show()
-
-    return filtered_signal, f, power, envelope, envelope_ratio, centroid_freq, freq_tuning_index
+    return output_signal, filtered_signal, envelope, envelope_ratio
 
 
 def get_pop_bandpass_filtered_signal_stats(signal_dict, filter_band_dict, input_t, valid_t=None, output_t=None,
-                                           order=15, plot=False, verbose=False):
+                                           order=15, pad=True, bins=100, plot=False, verbose=False):
     """
 
     :param signal_dict: array
@@ -1503,50 +1454,156 @@ def get_pop_bandpass_filtered_signal_stats(signal_dict, filter_band_dict, input_
     :param valid_t: array (ms)
     :param output_t: array (ms)
     :param order: int
+    :param pad: bool
+    :param bins: int
     :param plot: bool
     :param verbose: bool
     :return: tuple of dict
     """
     dt = input_t[1] - input_t[0]  # ms
     sampling_rate = 1000. / dt  # Hz
-    filtered_signal_dict = {}
+    output_signal = {}
+    filtered_signal = {}
+    fft_f_dict = {}
+    fft_power_dict = {}
     psd_f_dict = {}
     psd_power_dict = {}
     envelope_dict = {}
     envelope_ratio_dict = {}
     centroid_freq_dict = {}
     freq_tuning_index_dict = {}
+    sos_dict = {}
+    buffered_filter_band_dict = {}
+    psd_power_range = {}
 
     if valid_t is None:
         valid_t = input_t
         valid_indexes = ()
     else:
         valid_indexes = np.where((input_t >= valid_t[0]) & (input_t <= valid_t[-1]))[0]
+
     for filter_label, filter_band in viewitems(filter_band_dict):
-        filtered_signal_dict[filter_label] = {}
+        output_signal[filter_label] = {}
+        filtered_signal[filter_label] = {}
         psd_f_dict[filter_label] = {}
         psd_power_dict[filter_label] = {}
         envelope_dict[filter_label] = {}
         envelope_ratio_dict[filter_label] = {}
         centroid_freq_dict[filter_label] = {}
         freq_tuning_index_dict[filter_label] = {}
-        sos = get_butter_bandpass_filter(filter_band, sampling_rate, filter_label=filter_label, order=order, plot=plot)
-        buffered_filter_band = [filter_band[0] / 2., 2. * filter_band[1]]
-        buffered_sos = get_butter_bandpass_filter(buffered_filter_band, sampling_rate, filter_label=filter_label,
-                                                  order=order, plot=False)
-        for pop_name in signal_dict:
-            signal = signal_dict[pop_name][valid_indexes]
-            filtered_signal_dict[filter_label][pop_name], psd_f_dict[filter_label][pop_name], \
-            psd_power_dict[filter_label][pop_name], envelope_dict[filter_label][pop_name], \
-            envelope_ratio_dict[filter_label][pop_name], centroid_freq_dict[filter_label][pop_name], \
-            freq_tuning_index_dict[filter_label][pop_name] = \
-                get_bandpass_filtered_signal_stats(signal, valid_t, sos, filter_band, buffered_sos=buffered_sos,
-                                                   buffered_filter_band=buffered_filter_band, output_t=output_t,
-                                                   signal_label='Population: %s' % pop_name, filter_label=filter_label,
-                                                   axis_label='Firing rate', units='Hz', plot=plot, verbose=verbose)
+        sos_dict[filter_label] = get_butter_bandpass_filter(filter_band, sampling_rate, filter_label=filter_label,
+                                                            order=order, plot=plot)
+        buffered_filter_band_dict[filter_label] = [filter_band[0] / 2., 2. * filter_band[1]]
 
-    return filtered_signal_dict, psd_f_dict, psd_power_dict, envelope_dict, envelope_ratio_dict, centroid_freq_dict, \
-           freq_tuning_index_dict
+    for pop_name in signal_dict:
+        signal = signal_dict[pop_name][valid_indexes]
+        fft_f_dict[pop_name], fft_power_dict[pop_name] = periodogram(signal, fs=sampling_rate)
+
+        for filter_label, filter_band in viewitems(filter_band_dict):
+            output_signal[filter_label][pop_name], filtered_signal[filter_label][pop_name], \
+            envelope_dict[filter_label][pop_name], envelope_ratio_dict[filter_label][pop_name] = \
+                get_bandpass_filtered_signal_stats(signal, valid_t, sos_dict[filter_label], filter_band,
+                                                   output_t=output_t, pad=pad, filter_label=filter_label,
+                                                   signal_label='Population: %s' % pop_name, verbose=verbose)
+            psd_f_dict[filter_label][pop_name], psd_power_dict[filter_label][pop_name], \
+            centroid_freq_dict[filter_label][pop_name], freq_tuning_index_dict[filter_label][pop_name] = \
+                get_freq_tuning_stats(fft_f_dict[pop_name], fft_power_dict[pop_name], filter_band,
+                                      buffered_filter_band=buffered_filter_band_dict[filter_label], bins=bins,
+                                      verbose=verbose)
+            if filter_label not in psd_power_range:
+                psd_power_range[filter_label] = [np.min(psd_power_dict[filter_label][pop_name]),
+                                                 np.max(psd_power_dict[filter_label][pop_name])]
+            else:
+                psd_power_range[filter_label][0] = min(np.min(psd_power_dict[filter_label][pop_name]),
+                                                       psd_power_range[filter_label][0])
+                psd_power_range[filter_label][1] = max(np.max(psd_power_dict[filter_label][pop_name]),
+                                                       psd_power_range[filter_label][1])
+
+    if plot:
+        for filter_label, filter_band in viewitems(filter_band_dict):
+            for pop_name in output_signal[filter_label]:
+                plot_bandpass_filtered_signal_summary(output_t, output_signal[filter_label][pop_name],
+                                                      filtered_signal[filter_label][pop_name], filter_band,
+                                                      envelope_dict[filter_label][pop_name],
+                                                      psd_f_dict[filter_label][pop_name],
+                                                      psd_power_dict[filter_label][pop_name],
+                                                      centroid_freq_dict[filter_label][pop_name],
+                                                      freq_tuning_index_dict[filter_label][pop_name],
+                                                      psd_power_range=psd_power_range[filter_label],
+                                                      buffered_filter_band=buffered_filter_band_dict[filter_label],
+                                                      signal_label='Population: %s' % pop_name,
+                                                      filter_label=filter_label, axis_label='Firing rate', units='Hz')
+
+    return fft_f_dict, fft_power_dict, psd_f_dict, psd_power_dict, envelope_dict, envelope_ratio_dict, \
+           centroid_freq_dict, freq_tuning_index_dict
+
+
+def plot_bandpass_filtered_signal_summary(t, signal, filtered_signal, filter_band, envelope, psd_f, psd_power,
+                                          centroid_freq, freq_tuning_index, psd_power_range=None,
+                                          buffered_filter_band=None, signal_label='', filter_label='',
+                                          axis_label='Amplitude', units='a.u.'):
+    """
+    :param t: array
+    :param signal: array
+    :param filtered_signal: array
+    :param filter_band: list of float (Hz)
+    :param envelope: array
+    :param psd_f: array
+    :param psd_power: array
+    :param centroid_freq: float
+    :param freq_tuning_index: float
+    :param psd_power_range: list
+    :param buffered_filter_band: list of float (Hz)
+    :param signal_label: str
+    :param filter_label: str
+    :param axis_label: str
+    :param units: str
+    :return: tuple of array
+    """
+    mean_envelope = np.mean(envelope)
+    mean_signal = np.mean(signal)
+    if mean_signal == 0.:
+        envelope_ratio = 0.
+    else:
+        envelope_ratio = mean_envelope / mean_signal
+
+    fig, axes = plt.subplots(2, 2, figsize=(8.5, 7))
+    axes[0][0].plot(t, np.subtract(signal, np.mean(signal)), c='grey', alpha=0.5, label='Original signal')
+    axes[0][0].plot(t, filtered_signal, c='r', label='Filtered signal', alpha=0.5)
+    axes[0][1].plot(t, signal, label='Original signal', c='grey', alpha=0.5, zorder=2)
+    axes[0][1].plot(t, np.ones_like(t) * mean_signal, c='k', zorder=1)
+    axes[0][1].plot(t, envelope, label='Envelope amplitude', c='r', alpha=0.5, zorder=2)
+    axes[0][1].plot(t, np.ones_like(t) * mean_envelope, c='darkred', zorder=0)
+    axes[0][0].set_ylabel('%s\n(mean subtracted) (%s)' % (axis_label, units))
+    axes[0][1].set_ylabel('%s (%s)' % (axis_label, units))
+    box = axes[0][0].get_position()
+    axes[0][0].set_position([box.x0, box.y0, box.width, box.height * 0.8])
+    axes[0][0].legend(loc='lower center', bbox_to_anchor=(0.5, 1.0), frameon=False, framealpha=0.5)
+    axes[0][0].set_xlabel('Time (ms)')
+    box = axes[0][1].get_position()
+    axes[0][1].set_position([box.x0, box.y0, box.width, box.height * 0.8])
+    axes[0][1].legend(loc='lower center', bbox_to_anchor=(0.5, 1.0), frameon=False, framealpha=0.5)
+    axes[0][1].set_xlabel('Time (ms)')
+
+    # axes[1][0].plot(psd_f, psd_power, c='k')
+    axes[1][0].semilogy(psd_f, psd_power, c='k')
+    axes[1][0].set_xlabel('Frequency (Hz)')
+    axes[1][0].set_ylabel('Spectral density\n(units$^{2}$/Hz)')
+    if buffered_filter_band is not None:
+        axes[1][0].set_xlim(min(buffered_filter_band), max(buffered_filter_band))
+    else:
+        axes[1][0].set_xlim(min(filter_band), max(filter_band))
+    if psd_power_range is not None:
+        axes[1][0].set_ylim(psd_power_range[0], psd_power_range[1])
+
+    clean_axes(axes)
+    fig.suptitle('%s: %s bandpass filter (%.1f:%.1f Hz)\nEnvelope ratio: %.3f; Centroid freq: %.3f Hz\n'
+                 'Frequency tuning index: %.3f' % (signal_label, filter_label, min(filter_band), max(filter_band),
+                                                   envelope_ratio, centroid_freq, freq_tuning_index),
+                 fontsize=mpl.rcParams['font.size'])
+    fig.tight_layout()
+    fig.subplots_adjust(top=0.75, hspace=0.3)
+    fig.show()
 
 
 def get_lowpass_filtered_signal_stats(signal, input_t, sos, cutoff_freq, output_t=None, bins=100, signal_label='',
