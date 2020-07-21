@@ -20,6 +20,6 @@ set -x
 cd $WORK/optimize_simple_network
 
 ibrun -n 2240 python3 -m nested.optimize --config-file-path=$CONFIG_FILE_PATH \
-  --output-dir=$WORK/data/optimize_simple_network --pop_size=200 --max_iter=50 --path_length=3 --disp \
+  --output-dir=$SCRATCH/data/optimize_simple_network --pop_size=200 --max_iter=50 --path_length=3 --disp \
   --procs_per_worker=112
 EOT
