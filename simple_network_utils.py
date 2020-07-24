@@ -1027,15 +1027,20 @@ def infer_firing_rates_from_spike_count(binned_spike_count_dict, input_t, output
         if smooth_bins % 2 == 0:
             smooth_bins += 1
 
-    # if possible, include a starting at output_t[0]
+    # if possible, include a bin starting at align_to_t
     binned_t_center_indexes = []
-    this_start_index = np.where(input_t >= align_to_t)[0]
-    if len(this_start_index) > 0:
-        this_center_index = this_start_index[0] + half_window_bins
-        while this_center_index >= half_window_bins:
+
+    this_center_index = np.where(input_t >= align_to_t)[0] + half_window_bins
+    if len(this_center_index) > 0:
+        this_center_index = this_center_index[0]
+        if this_center_index < half_window_bins:
+            this_center_index = half_window_bins
             binned_t_center_indexes.append(this_center_index)
-            this_center_index -= step_bins
-        binned_t_center_indexes.reverse()
+        else:
+            while this_center_index > half_window_bins:
+                binned_t_center_indexes.append(this_center_index)
+                this_center_index -= step_bins
+            binned_t_center_indexes.reverse()
     else:
         this_center_index = half_window_bins
         binned_t_center_indexes.append(this_center_index)
@@ -2038,8 +2043,7 @@ def plot_firing_rate_heatmaps(firing_rates_dict, input_t, valid_t=None, pop_name
         y_interval = max(2, len(sorted_gids) // 10)
         yticks = list(range(0, len(sorted_gids), y_interval))
         ylabels = np.array(sorted_gids)[yticks]
-        dt = valid_t[1] - valid_t[0]
-        x_interval = min(int(1000. / dt), int((valid_t[-1] + dt) / 5.))
+        x_interval = max(1, math.floor(len(valid_t) / 10))
         xticks = list(range(0, len(valid_t), x_interval))
         xlabels = np.array(valid_t)[xticks].astype('int32')
         plot_heatmap_from_matrix(rate_matrix, xticks=xticks, xtick_labels=xlabels, yticks=yticks,
@@ -2097,9 +2101,9 @@ def plot_population_spike_rasters(binned_spike_count_dict, input_t, valid_t=None
         axes.set_ylim([spike_count_matrix.shape[0] - 1, 0])
         axes.set_yticks(yticks)
         axes.set_yticklabels(ylabels)
-        axes.set_xlim(valid_t[0], valid_t[-1])
-        axes.set_xticks(xticks)
-        axes.set_xticklabels(xlabels)
+        # axes.set_xlim(valid_t[0], valid_t[-1])
+        # axes.set_xticks(xticks)
+        # axes.set_xticklabels(xlabels)
         axes.set_xlabel('Time (ms)')
         axes.set_title('Spike times: %s population' % pop_name, fontsize=mpl.rcParams['font.size'])
         if sort:

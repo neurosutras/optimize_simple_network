@@ -165,7 +165,7 @@ def init_context():
     step_dur = step_bins * replay_binned_dt
     half_step_dur = step_dur / 2.
 
-    # if possible, include a bin starting at time zero.
+    # if possible, include a bin starting at align_to_t
     binned_t_center_indexes = []
     this_center_index = np.where(replay_binned_t >= align_to_t)[0] + half_window_bins
     if len(this_center_index) > 0:

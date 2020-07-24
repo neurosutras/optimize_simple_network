@@ -635,10 +635,9 @@ def analyze_network_output_run(network, model_id=None, export=False, plot=False)
         result['I_theta_tuning_index_run'] = freq_tuning_index_dict['Theta']['I']
         result['E_gamma_tuning_index_run'] = freq_tuning_index_dict['Gamma']['E']
         result['I_gamma_tuning_index_run'] = freq_tuning_index_dict['Gamma']['I']
-        result['E_ripple_psd_area_run'] = np.trapz(filter_psd_power_dict['Ripple']['E'],
-                                                   x=filter_psd_f_dict['Ripple']['E'])
-        result['I_ripple_psd_area_run'] = np.trapz(filter_psd_power_dict['Ripple']['I'],
-                                                   x=filter_psd_f_dict['Ripple']['I'])
+        result['FF_ripple_envelope_ratio_run'] = filter_envelope_ratio_dict['Ripple']['FF']
+        result['E_ripple_envelope_ratio_run'] = filter_envelope_ratio_dict['Ripple']['E']
+        result['I_ripple_envelope_ratio_run'] = filter_envelope_ratio_dict['Ripple']['I']
 
         if any(voltages_exceed_threshold_list):
             if context.verbose > 0:
@@ -676,11 +675,20 @@ def analyze_network_output_replay(network, ensemble_id=None, trial=None, model_i
     binned_t = np.arange(0., context.duration + context.binned_dt / 2., context.binned_dt)
 
     full_spike_times_dict = network.get_spike_times_dict()
+
     buffered_firing_rates_dict = \
         infer_firing_rates_baks(full_spike_times_dict, buffered_binned_t, alpha=context.baks_alpha,
                                 beta=context.baks_beta, pad_dur=context.baks_pad_dur,
                                 wrap_around=context.baks_wrap_around)
+
+
     full_binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict, full_binned_t)
+    """
+    inferred_binned_t, buffered_firing_rates_dict = \
+        infer_firing_rates_from_spike_count(full_binned_spike_count_dict, full_binned_t,
+                                            (binned_t[0], binned_t[-1]), align_to_t=0.,
+                                            window_dur=60., step_dur=20.)
+    """
 
     gathered_full_spike_times_dict_list = context.comm.gather(full_spike_times_dict, root=0)
     gathered_buffered_firing_rates_dict_list = context.comm.gather(buffered_firing_rates_dict, root=0)
@@ -748,15 +756,21 @@ def analyze_network_output_replay(network, ensemble_id=None, trial=None, model_i
 
         full_pop_mean_rate_from_binned_spike_count_dict = \
             get_pop_mean_rate_from_binned_spike_count(full_binned_spike_count_dict, dt=context.binned_dt)
+
         mean_min_rate_dict, mean_peak_rate_dict, mean_rate_active_cells_dict, pop_fraction_active_dict = \
             get_pop_activity_stats(buffered_firing_rates_dict, input_t=buffered_binned_t, valid_t=binned_t,
                                    threshold=context.active_rate_threshold, plot=plot)
+        """
+        mean_min_rate_dict, mean_peak_rate_dict, mean_rate_active_cells_dict, pop_fraction_active_dict = \
+            get_pop_activity_stats(buffered_firing_rates_dict, input_t=inferred_binned_t,
+                                   threshold=context.active_rate_threshold, plot=plot)
+        """
 
         fft_f_dict, fft_power_dict, filter_psd_f_dict, filter_psd_power_dict, filter_envelope_dict, \
         filter_envelope_ratio_dict, centroid_freq_dict, freq_tuning_index_dict = \
             get_pop_bandpass_filtered_signal_stats(full_pop_mean_rate_from_binned_spike_count_dict,
                                                    context.filter_bands, input_t=full_binned_t,
-                                                   valid_t=buffered_binned_t, output_t=binned_t, pad=False,
+                                                   valid_t=binned_t, output_t=binned_t, pad=False,
                                                    plot=plot, verbose=context.verbose > 1)
 
         if context.debug and context.verbose > 0:
@@ -766,10 +780,15 @@ def analyze_network_output_replay(network, ensemble_id=None, trial=None, model_i
             sys.stdout.flush()
 
         if plot:
+
             plot_firing_rate_heatmaps(buffered_firing_rates_dict, input_t=buffered_binned_t,
                                       valid_t=buffered_binned_t, tuning_peak_locs=context.tuning_peak_locs)
-            plot_population_spike_rasters(full_binned_spike_count_dict, input_t=full_binned_t, valid_t=buffered_binned_t,
-                                          tuning_peak_locs=context.tuning_peak_locs)
+            """
+            plot_firing_rate_heatmaps(buffered_firing_rates_dict, input_t=inferred_binned_t,
+                                      tuning_peak_locs=context.tuning_peak_locs)
+            """
+            plot_population_spike_rasters(full_binned_spike_count_dict, input_t=full_binned_t,
+                                          valid_t=buffered_binned_t, tuning_peak_locs=context.tuning_peak_locs)
 
         if export:
             current_time = time.time()
@@ -901,10 +920,12 @@ def analyze_network_output_replay(network, ensemble_id=None, trial=None, model_i
         result['FF_frac_active_replay'] = np.mean(pop_fraction_active_dict['FF'])
         result['E_frac_active_replay'] = np.mean(pop_fraction_active_dict['E'])
         result['I_frac_active_replay'] = np.mean(pop_fraction_active_dict['I'])
-        result['E_ripple_psd_area_replay'] = np.trapz(filter_psd_power_dict['Ripple']['E'],
-                                                      x=filter_psd_f_dict['Ripple']['E'])
-        result['I_ripple_psd_area_replay'] = np.trapz(filter_psd_power_dict['Ripple']['I'],
-                                                      x=filter_psd_f_dict['Ripple']['I'])
+        result['FF_mean_active_rate_replay'] = np.mean(mean_rate_active_cells_dict['FF'])
+        result['E_mean_active_rate_replay'] = np.mean(mean_rate_active_cells_dict['E'])
+        result['I_mean_active_rate_replay'] = np.mean(mean_rate_active_cells_dict['I'])
+        result['FF_ripple_envelope_ratio_replay'] = filter_envelope_ratio_dict['Ripple']['FF']
+        result['E_ripple_envelope_ratio_replay'] = filter_envelope_ratio_dict['Ripple']['E']
+        result['I_ripple_envelope_ratio_replay'] = filter_envelope_ratio_dict['Ripple']['I']
 
         if any(voltages_exceed_threshold_list):
             if context.verbose > 0:
@@ -1117,8 +1138,8 @@ def compute_features_replay(x, ensemble_id=None, trial=None, model_id=None, expo
 
     context.network.run()
     if context.comm.rank == 0 and context.verbose > 0:
-        print('optimize_simple_network: pid: %i; model_id: %i; network simulation (replay) took %.2f s' %
-              (os.getpid(), model_id, time.time() - current_time))
+        print('optimize_simple_network: pid: %i; model_id: %i; trial: %i; network simulation (replay) took %.2f s' %
+              (os.getpid(), model_id, trial, time.time() - current_time))
         sys.stdout.flush()
     current_time = time.time()
 
@@ -1126,8 +1147,8 @@ def compute_features_replay(x, ensemble_id=None, trial=None, model_id=None, expo
                                             export=export, plot=context.plot)
     if context.comm.rank == 0:
         if context.verbose > 0:
-            print('optimize_simple_network: pid: %i; model_id: %i; analysis of network simulation results (replay) '
-                  'took %.2f s' % (os.getpid(), model_id, time.time() - current_time))
+            print('optimize_simple_network: pid: %i; model_id: %i; trial: %i; analysis of network simulation results '
+                  '(replay) took %.2f s' % (os.getpid(), model_id, trial, time.time() - current_time))
             sys.stdout.flush()
         if results is None:
             return dict()
@@ -1148,26 +1169,27 @@ def get_objectives(features, model_id=None, export=False):
             if (objective_name.find('tuning_index') != -1 and
                     features[objective_name] >= context.target_val[objective_name]):
                 objectives[objective_name] = 0.
-            elif objective_name.find('ripple_psd_area') != -1:
-                base_name = 'ripple_psd_area'
-                if objective_name == 'E_ripple_psd_area_ratio':
+            elif objective_name.find('ripple_envelope_score') != -1:
+                base_name = 'ripple_envelope_ratio'
+                if objective_name == 'E_ripple_envelope_score':
                     pop_name = 'E'
-                elif objective_name == 'I_ripple_psd_area_ratio':
+                elif objective_name == 'I_ripple_envelope_score':
                     pop_name = 'I'
                 run_val = features['%s_%s_run' % (pop_name, base_name)]
                 replay_val = features['%s_%s_replay' % (pop_name, base_name)]
-                if run_val == 0.:
-                    if replay_val == 0.:
-                        return dict(), dict()
-                    else:
-                        objectives[objective_name] = 0.
+                if replay_val > run_val:
+                    objectives[objective_name] = 0.
                 else:
-                    this_ratio = replay_val / run_val
-                    if this_ratio >= context.target_val[objective_name]:
-                        objectives[objective_name] = 0.
-                    else:
-                        objectives[objective_name] = ((context.target_val[objective_name] - this_ratio) /
-                                                      context.target_range[objective_name]) ** 2.
+                    objectives[objective_name] = ((replay_val - run_val) /
+                                                  context.target_range[objective_name]) ** 2.
+            elif objective_name == 'E_mean_active_rate_replay':
+                E_val = features['E_mean_active_rate_replay']
+                FF_val = features['FF_mean_active_rate_replay']
+                if E_val < FF_val:
+                    objectives[objective_name] = 0.
+                else:
+                    objectives[objective_name] = ((E_val - FF_val) /
+                                                  context.target_range[objective_name]) ** 2.
             else:
                 objectives[objective_name] = ((context.target_val[objective_name] - features[objective_name]) /
                                               context.target_range[objective_name]) ** 2.

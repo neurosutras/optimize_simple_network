@@ -98,6 +98,9 @@ feature_names:
 - FF_gamma_envelope_ratio_run
 - E_gamma_envelope_ratio_run
 - I_gamma_envelope_ratio_run
+- FF_ripple_envelope_ratio_run
+- E_ripple_envelope_ratio_run
+- I_ripple_envelope_ratio_run
 - E_centroid_theta_freq_run
 - I_centroid_theta_freq_run
 - E_centroid_gamma_freq_run
@@ -109,10 +112,12 @@ feature_names:
 - FF_frac_active_replay
 - E_frac_active_replay
 - I_frac_active_replay
-- E_ripple_psd_area_run
-- E_ripple_psd_area_replay
-- I_ripple_psd_area_run
-- I_ripple_psd_area_replay
+- FF_mean_active_rate_replay
+- E_mean_active_rate_replay
+- I_mean_active_rate_replay
+- FF_ripple_envelope_ratio_replay
+- E_ripple_envelope_ratio_replay
+- I_ripple_envelope_ratio_replay
 update_context:
 - - optimize_simple_network_alt
   - update_context
@@ -201,8 +206,9 @@ objective_names:
 - E_gamma_tuning_index_run
 - I_gamma_tuning_index_run
 - E_frac_active_replay
-- E_ripple_psd_area_ratio
-- I_ripple_psd_area_ratio
+- E_mean_active_rate_replay
+- E_ripple_envelope_score
+- I_ripple_envelope_score
 optimization_title: simple_network_J_alt
 param_gen: PopulationAnnealing
 param_names:
@@ -248,8 +254,9 @@ target_range:
   E_gamma_tuning_index_run: 0.2
   I_gamma_tuning_index_run: 0.2
   E_frac_active_replay: 0.001
-  E_ripple_psd_area_ratio: 0.1
-  I_ripple_psd_area_ratio: 0.1
+  E_mean_active_rate_replay: 0.1
+  E_ripple_envelope_score: 0.01
+  I_ripple_envelope_score: 0.01
 target_val:
   E_mean_peak_rate_run: 20.
   E_mean_min_rate_run: 0.
@@ -268,9 +275,7 @@ target_val:
   I_theta_tuning_index_run: 5.
   E_gamma_tuning_index_run: 5.
   I_gamma_tuning_index_run: 5.
-  E_frac_active_replay: 0.3
-  E_ripple_psd_area_ratio: 2.
-  I_ripple_psd_area_ratio: 2.
+  E_frac_active_replay: 0.2
 x0:
   E_E_FF_syn_proportion: 5.558672E-01
   E_E_mean_weight: 7.666654E-01
