@@ -681,7 +681,6 @@ def analyze_network_output_replay(network, ensemble_id=None, trial=None, model_i
                                 beta=context.baks_beta, pad_dur=context.baks_pad_dur,
                                 wrap_around=context.baks_wrap_around)
 
-
     full_binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict, full_binned_t)
     """
     inferred_binned_t, buffered_firing_rates_dict = \

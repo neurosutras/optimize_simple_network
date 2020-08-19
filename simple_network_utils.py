@@ -1589,8 +1589,8 @@ def plot_bandpass_filtered_signal_summary(t, signal, filtered_signal, filter_ban
     axes[0][1].legend(loc='lower center', bbox_to_anchor=(0.5, 1.0), frameon=False, framealpha=0.5)
     axes[0][1].set_xlabel('Time (ms)')
 
-    # axes[1][0].plot(psd_f, psd_power, c='k')
-    axes[1][0].semilogy(psd_f, psd_power, c='k')
+    axes[1][0].plot(psd_f, psd_power, c='k')
+    # axes[1][0].semilogy(psd_f, psd_power, c='k')
     axes[1][0].set_xlabel('Frequency (Hz)')
     axes[1][0].set_ylabel('Spectral density\n(units$^{2}$/Hz)')
     if buffered_filter_band is not None:
