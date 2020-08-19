@@ -9,8 +9,8 @@ export MODEL_KEY="$5"
 sbatch <<EOT
 #!/bin/bash -l
 #SBATCH -J $JOB_NAME
-#SBATCH -o /scratch1/06441/aaronmil/src/optimize_simple_network/logs/$JOB_NAME.%j.o
-#SBATCH -e /scratch1/06441/aaronmil/src/optimize_simple_network/logs/$JOB_NAME.%j.e
+#SBATCH -o /scratch1/06441/aaronmil/logs/optimize_simple_network/$JOB_NAME.%j.o
+#SBATCH -e /scratch1/06441/aaronmil/logs/optimize_simple_network/$JOB_NAME.%j.e
 #SBATCH -p normal
 #SBATCH -N 20
 #SBATCH -n 1120
@@ -20,9 +20,10 @@ sbatch <<EOT
 
 set -x
 
-cd $SCRATCH/src/optimize_simple_network
+cd $WORK/optimize_simple_network
 
 ibrun -n 1120 python3 simulate_simple_network_replay.py --config-file-path=$CONFIG_FILE_PATH --verbose=1 \
     --procs_per_worker=112 --export --num_trials=1000 --param_file_path=$PARAM_FILE_PATH \
-    --model_key=$MODEL_KEY --network_instance=$NETWORK_INSTANCE --label=$LABEL
+    --model_key=$MODEL_KEY --network_instance=$NETWORK_INSTANCE --label=$LABEL \
+    --output-dir=$SCRATCH/data/optimize_simple_network
 EOT
