@@ -471,7 +471,7 @@ def append_processed_replay_data_to_file():
         context.update(decoded_pos_list_dict=decoded_pos_list_dict)
 
     with h5py.File(context.replay_data_file_path, 'a') as f:
-        group = get_h5py_group(f, [context.export_data_key, group_key, shared_context_key])
+        group = get_h5py_group(f, [context.export_data_key, group_key, shared_context_key], create=True)
         group.create_dataset('decode_binned_t', data=context.decode_binned_t, compression='gzip')
         subgroup = group.create_group('decoded_pos_matrix')
         for pop_name in decoded_pos_list_dict:
