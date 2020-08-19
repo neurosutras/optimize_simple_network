@@ -5,8 +5,8 @@ export MERGE_FILE_PATH="$1"
 sbatch <<EOT
 #!/bin/bash -l
 #SBATCH -J $JOB_NAME
-#SBATCH -o /scratch1/06441/aaronmil/src/optimize_simple_network/logs/$JOB_NAME.%j.o
-#SBATCH -e /scratch1/06441/aaronmil/src/optimize_simple_network/logs/$JOB_NAME.%j.e
+#SBATCH -o /scratch1/06441/aaronmil/logs/optimize_simple_network/$JOB_NAME.%j.o
+#SBATCH -e /scratch1/06441/aaronmil/logs/optimize_simple_network/$JOB_NAME.%j.e
 #SBATCH -p normal
 #SBATCH -N 1
 #SBATCH -n 1
@@ -16,7 +16,8 @@ sbatch <<EOT
 
 set -x
 
-cd $SCRATCH/src/optimize_simple_network
+cd $WORK/optimize_simple_network
 
-ibrun -n 1 python3 merge_output_files.py --merge-file-path=$MERGE_FILE_PATH --verbose
+ibrun -n 1 python3 merge_output_files.py --merge-file-path=$MERGE_FILE_PATH --verbose \
+  --output-dir=$SCRATCH/data/optimize_simple_network
 EOT
