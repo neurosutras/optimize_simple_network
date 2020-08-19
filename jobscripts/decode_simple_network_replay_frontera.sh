@@ -7,8 +7,8 @@ export REPLAY_DATA_FILE_PATH="$2"
 sbatch <<EOT
 #!/bin/bash -l
 #SBATCH -J $JOB_NAME
-#SBATCH -o /scratch1/06441/aaronmil/src/optimize_simple_network/logs/$JOB_NAME.%j.o
-#SBATCH -e /scratch1/06441/aaronmil/src/optimize_simple_network/logs/$JOB_NAME.%j.e
+#SBATCH -o /scratch1/06441/aaronmil/logs/optimize_simple_network/$JOB_NAME.%j.o
+#SBATCH -e /scratch1/06441/aaronmil/logs/optimize_simple_network/$JOB_NAME.%j.e
 #SBATCH -p normal
 #SBATCH -N 2
 #SBATCH -n 112
@@ -18,7 +18,7 @@ sbatch <<EOT
 
 set -x
 
-cd $SCRATCH/src/optimize_simple_network
+cd $WORK/optimize_simple_network
 
 ibrun -n 112 python3 decode_simple_network_replay.py --run-data-file-path=$RUN_DATA_FILE_PATH \
     --replay-data-file-path=$REPLAY_DATA_FILE_PATH
