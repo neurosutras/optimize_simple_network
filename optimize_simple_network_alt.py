@@ -583,6 +583,12 @@ def analyze_network_output_run(network, model_id=None, export=False, plot=False)
                     data_group.create_group(band)
                     for pop_name in centroid_freq_dict[band]:
                         data_group[band].attrs[pop_name] = centroid_freq_dict[band][pop_name]
+                data_group = subgroup.create_group('fft_f')
+                for pop_name in fft_f_dict:
+                    data_group.create_dataset(pop_name, data=fft_f_dict[pop_name], compression='gzip')
+                data_group = subgroup.create_group('fft_power')
+                for pop_name in fft_power_dict:
+                    data_group.create_dataset(pop_name, data=fft_power_dict[pop_name], compression='gzip')
                 data_group = subgroup.create_group('psd_f')
                 for band in filter_psd_f_dict:
                     data_group.create_group(band)
@@ -883,6 +889,12 @@ def analyze_network_output_replay(network, ensemble_id=None, trial=None, model_i
                     data_group.create_group(band)
                     for pop_name in centroid_freq_dict[band]:
                         data_group[band].attrs[pop_name] = centroid_freq_dict[band][pop_name]
+                data_group = subgroup.create_group('fft_f')
+                for pop_name in fft_f_dict:
+                    data_group.create_dataset(pop_name, data=fft_f_dict[pop_name], compression='gzip')
+                data_group = subgroup.create_group('fft_power')
+                for pop_name in fft_power_dict:
+                    data_group.create_dataset(pop_name, data=fft_power_dict[pop_name], compression='gzip')
                 data_group = subgroup.create_group('psd_f')
                 for band in filter_psd_f_dict:
                     data_group.create_group(band)

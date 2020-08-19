@@ -477,11 +477,12 @@ def analyze_network_output(network, trial=None, export=False, plot=False):
         mean_min_rate_dict, mean_peak_rate_dict, mean_rate_active_cells_dict, pop_fraction_active_dict = \
             get_pop_activity_stats(binned_firing_rates_dict, input_t=binned_t,
                                    threshold=context.active_rate_threshold, plot=plot)
-        filtered_mean_rate_dict, filter_psd_f_dict, filter_psd_power_dict, filter_envelope_dict, \
+
+        fft_f_dict, fft_power_dict, filter_psd_f_dict, filter_psd_power_dict, filter_envelope_dict, \
         filter_envelope_ratio_dict, centroid_freq_dict, freq_tuning_index_dict = \
             get_pop_bandpass_filtered_signal_stats(full_pop_mean_rate_from_binned_spike_count_dict,
                                                    context.filter_bands, input_t=full_binned_t,
-                                                   valid_t=buffered_binned_t, output_t=binned_t,
+                                                   valid_t=buffered_binned_t, output_t=binned_t, pad=True,
                                                    plot=plot, verbose=context.verbose > 1)
 
         if context.debug and context.verbose > 0:
@@ -602,6 +603,12 @@ def analyze_network_output(network, trial=None, export=False, plot=False):
                     data_group.create_group(band)
                     for pop_name in centroid_freq_dict[band]:
                         data_group[band].attrs[pop_name] = centroid_freq_dict[band][pop_name]
+                data_group = subgroup.create_group('fft_f')
+                for pop_name in fft_f_dict:
+                    data_group.create_dataset(pop_name, data=fft_f_dict[pop_name], compression='gzip')
+                data_group = subgroup.create_group('fft_power')
+                for pop_name in fft_power_dict:
+                    data_group.create_dataset(pop_name, data=fft_power_dict[pop_name], compression='gzip')
                 data_group = subgroup.create_group('psd_f')
                 for band in filter_psd_f_dict:
                     data_group.create_group(band)
