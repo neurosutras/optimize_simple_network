@@ -484,7 +484,7 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
         filter_envelope_ratio_dict, centroid_freq_dict, freq_tuning_index_dict = \
             get_pop_bandpass_filtered_signal_stats(full_pop_mean_rate_from_binned_spike_count_dict,
                                                    context.filter_bands, input_t=full_binned_t,
-                                                   valid_t=binned_t, output_t=binned_t,
+                                                   valid_t=binned_t, output_t=binned_t, pad=False,
                                                    plot=plot, verbose=context.verbose > 1)
 
         if context.debug and context.verbose > 0:
