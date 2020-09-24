@@ -111,6 +111,7 @@ feature_names:
 - I_gamma_tuning_index_run
 - FF_frac_active_replay
 - E_frac_active_replay
+- E_frac_active_replay_residuals
 - I_frac_active_replay
 - FF_mean_active_rate_replay
 - E_mean_active_rate_replay
@@ -205,7 +206,7 @@ objective_names:
 - I_theta_tuning_index_run
 - E_gamma_tuning_index_run
 - I_gamma_tuning_index_run
-- E_frac_active_replay
+- E_frac_active_replay_residuals
 - E_mean_active_rate_replay
 - E_ripple_envelope_score
 - I_ripple_envelope_score
@@ -253,7 +254,7 @@ target_range:
   I_theta_tuning_index_run: 0.2
   E_gamma_tuning_index_run: 0.2
   I_gamma_tuning_index_run: 0.2
-  E_frac_active_replay: 0.001
+  E_frac_active_replay_residuals: 0.005
   E_mean_active_rate_replay: 0.1
   E_ripple_envelope_score: 0.01
   I_ripple_envelope_score: 0.01
@@ -275,7 +276,7 @@ target_val:
   I_theta_tuning_index_run: 5.
   E_gamma_tuning_index_run: 5.
   I_gamma_tuning_index_run: 5.
-  E_frac_active_replay: 0.2
+  E_frac_active_replay_residuals: 0.
 x0:
   E_E_FF_syn_proportion: 5.558672E-01
   E_E_mean_weight: 7.666654E-01

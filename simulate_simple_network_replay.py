@@ -168,21 +168,21 @@ def config_worker():
 
     delay = 1.  # ms
     equilibrate = 250.  # ms
-    buffer = 100.  # ms
-    duration = 250.  # ms
+    buffer = 150.  # ms
+    duration = 200.  # ms
     stim_edge_duration = (150., 25.)  # ms
+
+    if any(np.array(stim_edge_duration) > buffer):
+        raise RuntimeError('Offline stimulus edge duration must be less than simulation buffer duration.')
+
     tstop = int(equilibrate + duration + 2. * buffer)  # ms
     tuning_duration = 3000.  # ms
     dt = 0.025
-    binned_dt = 1.  # ms
-    filter_dt = 1.  # ms
+    fine_binned_dt = 1.  # ms
+    coarse_binned_dt = 20.  # ms
     active_rate_threshold = 1.  # Hz
-    baks_alpha = 4.7725100028345535
-    baks_beta = 0.41969058927343522
-    baks_pad_dur = 0.  # ms
-    baks_wrap_around = False
     track_wrap_around = True
-    filter_bands = {'Ripple': [50., 150.]}
+    filter_bands = {'Ripple': [100., 200.]}
     max_num_cells_export_voltage_rec = 500
 
     if context.comm.rank == 0:
@@ -401,22 +401,27 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
                            context.dt)
     buffered_rec_t = np.arange(-context.buffer, context.duration + context.buffer + context.dt / 2., context.dt)
     rec_t = np.arange(0., context.duration, context.dt)
-    full_binned_t = np.arange(-context.buffer - context.equilibrate,
-                              context.duration + context.buffer + context.binned_dt / 2., context.binned_dt)
-    buffered_binned_t = np.arange(-context.buffer, context.duration + context.buffer + context.binned_dt / 2.,
-                                  context.binned_dt)
-    binned_t = np.arange(0., context.duration + context.binned_dt / 2., context.binned_dt)
+
+    buffered_fine_binned_t_edges = \
+        np.arange(-context.buffer, context.duration + context.buffer + context.fine_binned_dt / 2.,
+                  context.fine_binned_dt)
+    buffered_fine_binned_t = buffered_fine_binned_t_edges[:-1] + context.fine_binned_dt / 2.
+    fine_binned_t_edges = np.arange(0., context.duration + context.fine_binned_dt / 2., context.fine_binned_dt)
+    fine_binned_t = fine_binned_t_edges[:-1] + context.fine_binned_dt / 2.
+    coarse_binned_t_edges = np.arange(0., context.duration + context.coarse_binned_dt / 2., context.coarse_binned_dt)
+    coarse_binned_t = coarse_binned_t_edges[:-1] + context.coarse_binned_dt / 2.
 
     full_spike_times_dict = network.get_spike_times_dict()
-    buffered_firing_rates_dict = \
-        infer_firing_rates_baks(full_spike_times_dict, buffered_binned_t, alpha=context.baks_alpha,
-                                beta=context.baks_beta, pad_dur=context.baks_pad_dur,
-                                wrap_around=context.baks_wrap_around)
-    full_binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict, full_binned_t)
+    coarse_binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict, coarse_binned_t_edges)
+    firing_rates_from_coarse_binned_spike_count_dict = \
+        get_firing_rate_from_binned_spike_count(coarse_binned_spike_count_dict, context.coarse_binned_dt)
+    buffered_fine_binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict,
+                                                                        buffered_fine_binned_t_edges)
 
     gathered_full_spike_times_dict_list = context.comm.gather(full_spike_times_dict, root=0)
-    gathered_buffered_firing_rates_dict_list = context.comm.gather(buffered_firing_rates_dict, root=0)
-    gathered_full_binned_spike_count_dict_list = context.comm.gather(full_binned_spike_count_dict, root=0)
+    gathered_firing_rates_dict_list = context.comm.gather(firing_rates_from_coarse_binned_spike_count_dict, root=0)
+    gathered_buffered_fine_binned_spike_count_dict_list = \
+        context.comm.gather(buffered_fine_binned_spike_count_dict, root=0)
 
     full_voltage_rec_dict = network.get_voltage_rec_dict()
     voltages_exceed_threshold = check_voltages_exceed_threshold(full_voltage_rec_dict, input_t=full_rec_t,
@@ -459,8 +464,8 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
 
     if context.comm.rank == 0:
         full_spike_times_dict = merge_list_of_dict(gathered_full_spike_times_dict_list)
-        buffered_firing_rates_dict = merge_list_of_dict(gathered_buffered_firing_rates_dict_list)
-        full_binned_spike_count_dict = merge_list_of_dict(gathered_full_binned_spike_count_dict_list)
+        firing_rates_dict = merge_list_of_dict(gathered_firing_rates_dict_list)
+        buffered_fine_binned_spike_count_dict = merge_list_of_dict(gathered_buffered_fine_binned_spike_count_dict_list)
 
         if plot or export:
             subset_full_voltage_rec_dict = merge_list_of_dict(gathered_subset_full_voltage_rec_dict_list)
@@ -475,16 +480,16 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
             current_time = time.time()
             sys.stdout.flush()
 
-        full_pop_mean_rate_from_binned_spike_count_dict = \
-            get_pop_mean_rate_from_binned_spike_count(full_binned_spike_count_dict, dt=context.binned_dt)
+        buffered_pop_mean_rate_from_binned_spike_count_dict = \
+            get_pop_mean_rate_from_binned_spike_count(buffered_fine_binned_spike_count_dict, dt=context.fine_binned_dt)
         mean_min_rate_dict, mean_peak_rate_dict, mean_rate_active_cells_dict, pop_fraction_active_dict = \
-            get_pop_activity_stats(buffered_firing_rates_dict, input_t=buffered_binned_t, valid_t=binned_t,
-                                   threshold=context.active_rate_threshold, plot=plot)
+            get_pop_activity_stats(firing_rates_dict, input_t=coarse_binned_t, threshold=context.active_rate_threshold,
+                                   plot=plot)
         fft_f_dict, fft_power_dict, filter_psd_f_dict, filter_psd_power_dict, filter_envelope_dict, \
         filter_envelope_ratio_dict, centroid_freq_dict, freq_tuning_index_dict = \
-            get_pop_bandpass_filtered_signal_stats(full_pop_mean_rate_from_binned_spike_count_dict,
-                                                   context.filter_bands, input_t=full_binned_t,
-                                                   valid_t=binned_t, output_t=binned_t, pad=False,
+            get_pop_bandpass_filtered_signal_stats(buffered_pop_mean_rate_from_binned_spike_count_dict,
+                                                   context.filter_bands, input_t=buffered_fine_binned_t,
+                                                   valid_t=fine_binned_t, output_t=fine_binned_t, pad=False,
                                                    plot=plot, verbose=context.verbose > 1)
 
         if context.debug and context.verbose > 0:
@@ -495,10 +500,9 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
         if plot:
             plot_voltage_traces(subset_full_voltage_rec_dict, full_rec_t, valid_t=rec_t,
                                 spike_times_dict=full_spike_times_dict)
-            plot_firing_rate_heatmaps(buffered_firing_rates_dict, input_t=buffered_binned_t,
-                                      valid_t=binned_t, tuning_peak_locs=context.tuning_peak_locs)
-            plot_population_spike_rasters(full_binned_spike_count_dict, input_t=full_binned_t,
-                                          valid_t=buffered_binned_t,
+            plot_firing_rate_heatmaps(firing_rates_dict, input_t=coarse_binned_t,
+                                      tuning_peak_locs=context.tuning_peak_locs)
+            plot_population_spike_rasters(buffered_fine_binned_spike_count_dict, input_t=buffered_fine_binned_t,
                                           tuning_peak_locs=context.tuning_peak_locs)
 
         if any(voltages_exceed_threshold_list):
@@ -526,17 +530,12 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
                     set_h5py_attr(subgroup.attrs, 'trial_offset', context.trial_offset)
                     set_h5py_attr(subgroup.attrs, 'connectivity_type', context.connectivity_type)
                     set_h5py_attr(subgroup.attrs, 'duration', context.duration)
-                    set_h5py_attr(subgroup.attrs, 'baks_alpha', context.baks_alpha)
-                    set_h5py_attr(subgroup.attrs, 'baks_beta', context.baks_beta)
-                    set_h5py_attr(subgroup.attrs, 'baks_pad_dur', context.baks_pad_dur)
-                    set_h5py_attr(subgroup.attrs, 'baks_wrap_around', context.baks_wrap_around)
+                    set_h5py_attr(subgroup.attrs, 'buffer', context.buffer)
+                    set_h5py_attr(subgroup.attrs, 'stim_edge_duration', context.stim_edge_duration)
                     subgroup.attrs['active_rate_threshold'] = context.active_rate_threshold
-                    subgroup.create_dataset('full_binned_t', data=full_binned_t, compression='gzip')
                     data_group = subgroup.create_group('pop_gid_ranges')
                     for pop_name in context.pop_gid_ranges:
                         data_group.create_dataset(pop_name, data=context.pop_gid_ranges[pop_name])
-                    subgroup.create_dataset('buffered_binned_t', data=buffered_binned_t, compression='gzip')
-                    subgroup.create_dataset('binned_t', data=binned_t, compression='gzip')
                     data_group = subgroup.create_group('filter_bands')
                     for filter, band in viewitems(context.filter_bands):
                         data_group.create_dataset(filter, data=band)
@@ -586,6 +585,7 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
                 group = get_h5py_group(group, [trial], create=True)
                 set_h5py_attr(group.attrs, 'ensemble_id', int(ensemble_id))
                 set_h5py_attr(group.attrs, 'trial_id', int(trial))
+                set_h5py_attr(group.attrs, 'equilibrate', context.equilibrate)
                 set_h5py_attr(group.attrs, 'voltages_exceed_threshold', voltages_exceed_threshold)
                 subgroup = group.create_group('full_spike_times')
                 for pop_name in full_spike_times_dict:

@@ -104,9 +104,9 @@ def config_controller():
     with h5py.File(context.run_data_file_path, 'r') as f:
         group = get_h5py_group(f, [context.export_data_key, run_group_key])
         subgroup = get_h5py_group(group, [shared_context_key])
-        if 'duration' in subgroup.attrs:
-            baks_pad_dur = subgroup.attrs['duration']
-        run_binned_t = subgroup['binned_t'][:]
+        duration = get_h5py_attr(group.attrs, 'duration')
+        run_binned_t_edges = np.arange(0., duration + context.window_dur / 2., context.window_dur)
+        run_binned_t = run_binned_t_edges[:-1] + context.window_dur / 2.
         run_trial_keys = [key for key in group if key != shared_context_key]
 
         group = get_h5py_group(f, [context.export_data_key])
@@ -592,7 +592,7 @@ def analyze_decoded_position_replay_from_file(replay_data_file_path, run_range, 
         for pop_name in ordered_pop_names:
             hist_list = []
             for all_decoded_pos in all_decoded_pos_dict_instances_list[pop_name]:
-                hist, edges = np.histogram(all_decoded_pos, bins=np.linspace(0., 1., 21), density=True)
+                hist, edges = np.histogram(all_decoded_pos, bins=np.linspace(0., 1., 101), density=True)
                 bin_width = (edges[1] - edges[0])
                 hist *= bin_width
                 hist_list.append(hist)

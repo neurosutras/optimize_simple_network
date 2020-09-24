@@ -317,15 +317,18 @@ class SimpleNetwork(object):
             if input_types[pop_name] in ['constant', 'gaussian']:
                 this_min_rate = input_offline_min_rates[pop_name]
                 this_mean_rate = input_offline_mean_rates[pop_name]
-                self.input_pop_t[pop_name] = np.concatenate((
-                    [0., self.buffer + self.equilibrate],
-                    np.arange(self.buffer + self.equilibrate,
-                              self.buffer + self.equilibrate + stim_edge_duration[0], self.dt),
-                    [self.buffer + self.equilibrate + stim_edge_duration[0],
-                     self.buffer + self.equilibrate + self.duration - stim_edge_duration[1]],
-                    np.arange(self.buffer + self.equilibrate + self.duration - stim_edge_duration[1],
-                              self.buffer + self.equilibrate + self.duration, self.dt),
-                    [self.buffer + self.equilibrate + self.duration, self.tstop]))
+                components = [[0., self.equilibrate + self.buffer - stim_edge_duration[0]]]
+                if stim_edge_duration[0] > 0.:
+                    components.append(np.arange(self.buffer + self.equilibrate - stim_edge_duration[0],
+                                                self.buffer + self.equilibrate, self.dt))
+                components.append([self.buffer + self.equilibrate, self.buffer + self.equilibrate + self.duration])
+                if stim_edge_duration[0] > 0.:
+                    components.append(np.arange(self.buffer + self.equilibrate + self.duration,
+                                                self.buffer + self.equilibrate + self.duration + stim_edge_duration[1],
+                                                self.dt))
+                components.append([self.buffer + self.equilibrate + self.duration + stim_edge_duration[1], self.tstop])
+                self.input_pop_t[pop_name] = np.concatenate(components)
+
                 this_fraction_active = input_offline_fraction_active[pop_name]
                 for gid in self.cells[pop_name]:
                     local_np_random = np.random.default_rng(seed=selection_seed + [gid])
@@ -1139,7 +1142,7 @@ def padded_baks(spike_times, t, alpha, beta, pad_dur=500., wrap_around=False, pl
     return rate
 
 
-def get_binned_spike_count(spike_times, t):
+def get_binned_spike_count_orig(spike_times, t):
     """
     Convert spike times to a binned binary spike train
     :param spike_times: array (ms)
@@ -1163,6 +1166,33 @@ def get_binned_spike_count(spike_times, t):
     return binned_spikes
 
 
+def get_binned_spike_count(spike_times, edges):
+    """
+    Convert ordered spike times to a spike count array in bins specified by the provided edges array.
+    :param spike_times: array (ms)
+    :param edges: array (ms)
+    :return: array
+    """
+    binned_spikes = np.zeros(len(edges) - 1, dtype='int32')
+    valid_indexes = np.where((spike_times >= edges[0]) & (spike_times <= edges[-1]))[0]
+    if len(valid_indexes) < 1:
+        return binned_spikes
+    spike_times = spike_times[valid_indexes]
+    j = 0
+    for i, bin_start in enumerate(edges[:-1]):
+        if len(spike_times[j:]) < 1:
+            break
+        bin_end = edges[i+1]
+        if i == len(edges) - 2:
+            count = len(np.where((spike_times[j:] >= bin_start) & (spike_times[j:] <= bin_end))[0])
+        else:
+            count = len(np.where((spike_times[j:] >= bin_start) & (spike_times[j:] < bin_end))[0])
+        j += count
+        binned_spikes[i] = count
+
+    return binned_spikes
+
+
 def get_pop_mean_rate_from_binned_spike_count(binned_spike_count_dict, dt):
     """
     Calculate mean firing rate for each cell population.
@@ -1177,6 +1207,23 @@ def get_pop_mean_rate_from_binned_spike_count(binned_spike_count_dict, dt):
             np.divide(np.mean(list(binned_spike_count_dict[pop_name].values()), axis=0), dt / 1000.)
 
     return pop_mean_rate_dict
+
+
+def get_firing_rate_from_binned_spike_count(binned_spike_count_dict, dt):
+    """
+    Convert binned spike counts into firing rates.
+    :param binned_spike_count_dict: nested dict of array
+    :param dt: float (ms)
+    :return: dict of array
+    """
+    rate_dict = dict()
+
+    for pop_name in binned_spike_count_dict:
+        rate_dict[pop_name] = dict()
+        for gid in binned_spike_count_dict[pop_name]:
+            rate_dict[pop_name][gid] = binned_spike_count_dict[pop_name][gid] / (dt / 1000.)
+
+    return rate_dict
 
 
 def get_pop_activity_stats(firing_rates_dict, input_t, valid_t=None, threshold=2., plot=False):

@@ -198,15 +198,19 @@ def config_worker():
     equilibrate = 250.  # ms
     run_buffer = 500.  # ms
     run_duration = 3000.  # ms
-    replay_buffer = 100.  # ms
-    replay_duration = 250.  # ms
+    replay_buffer = 150.  # ms
+    replay_duration = 200.  # ms
     replay_stim_edge_duration = (150., 25.)  # ms
+
+    if any(np.array(replay_stim_edge_duration) > replay_buffer):
+        raise RuntimeError('Offline stimulus edge duration must be less than simulation buffer duration.')
+
     tuning_duration = 3000.  # ms
     run_tstop = int(equilibrate + run_duration + 2. * run_buffer)  # ms
     replay_tstop = int(equilibrate + replay_duration + 2. * replay_buffer)  # ms
     dt = 0.025
-    binned_dt = 1.  # ms
-    filter_dt = 1.  # ms
+    fine_binned_dt = 1.  # ms
+    coarse_binned_dt = 20.  # ms
     active_rate_threshold = 1.  # Hz
     baks_alpha = 4.7725100028345535
     baks_beta = 0.41969058927343522
@@ -381,22 +385,23 @@ def analyze_network_output_run(network, model_id=None, export=False, plot=False)
                            context.dt)
     buffered_rec_t = np.arange(-context.buffer, context.duration + context.buffer + context.dt / 2., context.dt)
     rec_t = np.arange(0., context.duration, context.dt)
-    full_binned_t = np.arange(-context.buffer - context.equilibrate,
-                              context.duration + context.buffer + context.binned_dt / 2., context.binned_dt)
-    buffered_binned_t = np.arange(-context.buffer, context.duration + context.buffer + context.binned_dt / 2.,
-                                  context.binned_dt)
-    binned_t = np.arange(0., context.duration + context.binned_dt / 2., context.binned_dt)
+    buffered_binned_t_edges = \
+        np.arange(-context.buffer, context.duration + context.buffer + context.fine_binned_dt / 2.,
+                  context.fine_binned_dt)
+    buffered_binned_t = buffered_binned_t_edges[:-1] + context.fine_binned_dt / 2.
+    binned_t_edges = np.arange(0., context.duration + context.fine_binned_dt / 2., context.fine_binned_dt)
+    binned_t = binned_t_edges[:-1] + context.fine_binned_dt / 2.
 
     full_spike_times_dict = network.get_spike_times_dict()
     binned_firing_rates_dict = \
-        infer_firing_rates_baks(full_spike_times_dict, binned_t, alpha=context.baks_alpha,
+        infer_firing_rates_baks(full_spike_times_dict, binned_t_edges, alpha=context.baks_alpha,
                                 beta=context.baks_beta, pad_dur=context.baks_pad_dur,
                                 wrap_around=context.baks_wrap_around)
-    full_binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict, full_binned_t)
+    buffered_binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict, buffered_binned_t_edges)
 
     gathered_full_spike_times_dict_list = context.comm.gather(full_spike_times_dict, root=0)
     gathered_binned_firing_rates_dict_list = context.comm.gather(binned_firing_rates_dict, root=0)
-    gathered_full_binned_spike_count_dict_list = context.comm.gather(full_binned_spike_count_dict, root=0)
+    gathered_buffered_binned_spike_count_dict_list = context.comm.gather(buffered_binned_spike_count_dict, root=0)
 
     full_voltage_rec_dict = network.get_voltage_rec_dict()
     voltages_exceed_threshold = check_voltages_exceed_threshold(full_voltage_rec_dict, input_t=full_rec_t,
@@ -440,7 +445,7 @@ def analyze_network_output_run(network, model_id=None, export=False, plot=False)
     if context.comm.rank == 0:
         full_spike_times_dict = merge_list_of_dict(gathered_full_spike_times_dict_list)
         binned_firing_rates_dict = merge_list_of_dict(gathered_binned_firing_rates_dict_list)
-        full_binned_spike_count_dict = merge_list_of_dict(gathered_full_binned_spike_count_dict_list)
+        buffered_binned_spike_count_dict = merge_list_of_dict(gathered_buffered_binned_spike_count_dict_list)
 
         if plot or export:
             subset_full_voltage_rec_dict = merge_list_of_dict(gathered_subset_full_voltage_rec_dict_list)
@@ -456,16 +461,16 @@ def analyze_network_output_run(network, model_id=None, export=False, plot=False)
             current_time = time.time()
             sys.stdout.flush()
 
-        full_pop_mean_rate_from_binned_spike_count_dict = \
-            get_pop_mean_rate_from_binned_spike_count(full_binned_spike_count_dict, dt=context.binned_dt)
+        buffered_pop_mean_rate_from_binned_spike_count_dict = \
+            get_pop_mean_rate_from_binned_spike_count(buffered_binned_spike_count_dict, dt=context.fine_binned_dt)
         mean_min_rate_dict, mean_peak_rate_dict, mean_rate_active_cells_dict, pop_fraction_active_dict = \
-            get_pop_activity_stats(binned_firing_rates_dict, input_t=binned_t,
+            get_pop_activity_stats(binned_firing_rates_dict, input_t=binned_t_edges,
                                    threshold=context.active_rate_threshold, plot=plot)
 
         fft_f_dict, fft_power_dict, filter_psd_f_dict, filter_psd_power_dict, filter_envelope_dict, \
         filter_envelope_ratio_dict, centroid_freq_dict, freq_tuning_index_dict = \
-            get_pop_bandpass_filtered_signal_stats(full_pop_mean_rate_from_binned_spike_count_dict,
-                                                   context.filter_bands, input_t=full_binned_t,
+            get_pop_bandpass_filtered_signal_stats(buffered_pop_mean_rate_from_binned_spike_count_dict,
+                                                   context.filter_bands, input_t=buffered_binned_t,
                                                    valid_t=buffered_binned_t, output_t=binned_t, pad=True,
                                                    plot=plot, verbose=context.verbose > 1)
 
@@ -479,13 +484,13 @@ def analyze_network_output_run(network, model_id=None, export=False, plot=False)
             sys.stdout.flush()
 
         if plot:
-            plot_inferred_spike_rates(full_spike_times_dict, binned_firing_rates_dict, input_t=binned_t,
+            plot_inferred_spike_rates(full_spike_times_dict, binned_firing_rates_dict, input_t=binned_t_edges,
                                       active_rate_threshold=context.active_rate_threshold)
             plot_voltage_traces(subset_full_voltage_rec_dict, full_rec_t, valid_t=rec_t,
                                 spike_times_dict=full_spike_times_dict)
             plot_weight_matrix(connection_weights_dict, pop_gid_ranges=context.pop_gid_ranges,
                                tuning_peak_locs=context.tuning_peak_locs)
-            plot_firing_rate_heatmaps(binned_firing_rates_dict, input_t=binned_t,
+            plot_firing_rate_heatmaps(binned_firing_rates_dict, input_t=binned_t_edges,
                                       tuning_peak_locs=context.tuning_peak_locs)
             if context.connectivity_type == 'gaussian':
                 plot_2D_connection_distance(context.pop_syn_proportions, context.pop_cell_positions, connectivity_dict)
@@ -505,17 +510,15 @@ def analyze_network_output_run(network, model_id=None, export=False, plot=False)
                     set_h5py_attr(subgroup.attrs, 'network_instance', context.network_instance)
                     set_h5py_attr(subgroup.attrs, 'connectivity_type', context.connectivity_type)
                     set_h5py_attr(subgroup.attrs, 'duration', context.duration)
+                    set_h5py_attr(subgroup.attrs, 'buffer', context.duration)
                     set_h5py_attr(subgroup.attrs, 'active_rate_threshold', context.active_rate_threshold)
                     set_h5py_attr(subgroup.attrs, 'baks_alpha', context.baks_alpha)
                     set_h5py_attr(subgroup.attrs, 'baks_beta', context.baks_beta)
                     set_h5py_attr(subgroup.attrs, 'baks_pad_dur', context.baks_pad_dur)
                     set_h5py_attr(subgroup.attrs, 'baks_wrap_around', context.baks_wrap_around)
-
                     data_group = subgroup.create_group('pop_gid_ranges')
                     for pop_name in context.pop_gid_ranges:
                         data_group.create_dataset(pop_name, data=context.pop_gid_ranges[pop_name])
-                    subgroup.create_dataset('buffered_binned_t', data=buffered_binned_t, compression='gzip')
-                    subgroup.create_dataset('binned_t', data=binned_t, compression='gzip')
                     data_group = subgroup.create_group('filter_bands')
                     for filter, band in viewitems(context.filter_bands):
                         data_group.create_dataset(filter, data=band)
@@ -564,7 +567,7 @@ def analyze_network_output_run(network, model_id=None, export=False, plot=False)
                         data_subgroup.create_dataset('positions', data=positions, compression='gzip')
                 group = get_h5py_group(group, [context.run_trial], create=True)
                 set_h5py_attr(group.attrs, 'trial_id', int(context.run_trial))
-                group.create_dataset('full_binned_t', data=full_binned_t, compression='gzip')
+                set_h5py_attr(group.attrs, 'equilibrate', context.equilibrate)
                 set_h5py_attr(group.attrs, 'voltages_exceed_threshold', voltages_exceed_threshold)
                 subgroup = group.create_group('full_spike_times')
                 for pop_name in full_spike_times_dict:
@@ -674,30 +677,27 @@ def analyze_network_output_replay(network, ensemble_id=None, trial=None, model_i
                            context.dt)
     buffered_rec_t = np.arange(-context.buffer, context.duration + context.buffer + context.dt / 2., context.dt)
     rec_t = np.arange(0., context.duration, context.dt)
-    full_binned_t = np.arange(-context.buffer - context.equilibrate,
-                              context.duration + context.buffer + context.binned_dt / 2., context.binned_dt)
-    buffered_binned_t = np.arange(-context.buffer, context.duration + context.buffer + context.binned_dt / 2.,
-                                  context.binned_dt)
-    binned_t = np.arange(0., context.duration + context.binned_dt / 2., context.binned_dt)
+
+    buffered_fine_binned_t_edges = \
+        np.arange(-context.buffer, context.duration + context.buffer + context.fine_binned_dt / 2.,
+                  context.fine_binned_dt)
+    buffered_fine_binned_t = buffered_fine_binned_t_edges[:-1] + context.fine_binned_dt / 2.
+    fine_binned_t_edges = np.arange(0., context.duration + context.fine_binned_dt / 2., context.fine_binned_dt)
+    fine_binned_t = fine_binned_t_edges[:-1] + context.fine_binned_dt / 2.
+    coarse_binned_t_edges = np.arange(0., context.duration + context.coarse_binned_dt / 2., context.coarse_binned_dt)
+    coarse_binned_t = coarse_binned_t_edges[:-1] + context.coarse_binned_dt / 2.
 
     full_spike_times_dict = network.get_spike_times_dict()
-
-    buffered_firing_rates_dict = \
-        infer_firing_rates_baks(full_spike_times_dict, buffered_binned_t, alpha=context.baks_alpha,
-                                beta=context.baks_beta, pad_dur=context.baks_pad_dur,
-                                wrap_around=context.baks_wrap_around)
-
-    full_binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict, full_binned_t)
-    """
-    inferred_binned_t, buffered_firing_rates_dict = \
-        infer_firing_rates_from_spike_count(full_binned_spike_count_dict, full_binned_t,
-                                            (binned_t[0], binned_t[-1]), align_to_t=0.,
-                                            window_dur=60., step_dur=20.)
-    """
+    coarse_binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict, coarse_binned_t_edges)
+    firing_rates_from_coarse_binned_spike_count_dict = \
+        get_firing_rate_from_binned_spike_count(coarse_binned_spike_count_dict, context.coarse_binned_dt)
+    buffered_fine_binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict,
+                                                                        buffered_fine_binned_t_edges)
 
     gathered_full_spike_times_dict_list = context.comm.gather(full_spike_times_dict, root=0)
-    gathered_buffered_firing_rates_dict_list = context.comm.gather(buffered_firing_rates_dict, root=0)
-    gathered_full_binned_spike_count_dict_list = context.comm.gather(full_binned_spike_count_dict, root=0)
+    gathered_firing_rates_dict_list = context.comm.gather(firing_rates_from_coarse_binned_spike_count_dict, root=0)
+    gathered_buffered_fine_binned_spike_count_dict_list = \
+        context.comm.gather(buffered_fine_binned_spike_count_dict, root=0)
 
     full_voltage_rec_dict = network.get_voltage_rec_dict()
     voltages_exceed_threshold = check_voltages_exceed_threshold(full_voltage_rec_dict, input_t=full_rec_t,
@@ -741,8 +741,8 @@ def analyze_network_output_replay(network, ensemble_id=None, trial=None, model_i
 
     if context.comm.rank == 0:
         full_spike_times_dict = merge_list_of_dict(gathered_full_spike_times_dict_list)
-        buffered_firing_rates_dict = merge_list_of_dict(gathered_buffered_firing_rates_dict_list)
-        full_binned_spike_count_dict = merge_list_of_dict(gathered_full_binned_spike_count_dict_list)
+        firing_rates_dict = merge_list_of_dict(gathered_firing_rates_dict_list)
+        buffered_fine_binned_spike_count_dict = merge_list_of_dict(gathered_buffered_fine_binned_spike_count_dict_list)
 
         if plot or export:
             subset_full_voltage_rec_dict = merge_list_of_dict(gathered_subset_full_voltage_rec_dict_list)
@@ -759,23 +759,16 @@ def analyze_network_output_replay(network, ensemble_id=None, trial=None, model_i
             current_time = time.time()
             sys.stdout.flush()
 
-        full_pop_mean_rate_from_binned_spike_count_dict = \
-            get_pop_mean_rate_from_binned_spike_count(full_binned_spike_count_dict, dt=context.binned_dt)
-
+        buffered_pop_mean_rate_from_binned_spike_count_dict = \
+            get_pop_mean_rate_from_binned_spike_count(buffered_fine_binned_spike_count_dict, dt=context.fine_binned_dt)
         mean_min_rate_dict, mean_peak_rate_dict, mean_rate_active_cells_dict, pop_fraction_active_dict = \
-            get_pop_activity_stats(buffered_firing_rates_dict, input_t=buffered_binned_t, valid_t=binned_t,
-                                   threshold=context.active_rate_threshold, plot=plot)
-        """
-        mean_min_rate_dict, mean_peak_rate_dict, mean_rate_active_cells_dict, pop_fraction_active_dict = \
-            get_pop_activity_stats(buffered_firing_rates_dict, input_t=inferred_binned_t,
-                                   threshold=context.active_rate_threshold, plot=plot)
-        """
-
+            get_pop_activity_stats(firing_rates_dict, input_t=coarse_binned_t, threshold=context.active_rate_threshold,
+                                   plot=plot)
         fft_f_dict, fft_power_dict, filter_psd_f_dict, filter_psd_power_dict, filter_envelope_dict, \
         filter_envelope_ratio_dict, centroid_freq_dict, freq_tuning_index_dict = \
-            get_pop_bandpass_filtered_signal_stats(full_pop_mean_rate_from_binned_spike_count_dict,
-                                                   context.filter_bands, input_t=full_binned_t,
-                                                   valid_t=binned_t, output_t=binned_t, pad=False,
+            get_pop_bandpass_filtered_signal_stats(buffered_pop_mean_rate_from_binned_spike_count_dict,
+                                                   context.filter_bands, input_t=buffered_fine_binned_t,
+                                                   valid_t=fine_binned_t, output_t=fine_binned_t, pad=False,
                                                    plot=plot, verbose=context.verbose > 1)
 
         if context.debug and context.verbose > 0:
@@ -785,15 +778,10 @@ def analyze_network_output_replay(network, ensemble_id=None, trial=None, model_i
             sys.stdout.flush()
 
         if plot:
-
-            plot_firing_rate_heatmaps(buffered_firing_rates_dict, input_t=buffered_binned_t,
-                                      valid_t=buffered_binned_t, tuning_peak_locs=context.tuning_peak_locs)
-            """
-            plot_firing_rate_heatmaps(buffered_firing_rates_dict, input_t=inferred_binned_t,
+            plot_firing_rate_heatmaps(firing_rates_dict, input_t=coarse_binned_t,
                                       tuning_peak_locs=context.tuning_peak_locs)
-            """
-            plot_population_spike_rasters(full_binned_spike_count_dict, input_t=full_binned_t,
-                                          valid_t=buffered_binned_t, tuning_peak_locs=context.tuning_peak_locs)
+            plot_population_spike_rasters(buffered_fine_binned_spike_count_dict, input_t=buffered_fine_binned_t,
+                                          tuning_peak_locs=context.tuning_peak_locs)
 
         if export:
             current_time = time.time()
@@ -811,17 +799,12 @@ def analyze_network_output_replay(network, ensemble_id=None, trial=None, model_i
                     set_h5py_attr(subgroup.attrs, 'replay_trial_offset', context.replay_trial_offset)
                     set_h5py_attr(subgroup.attrs, 'connectivity_type', context.connectivity_type)
                     set_h5py_attr(subgroup.attrs, 'duration', context.duration)
+                    set_h5py_attr(subgroup.attrs, 'buffer', context.buffer)
+                    set_h5py_attr(subgroup.attrs, 'stim_edge_duration', context.replay_stim_edge_duration)
                     set_h5py_attr(subgroup.attrs, 'active_rate_threshold', context.active_rate_threshold)
-                    set_h5py_attr(subgroup.attrs, 'baks_alpha', context.baks_alpha)
-                    set_h5py_attr(subgroup.attrs, 'baks_beta', context.baks_beta)
-                    set_h5py_attr(subgroup.attrs, 'baks_pad_dur', context.baks_pad_dur)
-                    set_h5py_attr(subgroup.attrs, 'baks_wrap_around', context.baks_wrap_around)
-                    subgroup.create_dataset('full_binned_t', data=full_binned_t, compression='gzip')
                     data_group = subgroup.create_group('pop_gid_ranges')
                     for pop_name in context.pop_gid_ranges:
                         data_group.create_dataset(pop_name, data=context.pop_gid_ranges[pop_name])
-                    subgroup.create_dataset('buffered_binned_t', data=buffered_binned_t, compression='gzip')
-                    subgroup.create_dataset('binned_t', data=binned_t, compression='gzip')
                     data_group = subgroup.create_group('filter_bands')
                     for filter, band in viewitems(context.filter_bands):
                         data_group.create_dataset(filter, data=band)
@@ -871,6 +854,7 @@ def analyze_network_output_replay(network, ensemble_id=None, trial=None, model_i
                 group = get_h5py_group(group, [trial], create=True)
                 set_h5py_attr(group.attrs, 'ensemble_id', int(ensemble_id))
                 set_h5py_attr(group.attrs, 'trial_id', int(trial))
+                set_h5py_attr(group.attrs, 'equilibrate', context.equilibrate)
                 set_h5py_attr(group.attrs, 'voltages_exceed_threshold', voltages_exceed_threshold)
                 subgroup = group.create_group('full_spike_times')
                 for pop_name in full_spike_times_dict:
@@ -905,12 +889,6 @@ def analyze_network_output_replay(network, ensemble_id=None, trial=None, model_i
                     data_group.create_group(band)
                     for pop_name in filter_psd_power_dict[band]:
                         data_group[band].attrs[pop_name] = filter_psd_power_dict[band][pop_name]
-                subgroup = group.create_group('buffered_firing_rates')
-                for pop_name in buffered_firing_rates_dict:
-                    subgroup.create_group(pop_name)
-                    for gid in buffered_firing_rates_dict[pop_name]:
-                        subgroup[pop_name].create_dataset(
-                            str(gid), data=buffered_firing_rates_dict[pop_name][gid], compression='gzip')
                 subgroup = group.create_group('subset_full_voltage_recs')
                 for pop_name in subset_full_voltage_rec_dict:
                     subgroup.create_group(pop_name)
@@ -926,9 +904,13 @@ def analyze_network_output_replay(network, ensemble_id=None, trial=None, model_i
                                                         time.time() - current_time))
                 sys.stdout.flush()
 
+        FF_mean_frac_active_replay = np.mean(pop_fraction_active_dict['FF'])
+        E_frac_active_replay_residuals = \
+            np.sum(np.abs(np.subtract(pop_fraction_active_dict['E'], FF_mean_frac_active_replay)))
+
         result = dict()
 
-        result['FF_frac_active_replay'] = np.mean(pop_fraction_active_dict['FF'])
+        result['FF_frac_active_replay'] = FF_mean_frac_active_replay
         result['E_frac_active_replay'] = np.mean(pop_fraction_active_dict['E'])
         result['I_frac_active_replay'] = np.mean(pop_fraction_active_dict['I'])
         result['FF_mean_active_rate_replay'] = np.mean(mean_rate_active_cells_dict['FF'])
@@ -937,6 +919,7 @@ def analyze_network_output_replay(network, ensemble_id=None, trial=None, model_i
         result['FF_ripple_envelope_ratio_replay'] = filter_envelope_ratio_dict['Ripple']['FF']
         result['E_ripple_envelope_ratio_replay'] = filter_envelope_ratio_dict['Ripple']['E']
         result['I_ripple_envelope_ratio_replay'] = filter_envelope_ratio_dict['Ripple']['I']
+        result['E_frac_active_replay_residuals'] = E_frac_active_replay_residuals
 
         if any(voltages_exceed_threshold_list):
             if context.verbose > 0:
