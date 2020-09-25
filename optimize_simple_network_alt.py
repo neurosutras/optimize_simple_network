@@ -139,8 +139,8 @@ def config_worker():
         input_max_rates_run = None
     if 'input_offline_min_rates' not in context():
         input_offline_min_rates = None
-    if 'input_offline_mean_rates' not in context():
-        input_offline_mean_rates = None
+    if 'input_offline_max_rates' not in context():
+        input_offline_max_rates = None
     if 'input_offline_fraction_active' not in context():
         input_offline_fraction_active = None
     if 'input_norm_tuning_widths' not in context():
@@ -199,11 +199,14 @@ def config_worker():
     run_buffer = 500.  # ms
     run_duration = 3000.  # ms
     replay_buffer = 150.  # ms
-    replay_duration = 200.  # ms
-    replay_stim_edge_duration = (150., 25.)  # ms
-
-    if any(np.array(replay_stim_edge_duration) > replay_buffer):
-        raise RuntimeError('Offline stimulus edge duration must be less than simulation buffer duration.')
+    replay_duration = 160.  # ms
+    # epoch_start (ms), epoch_duration (ms), epoch_type ('min', 'max', 'onset', 'offset')
+    replay_stim_epochs = {'FF': [(0., equilibrate + replay_buffer - 120., 'min'),
+                                 (equilibrate + replay_buffer - 120., 160., 'onset'),
+                                 (equilibrate + replay_buffer + 40., 40., 'max'),
+                                 (equilibrate + replay_buffer + 80., 160., 'offset'),
+                                 (equilibrate + replay_buffer + 240., 70., 'min')]
+                          }
 
     tuning_duration = 3000.  # ms
     run_tstop = int(equilibrate + run_duration + 2. * run_buffer)  # ms
@@ -800,7 +803,7 @@ def analyze_network_output_replay(network, ensemble_id=None, trial=None, model_i
                     set_h5py_attr(subgroup.attrs, 'connectivity_type', context.connectivity_type)
                     set_h5py_attr(subgroup.attrs, 'duration', context.duration)
                     set_h5py_attr(subgroup.attrs, 'buffer', context.buffer)
-                    set_h5py_attr(subgroup.attrs, 'stim_edge_duration', context.replay_stim_edge_duration)
+                    set_h5py_attr(subgroup.attrs, 'stim_epochs', context.replay_stim_epochs)
                     set_h5py_attr(subgroup.attrs, 'active_rate_threshold', context.active_rate_threshold)
                     data_group = subgroup.create_group('pop_gid_ranges')
                     for pop_name in context.pop_gid_ranges:
@@ -1087,11 +1090,12 @@ def compute_features_replay(x, ensemble_id=None, trial=None, model_id=None, expo
     current_time = time.time()
 
     context.network.set_offline_input_pattern(
-        context.input_types, input_offline_min_rates=context.input_offline_min_rates,
-        input_offline_mean_rates=context.input_offline_mean_rates,
+        input_offline_min_rates=context.input_offline_min_rates,
+        input_offline_max_rates=context.input_offline_max_rates,
         input_offline_fraction_active=context.input_offline_fraction_active, tuning_peak_locs=context.tuning_peak_locs,
-        track_wrap_around=context.track_wrap_around, stim_edge_duration=context.replay_stim_edge_duration,
-        selection_seed=trial_selection_seed, spikes_seed=trial_spikes_seed, tuning_duration=context.tuning_duration)
+        track_wrap_around=context.track_wrap_around, stim_epochs=context.replay_stim_epochs,
+        selection_seed=trial_selection_seed, spikes_seed=trial_spikes_seed, tuning_duration=context.tuning_duration,
+        debug=context.debug)
 
     if context.comm.rank == 0 and context.verbose > 0:
         print('optimize_simple_network: pid: %i; setting network input pattern (replay) took %.2f s' %

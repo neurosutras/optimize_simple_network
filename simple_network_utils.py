@@ -273,22 +273,22 @@ class SimpleNetwork(object):
                 cell = self.cells[pop_name][gid]
                 cell.load_vecstim(this_spike_train)
 
-    def set_offline_input_pattern(self, input_types, input_offline_min_rates=None, input_offline_mean_rates=None,
+    def set_offline_input_pattern(self, input_offline_min_rates=None, input_offline_max_rates=None,
                                   input_offline_fraction_active=None, tuning_peak_locs=None, track_wrap_around=False,
-                                  stim_edge_duration=(0., 0.), selection_seed=None, spikes_seed=None,
-                                  tuning_duration=None):
+                                  stim_epochs=None, selection_seed=None, spikes_seed=None,
+                                  tuning_duration=None, debug=False):
         """
 
-        :param input_types: dict
         :param input_offline_min_rates: dict
-        :param input_offline_mean_rates: dict
+        :param input_offline_max_rates: dict
         :param input_offline_fraction_active: dict
         :param tuning_peak_locs: dict
         :param track_wrap_around: bool
-        :param stim_edge_duration: tuple of float
+        :param stim_epochs: dict of list of tuple of float: {pop_name: [(epoch_start, epoch_duration, epoch_type)]
         :param selection_seed: list of int: random seed for reproducible input cell selection
         :param spikes_seed: list of int: random seed for reproducible input spike trains
         :param tuning_duration: float
+        :param debug: bool
         """
         if spikes_seed is None:
             raise RuntimeError('SimpleNetwork.set_offline_input_pattern: missing spikes_seed required to generate '
@@ -296,56 +296,71 @@ class SimpleNetwork(object):
         if selection_seed is None:
             raise RuntimeError('SimpleNetwork.set_offline_input_pattern: missing selection_seed required to select '
                                'reproducible ensembles of active inputs')
-        if stim_edge_duration[0] > 0.:
-            stim_onset_len = int(stim_edge_duration[0]/self.dt)
-            stim_onset = hann(int(stim_edge_duration[0] * 2. / self.dt))[:stim_onset_len]
-        if stim_edge_duration[1] > 0.:
-            stim_offset_len = int(stim_edge_duration[1] / self.dt)
-            stim_offset = hann(int(stim_edge_duration[1] * 2. / self.dt))[-stim_offset_len:]
+        if stim_epochs is None or len(stim_epochs) == 0:
+            return
+        else:
+            stim_defined = False
+            for pop_name in stim_epochs:
+                if len(stim_epochs[pop_name]) > 0:
+                    stim_defined = True
+            if not stim_defined:
+                return
 
-        for pop_name in (pop_name for pop_name in input_types if pop_name in self.cells):
+        for pop_name in (pop_name for pop_name in stim_epochs if pop_name in self.cells):
             if input_offline_min_rates is None or pop_name not in input_offline_min_rates:
                 raise RuntimeError('SimpleNetwork.set_input_pattern: missing input_offline_min_rates required to '
-                                   'specify %s input population: %s' % (input_types[pop_name], pop_name))
-            if input_offline_mean_rates is None or pop_name not in input_offline_mean_rates:
-                raise RuntimeError('SimpleNetwork.set_input_pattern: missing input_offline_mean_rates required to '
-                                   'specify %s input population: %s' % (input_types[pop_name], pop_name))
+                                   'specify input population: %s' % pop_name)
+            if input_offline_max_rates is None or pop_name not in input_offline_max_rates:
+                raise RuntimeError('SimpleNetwork.set_input_pattern: missing input_offline_max_rates required to '
+                                   'specify input population: %s' % pop_name)
             if input_offline_fraction_active is None or pop_name not in input_offline_fraction_active:
                 raise RuntimeError('SimpleNetwork.set_input_pattern: missing input_offline_fraction_active '
-                                   'required to specify %s input population: %s' %
-                                   (input_types[pop_name], pop_name))
-            if input_types[pop_name] in ['constant', 'gaussian']:
-                this_min_rate = input_offline_min_rates[pop_name]
-                this_mean_rate = input_offline_mean_rates[pop_name]
-                components = [[0., self.equilibrate + self.buffer - stim_edge_duration[0]]]
-                if stim_edge_duration[0] > 0.:
-                    components.append(np.arange(self.buffer + self.equilibrate - stim_edge_duration[0],
-                                                self.buffer + self.equilibrate, self.dt))
-                components.append([self.buffer + self.equilibrate, self.buffer + self.equilibrate + self.duration])
-                if stim_edge_duration[0] > 0.:
-                    components.append(np.arange(self.buffer + self.equilibrate + self.duration,
-                                                self.buffer + self.equilibrate + self.duration + stim_edge_duration[1],
-                                                self.dt))
-                components.append([self.buffer + self.equilibrate + self.duration + stim_edge_duration[1], self.tstop])
-                self.input_pop_t[pop_name] = np.concatenate(components)
+                                   'required to specify input population: %s' % pop_name)
+            this_min_rate = input_offline_min_rates[pop_name]
+            this_max_rate = input_offline_max_rates[pop_name]
+            this_fraction_active = input_offline_fraction_active[pop_name]
 
-                this_fraction_active = input_offline_fraction_active[pop_name]
-                for gid in self.cells[pop_name]:
-                    local_np_random = np.random.default_rng(seed=selection_seed + [gid])
-                    if local_np_random.uniform(0., 1.) <= this_fraction_active:
-                        components = [[this_min_rate, this_min_rate]]
-                        if stim_edge_duration[0] > 0.:
-                            components.append((this_mean_rate - this_min_rate) * stim_onset + this_min_rate)
-                        components.append([this_mean_rate, this_mean_rate])
-                        if stim_edge_duration[1] > 0.:
-                            components.append((this_mean_rate - this_min_rate) * stim_offset + this_min_rate)
-                        components.append([this_min_rate, this_min_rate])
-                        self.input_pop_firing_rates[pop_name][gid] = np.concatenate(components)
-                    else:
-                        self.input_pop_firing_rates[pop_name][gid] = \
-                            np.ones_like(self.input_pop_t[pop_name]) * this_min_rate
+            stim_t = []
+            stim_rate = []
+            last_epoch_end = 0.
+            for epoch_start, epoch_duration, epoch_type in stim_epochs[pop_name]:
+                if epoch_start != last_epoch_end:
+                    raise RuntimeError('set_offline_input_pattern: input population: %s; invalid start time: %.2f for '
+                                       'stim epoch: %s' % (pop_name, epoch_start, epoch_type))
+                epoch_end = min(epoch_start + epoch_duration, self.tstop)
+                last_epoch_end = epoch_end
+                if epoch_type == 'onset':
+                    epoch_len = int(epoch_duration / self.dt)
+                    epoch_t = np.arange(epoch_start, epoch_end, self.dt)
+                    epoch_rate = \
+                        (this_max_rate - this_min_rate) * hann(int(epoch_duration * 2. / self.dt))[:epoch_len] + \
+                        this_min_rate
+                elif epoch_type == 'offset':
+                    epoch_len = int(epoch_duration / self.dt)
+                    epoch_t = np.arange(epoch_start, epoch_end, self.dt)
+                    epoch_rate = \
+                        (this_max_rate - this_min_rate) * hann(int(epoch_duration * 2. / self.dt))[:epoch_len][::-1] + \
+                        this_min_rate
+                elif epoch_type == 'min':
+                    epoch_t = [epoch_start, epoch_end]
+                    epoch_rate = [this_min_rate, this_min_rate]
+                elif epoch_type == 'max':
+                    epoch_t = [epoch_start, epoch_end]
+                    epoch_rate = [this_max_rate, this_max_rate]
+                stim_t.append(epoch_t)
+                stim_rate.append(epoch_rate)
+            stim_t = np.concatenate(stim_t)
+            stim_rate = np.concatenate(stim_rate)
+            self.input_pop_t[pop_name] = stim_t
+            for gid in self.cells[pop_name]:
+                local_np_random = np.random.default_rng(seed=selection_seed + [gid])
+                if local_np_random.uniform(0., 1.) <= this_fraction_active:
+                    self.input_pop_firing_rates[pop_name][gid] = stim_rate
+                else:
+                    self.input_pop_firing_rates[pop_name][gid] = \
+                        np.ones_like(self.input_pop_t[pop_name]) * this_min_rate
 
-        for pop_name in (pop_name for pop_name in input_types if pop_name in self.cells):
+        for pop_name in (pop_name for pop_name in stim_epochs if pop_name in self.cells):
             for gid in self.cells[pop_name]:
                 local_np_random = np.random.default_rng(seed=spikes_seed + [gid])
                 this_spike_train = \
