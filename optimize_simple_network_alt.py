@@ -201,11 +201,11 @@ def config_worker():
     replay_buffer = 150.  # ms
     replay_duration = 160.  # ms
     # epoch_start (ms), epoch_duration (ms), epoch_type ('min', 'max', 'onset', 'offset')
-    replay_stim_epochs = {'FF': [(0., equilibrate + replay_buffer - 120., 'min'),
-                                 (equilibrate + replay_buffer - 120., 160., 'onset'),
-                                 (equilibrate + replay_buffer + 40., 40., 'max'),
-                                 (equilibrate + replay_buffer + 80., 160., 'offset'),
-                                 (equilibrate + replay_buffer + 240., 70., 'min')]
+    replay_stim_epochs = {'FF': [(0., equilibrate + replay_buffer - 100., 'min'),
+                                 (equilibrate + replay_buffer - 100., 120., 'onset'),
+                                 (equilibrate + replay_buffer + 20., 120., 'max'),
+                                 (equilibrate + replay_buffer + 140., 120., 'offset'),
+                                 (equilibrate + replay_buffer + 260., 50., 'min')]
                           }
 
     tuning_duration = 3000.  # ms
@@ -1188,6 +1188,11 @@ def get_objectives(features, model_id=None, export=False):
                 else:
                     objectives[objective_name] = ((E_val - FF_val) /
                                                   context.target_range[objective_name]) ** 2.
+            elif objective_name == 'E_frac_active_replay':
+                E_val = features['E_frac_active_replay']
+                FF_val = features['FF_frac_active_replay']
+                objectives[objective_name] = ((E_val - FF_val) /
+                                              context.target_range[objective_name]) ** 2.
             else:
                 objectives[objective_name] = ((context.target_val[objective_name] - features[objective_name]) /
                                               context.target_range[objective_name]) ** 2.

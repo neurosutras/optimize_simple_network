@@ -206,10 +206,11 @@ objective_names:
 - I_theta_tuning_index_run
 - E_gamma_tuning_index_run
 - I_gamma_tuning_index_run
-- E_frac_active_replay_residuals
+# - E_frac_active_replay_residuals
+- E_frac_active_replay
 - E_mean_active_rate_replay
-- E_ripple_envelope_score
-- I_ripple_envelope_score
+# - E_ripple_envelope_score
+# - I_ripple_envelope_score
 optimization_title: simple_network_J_alt
 param_gen: PopulationAnnealing
 param_names:
@@ -255,6 +256,7 @@ target_range:
   E_gamma_tuning_index_run: 0.2
   I_gamma_tuning_index_run: 0.2
   E_frac_active_replay_residuals: 0.005
+  E_frac_active_replay: 0.001
   E_mean_active_rate_replay: 0.1
   E_ripple_envelope_score: 0.01
   I_ripple_envelope_score: 0.01
@@ -263,7 +265,7 @@ target_val:
   E_mean_min_rate_run: 0.
   I_mean_active_rate_run: 20.
   E_frac_active_run: .6
-  I_frac_active_run: .9
+  I_frac_active_run: .95
   E_theta_envelope_ratio_run: .5
   I_theta_envelope_ratio_run: .5
   E_gamma_envelope_ratio_run: .25
