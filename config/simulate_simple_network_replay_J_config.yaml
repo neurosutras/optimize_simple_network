@@ -12,7 +12,7 @@ input_types:
   FF: gaussian
 input_offline_min_rates:
   FF: 0.
-input_offline_mean_rates:
+input_offline_max_rates:
   FF: 12.5  # 15.
 input_offline_fraction_active:
   FF: 0.25  # 0.3

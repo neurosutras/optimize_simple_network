@@ -69,22 +69,6 @@ bounds:
     - 1.
     - 5.0
 rel_bounds:
-#- - E_FF_mean_weight
-#  - '<'
-#  - 2.0
-#  - E_E_mean_weight
-#- - E_FF_mean_weight
-#  - '>'
-#  - 0.5
-#  - E_E_mean_weight
-#- - I_FF_mean_weight
-#  - '<'
-#  - 2.0
-#  - I_E_mean_weight
-#- - I_FF_mean_weight
-#  - '>'
-#  - 0.5
-#  - I_E_mean_weight
 feature_names:
 - E_mean_peak_rate_run
 - E_mean_min_rate_run
@@ -111,6 +95,7 @@ feature_names:
 - I_gamma_tuning_index_run
 - FF_frac_active_replay
 - E_frac_active_replay
+- E_frac_active_replay_residuals
 - I_frac_active_replay
 - FF_mean_active_rate_replay
 - E_mean_active_rate_replay
@@ -119,17 +104,17 @@ feature_names:
 - E_ripple_envelope_ratio_replay
 - I_ripple_envelope_ratio_replay
 update_context:
-- - optimize_simple_network_alt
+- - optimize_simple_network
   - update_context
 get_features_stages:
-- source: optimize_simple_network_alt
+- source: optimize_simple_network
   compute_features: compute_features_run
-- source: optimize_simple_network_alt
+- source: optimize_simple_network
   get_args_static: get_args_static_replay_event_ids
   compute_features: compute_features_replay
   filter_features: filter_features_replay
 get_objectives:
-  optimize_simple_network_alt: get_objectives
+  optimize_simple_network: get_objectives
 kwargs:
   verbose: 1
   run_trial: 0
@@ -151,7 +136,7 @@ kwargs:
     FF: 0.
   input_offline_min_rates:
     FF: 0.
-  input_offline_mean_rates:
+  input_offline_max_rates:
     FF: 12.5  # 15.
   input_offline_fraction_active:
     FF: 0.25  # 0.3
@@ -209,11 +194,12 @@ objective_names:
 - I_theta_tuning_index_run
 - E_gamma_tuning_index_run
 - I_gamma_tuning_index_run
+# - E_frac_active_replay_residuals
 - E_frac_active_replay
 - E_mean_active_rate_replay
-- E_ripple_envelope_score
-- I_ripple_envelope_score
-optimization_title: simple_network_J_reward_alt
+# - E_ripple_envelope_score
+# - I_ripple_envelope_score
+optimization_title: simple_network_J_reward
 param_gen: PopulationAnnealing
 param_names:
 - E_FF_mean_weight
@@ -257,6 +243,7 @@ target_range:
   I_theta_tuning_index_run: 0.2
   E_gamma_tuning_index_run: 0.2
   I_gamma_tuning_index_run: 0.2
+  E_frac_active_replay_residuals: 0.005
   E_frac_active_replay: 0.001
   E_mean_active_rate_replay: 0.1
   E_ripple_envelope_score: 0.01
@@ -266,7 +253,7 @@ target_val:
   E_mean_min_rate_run: 0.
   I_mean_active_rate_run: 20.
   E_frac_active_run: .6
-  I_frac_active_run: .9
+  I_frac_active_run: .95
   E_theta_envelope_ratio_run: .5
   I_theta_envelope_ratio_run: .5
   E_gamma_envelope_ratio_run: .25
@@ -279,7 +266,7 @@ target_val:
   I_theta_tuning_index_run: 5.
   E_gamma_tuning_index_run: 5.
   I_gamma_tuning_index_run: 5.
-  E_frac_active_replay: 0.2
+  E_frac_active_replay_residuals: 0.
 x0:
   E_E_FF_syn_proportion: 5.558672E-01
   E_E_mean_weight: 7.666654E-01

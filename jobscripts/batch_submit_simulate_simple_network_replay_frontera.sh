@@ -4,7 +4,7 @@ export LABEL="$2"
 export PARAM_FILE_PATH="$3"
 export MODEL_KEY="$4"
 
-for ((network_instance=0;network_instance<5;network_instance++))
+for ((network_instance=1;network_instance<6;network_instance++))
 do
   export network_instance
   sh simulate_simple_network_replay_frontera.sh $CONFIG_FILE_PATH $LABEL $network_instance $PARAM_FILE_PATH $MODEL_KEY

@@ -69,22 +69,6 @@ bounds:
     - 1.
     - 5.0
 rel_bounds:
-#- - E_FF_mean_weight
-#  - '<'
-#  - 2.0
-#  - E_E_mean_weight
-#- - E_FF_mean_weight
-#  - '>'
-#  - 0.5
-#  - E_E_mean_weight
-#- - I_FF_mean_weight
-#  - '<'
-#  - 2.0
-#  - I_E_mean_weight
-#- - I_FF_mean_weight
-#  - '>'
-#  - 0.5
-#  - I_E_mean_weight
 feature_names:
 - E_mean_peak_rate_run
 - E_mean_min_rate_run
@@ -120,17 +104,17 @@ feature_names:
 - E_ripple_envelope_ratio_replay
 - I_ripple_envelope_ratio_replay
 update_context:
-- - optimize_simple_network_alt
+- - optimize_simple_network
   - update_context
 get_features_stages:
-- source: optimize_simple_network_alt
+- source: optimize_simple_network
   compute_features: compute_features_run
-- source: optimize_simple_network_alt
+- source: optimize_simple_network
   get_args_static: get_args_static_replay_event_ids
   compute_features: compute_features_replay
   filter_features: filter_features_replay
 get_objectives:
-  optimize_simple_network_alt: get_objectives
+  optimize_simple_network: get_objectives
 kwargs:
   verbose: 1
   run_trial: 0
@@ -211,7 +195,7 @@ objective_names:
 - E_mean_active_rate_replay
 # - E_ripple_envelope_score
 # - I_ripple_envelope_score
-optimization_title: simple_network_J_alt
+optimization_title: simple_network_J
 param_gen: PopulationAnnealing
 param_names:
 - E_FF_mean_weight
