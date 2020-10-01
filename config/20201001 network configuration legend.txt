@@ -1,0 +1,8 @@
+H (6): no weights are structured
+I (7): only E_E weights are structured
+J (8): both E_FF and E_E weights are structured
+J_reward (10): both E_FF and E_E weights are structured, reward location is over-represented by the E cell population
+K (9): only E_FF weights are structured
+L (11): both E_FF and E_E weights are structured, E cells are RS
+M (12): both E_FF and E_E weights are structured, rhythmicity objectives are off
+N (13): both E_FF and E_E weights are structured, structured weights are skewed to the past
