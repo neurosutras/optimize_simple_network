@@ -1,6 +1,7 @@
 from nested.utils import *
 from neuron import h
 from scipy.signal import butter, sosfiltfilt, sosfreqz, hilbert, periodogram, savgol_filter, hann
+from scipy.ndimage import gaussian_filter1d
 from collections import namedtuple, defaultdict
 
 
@@ -1021,75 +1022,43 @@ def get_binned_spike_count_dict(spike_times_dict, t):
     return binned_spike_count_dict
 
 
-def infer_firing_rates_from_spike_count(binned_spike_count_dict, input_t, output_range, align_to_t=0., window_dur=500.,
-                                        step_dur=1., smooth_dur=None, debug=False):
+def get_firing_rate_from_binned_spike_count(binned_spike_count, bin_dur=20., smooth=None, wrap=False):
     """
+    Use a gaussian filter to estimate firing rate from a binned spike count array.
+    :param binned_spike_count: array of int
+    :param bin_dur: float (ms)
+    :param smooth: float (ms): standard deviation of temporal gaussian filter to smooth firing rate estimate
+    :param wrap: bool
+    :return: array
+    """
+    if smooth is None:
+        return binned_spike_count / (bin_dur / 1000.)
+    sigma = smooth / bin_dur
+    if wrap:
+        return gaussian_filter1d(binned_spike_count / (bin_dur / 1000.), sigma, mode='wrap')
+    else:
+        return gaussian_filter1d(binned_spike_count / (bin_dur / 1000.), sigma)
 
-    :param binned_spike_count_dict: dict: {pop_name: {gid: array} }
-    :param input_t: array
-    :param output_range: array
-    :param align_to_t: float
-    :param window_dur: float
-    :param step_dur: float
-    :param smooth_dur: float
-    :param debug: bool
+
+def get_firing_rates_from_binned_spike_count_matrix_dict(binned_spike_count_matrix_dict, bin_dur=20.,
+                                                         smooth=None, wrap=False):
+    """
+    Use a gaussian filter to estimate firing rate for each cell population in a dict of binned spike count arrays.
+    :param binned_spike_count_matrix_dict: dict: {pop_name: array with shape == (cells, bins) }
+    :param bin_dur: float (ms)
+    :param smooth: float (ms): standard deviation of temporal gaussian filter to smooth firing rate estimate
+    :param wrap: bool
     :return: tuple of dict
     """
-    dt = input_t[1] - input_t[0]
-    half_window_bins = int(window_dur // dt // 2)
-    window_bins = int(2 * half_window_bins + 1)
-    window_dur = window_bins * dt
-    step_bins = step_dur // dt
-    if smooth_dur is not None:
-        smooth_bins = int(smooth_dur // step_dur)
-        if smooth_bins % 2 == 0:
-            smooth_bins += 1
+    firing_rates_matrix_dict = {}
+    for pop_name in binned_spike_count_matrix_dict:
+        firing_rates_matrix_dict[pop_name] = np.empty_like(binned_spike_count_matrix_dict[pop_name])
+        for i in range(binned_spike_count_matrix_dict[pop_name].shape[0]):
+            this_binned_spike_count = binned_spike_count_matrix_dict[pop_name][i,:]
+            firing_rates_matrix_dict[pop_name][i,:] = \
+                get_firing_rate_from_binned_spike_count(this_binned_spike_count, bin_dur, smooth, wrap)
 
-    # if possible, include a bin starting at align_to_t
-    binned_t_center_indexes = []
-
-    this_center_index = np.where(input_t >= align_to_t)[0] + half_window_bins
-    if len(this_center_index) > 0:
-        this_center_index = this_center_index[0]
-        if this_center_index < half_window_bins:
-            this_center_index = half_window_bins
-            binned_t_center_indexes.append(this_center_index)
-        else:
-            while this_center_index > half_window_bins:
-                binned_t_center_indexes.append(this_center_index)
-                this_center_index -= step_bins
-            binned_t_center_indexes.reverse()
-    else:
-        this_center_index = half_window_bins
-        binned_t_center_indexes.append(this_center_index)
-    this_center_index = binned_t_center_indexes[-1] + step_bins
-    while this_center_index < len(input_t) - half_window_bins:
-        binned_t_center_indexes.append(this_center_index)
-        this_center_index += step_bins
-    binned_t_center_indexes = np.array(binned_t_center_indexes, dtype='int')
-    binned_t = input_t[binned_t_center_indexes]
-
-    valid_indexes = np.where((binned_t >= output_range[0]) & (binned_t <= output_range[-1]))[0]
-    firing_rates_from_spike_count_dict = dict()
-    plot_count = 0
-    for pop_name in binned_spike_count_dict:
-        firing_rates_from_spike_count_dict[pop_name] = dict()
-        for gid in binned_spike_count_dict[pop_name]:
-            this_binned_spike_count = binned_spike_count_dict[pop_name][gid]
-            this_inferred_rate = np.empty_like(binned_t)
-            for rate_index, t_center_index in enumerate(binned_t_center_indexes):
-                t_start_index = t_center_index - half_window_bins
-                t_end_index = t_center_index + half_window_bins + 1
-                this_inferred_rate[rate_index] = \
-                    np.sum(this_binned_spike_count[t_start_index:t_end_index]) / (window_dur / 1000.)
-            if smooth_dur is not None:
-                this_smoothed_rate = savgol_filter(this_inferred_rate, smooth_bins, 3, mode='interp')
-                this_smoothed_rate = np.maximum(0., this_smoothed_rate)
-                firing_rates_from_spike_count_dict[pop_name][gid] = this_smoothed_rate[valid_indexes]
-            else:
-                firing_rates_from_spike_count_dict[pop_name][gid] = this_inferred_rate[valid_indexes]
-
-    return binned_t[valid_indexes], firing_rates_from_spike_count_dict
+    return firing_rates_matrix_dict
 
 
 def find_nearest(arr, tt):
@@ -1222,23 +1191,6 @@ def get_pop_mean_rate_from_binned_spike_count(binned_spike_count_dict, dt):
             np.divide(np.mean(list(binned_spike_count_dict[pop_name].values()), axis=0), dt / 1000.)
 
     return pop_mean_rate_dict
-
-
-def get_firing_rate_from_binned_spike_count(binned_spike_count_dict, dt):
-    """
-    Convert binned spike counts into firing rates.
-    :param binned_spike_count_dict: nested dict of array
-    :param dt: float (ms)
-    :return: dict of array
-    """
-    rate_dict = dict()
-
-    for pop_name in binned_spike_count_dict:
-        rate_dict[pop_name] = dict()
-        for gid in binned_spike_count_dict[pop_name]:
-            rate_dict[pop_name][gid] = binned_spike_count_dict[pop_name][gid] / (dt / 1000.)
-
-    return rate_dict
 
 
 def get_pop_activity_stats(firing_rates_dict, input_t, valid_t=None, threshold=2., plot=False):
@@ -2551,54 +2503,71 @@ def get_replay_data_from_file(replay_data_file_path, replay_binned_t, sorted_gid
     return replay_binned_spike_count_matrix_dict
 
 
-def decode_position_from_offline_replay(run_binned_t, run_firing_rates_matrix_dict, replay_binned_t,
-                                        replay_binned_spike_count_matrix_dict, replay_binned_t_center_indexes,
-                                        decode_binned_t, window_dur=20.):
+def circular_linear_fit_error(p, x, y, end=1.):
+    p_y = p[0] * x + p[1]
+    err = 0.
+    for i in range(len(y)):
+        err += 2. * (1. - np.cos(2. * np.pi / end * (y[i] - p_y[i])))
+    return err
+
+
+def get_circular_linear_pos(p, x, end=1.):
+    return np.mod(p[0] * x + p[1], end)
+
+
+def fit_trajectory_slope(bins, this_trial_pos, plot=False):
+    from scipy.optimize import basinhopping
+    from scipy.stats import pearsonr
+    bounds = ((-5., 5.), (-1.5, 1.5))
+    stepsize = 5.
+    result = basinhopping(circular_linear_fit_error, [0., 0.5],
+                          minimizer_kwargs={'args': (bins, this_trial_pos), 'method': 'L-BFGS-B', 'bounds': bounds},
+                          stepsize=stepsize)
+    fit_pos = get_circular_linear_pos(result.x, bins)
+    r, p = pearsonr(this_trial_pos, fit_pos)
+    if plot:
+        fig = plt.figure()
+        plt.plot(bins, this_trial_pos)
+        plt.plot(bins, fit_pos)
+        plt.title('Slope: %.2E, p: %.4f' % (result.x[0], p))
+        fig.show()
+    return result.x[0], p
+
+
+def decode_position_from_offline_replay(replay_binned_spike_count_matrix_dict, run_firing_rate_matrix_dict,
+                                        bin_dur=20.):
     """
 
-    :param run_binned_t: array
-    :param run_firing_rates_matrix_dict: dict of 2d array
-    :param replay_binned_t: array
     :param replay_binned_spike_count_matrix_dict: dict of 2d array
-    :param replay_binned_t_center_indexes: array
-    :param decode_binned_t: array
-    :param window_dur: float
-    :return: nested dict
+    :param run_firing_rate_matrix_dict: dict of 2d array
+    :param bin_dur: float
+    :return: dict of 2d array
     """
     import numpy.matlib
-
-    replay_binned_dt = replay_binned_t[1] - replay_binned_t[0]
-    half_window_bins = int(window_dur // replay_binned_dt // 2)
-    window_bins = int(2 * half_window_bins + 1)
-    window_dur = window_bins * replay_binned_dt
-
     p_pos_dict = dict()
     for pop_name in replay_binned_spike_count_matrix_dict:
-        if replay_binned_spike_count_matrix_dict[pop_name].shape[0] != run_firing_rates_matrix_dict[pop_name].shape[0]:
+        if replay_binned_spike_count_matrix_dict[pop_name].shape[0] != run_firing_rate_matrix_dict[pop_name].shape[0]:
             raise RuntimeError('decode_position_from_offline_replay: population: %s; mismatched number of cells to'
                                ' decode')
         binned_spike_count = replay_binned_spike_count_matrix_dict[pop_name]
-        run_firing_rates = run_firing_rates_matrix_dict[pop_name]
+        run_firing_rates = run_firing_rate_matrix_dict[pop_name] + 0.1  # small offset to avoid veto by zero rate
 
-        p_pos = np.empty((len(run_binned_t), len(decode_binned_t)))
+        p_pos = np.empty((run_firing_rates.shape[1], binned_spike_count.shape[1]))
         p_pos.fill(np.nan)
 
-        population_rate_prior = np.exp(-window_dur / 1000. * np.sum(run_firing_rates, axis=0, dtype='float128'))
-        for p_pos_index, t_center_index in enumerate(replay_binned_t_center_indexes):
-            t_start_index = t_center_index - half_window_bins
-            t_end_index = t_center_index + half_window_bins + 1
-            local_spike_count_array = np.sum(binned_spike_count[:, t_start_index:t_end_index], axis=1,
-                                             dtype='float128')
-            if len(np.where(local_spike_count_array > 0)[0]) > 1:
-                n = np.matlib.repmat(local_spike_count_array, len(run_binned_t), 1).T
-                this_p_pos = (run_firing_rates ** n).prod(axis=0) * population_rate_prior
+        population_spike_count = np.exp(-bin_dur / 1000. * np.sum(run_firing_rates, axis=0, dtype='float128'))
+        for index in range(binned_spike_count.shape[1]):
+            local_spike_count_array = binned_spike_count[:, index].astype('float128')
+            if np.sum(local_spike_count_array) > 0.:
+                n = np.matlib.repmat(local_spike_count_array, run_firing_rates.shape[1], 1).T
+                this_p_pos = (run_firing_rates ** n).prod(axis=0) * population_spike_count
                 this_p_sum = np.nansum(this_p_pos)
                 if np.isnan(this_p_sum):
-                    p_pos[:, p_pos_index] = np.nan
+                    p_pos[:, index] = np.nan
                 elif this_p_sum > 0.:
-                    p_pos[:, p_pos_index] = this_p_pos / this_p_sum
+                    p_pos[:, index] = this_p_pos / this_p_sum
                 else:
-                    p_pos[:, p_pos_index] = np.nan
+                    p_pos[:, index] = np.nan
         p_pos_dict[pop_name] = p_pos
 
     return p_pos_dict

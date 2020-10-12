@@ -11,15 +11,18 @@ context = Context()
 @click.option("--replay-data-file-path", type=click.Path(exists=True, file_okay=True, dir_okay=False), required=True)
 @click.option("--export-data-key", type=int, default=0)
 @click.option("--plot-n-trials", type=int, default=10)
-@click.option("--window-dur", type=float, default=20.)
+@click.option("--run-window-dur", type=float, default=20.)
+@click.option("--replay-window-dur", type=float, default=20.)
 @click.option("--step-dur", type=float, default=20.)
+@click.option("--output-dir", type=str, default='data')
 @click.option("--interactive", is_flag=True)
 @click.option("--verbose", type=int, default=2)
+@click.option("--export", is_flag=True)
 @click.option("--plot", is_flag=True)
 @click.option("--debug", is_flag=True)
 @click.pass_context
-def main(cli, run_data_file_path, replay_data_file_path, export_data_key, plot_n_trials, window_dur, step_dur,
-         interactive, verbose, plot, debug):
+def main(cli, run_data_file_path, replay_data_file_path, export_data_key, plot_n_trials, run_window_dur,
+         replay_window_dur, step_dur, output_dir, interactive, verbose, export, plot, debug):
     """
 
     :param cli: contains unrecognized args as list of str
@@ -27,10 +30,13 @@ def main(cli, run_data_file_path, replay_data_file_path, export_data_key, plot_n
     :param replay_data_file_path: str (path)
     :param export_data_key: str
     :param plot_n_trials: int
-    :param window_dur: float
+    :param run_window_dur: float
+    :param replay_window_dur: float
     :param step_dur: float
+    :param output_dir: str (path to dir)
     :param interactive: bool
     :param verbose: int
+    :param export: bool
     :param plot: bool
     :param debug: bool
     """
@@ -43,17 +49,25 @@ def main(cli, run_data_file_path, replay_data_file_path, export_data_key, plot_n
     context.interface.start(disp=context.disp)
     context.interface.ensure_controller()
 
-    config_parallel_interface(__file__, disp=context.disp, interface=context.interface, verbose=verbose, plot=plot,
-                              debug=debug, export_data_key=export_data_key, **kwargs)
+    config_parallel_interface(__file__, disp=context.disp, interface=context.interface, output_dir=output_dir,
+                              verbose=verbose, plot=plot, debug=debug, export_data_key=export_data_key, export=export,
+                              **kwargs)
 
-    if context.debug:
-        return
+    context.interface.update_worker_contexts(run_duration=context.run_duration, run_window_dur=context.run_window_dur,
+                                             replay_duration=context.replay_duration,
+                                             replay_window_dur=context.replay_window_dur)
 
     start_time = time.time()
 
     if not context.run_data_is_processed:
-        append_processed_run_data_to_file()
-    context.interface.apply(load_processed_run_data_from_file)
+        context.sorted_gid_dict, context.run_firing_rate_matrix_dict = \
+            process_run_data(context.run_data_file_path, context.run_trial_keys, context.export_data_key,
+                             context.run_window_dur, export=context.export, disp=context.disp)
+    else:
+        context.sorted_gid_dict, context.run_firing_rate_matrix_dict = \
+            load_processed_run_data(context.run_data_file_path, context.export_data_key)
+    context.interface.update_worker_contexts(sorted_gid_dict=context.sorted_gid_dict,
+                                             run_firing_rate_matrix_dict=context.run_firing_rate_matrix_dict)
 
     if context.disp:
         print('decode_simple_network_replay: processing run data for %i trials took %.1f s' %
@@ -61,27 +75,29 @@ def main(cli, run_data_file_path, replay_data_file_path, export_data_key, plot_n
         sys.stdout.flush()
     current_time = time.time()
 
-    context.interface.apply(update_worker_contexts, replay_binned_t=context.replay_binned_t,
-                            plot_replay_trial_keys=context.plot_replay_trial_keys)
-    context.interface.apply(init_context)
-
     if not context.replay_data_is_processed:
-        num_replay_trials = len(context.replay_trial_keys)
-        sequences = [context.replay_trial_keys, [True] * num_replay_trials]
-        context.interface.map(process_replay_trial_data, *sequences)
-        append_processed_replay_data_to_file()
-    elif plot:
-        sequences = [context.plot_replay_trial_keys, [False] * context.plot_n_trials]
-        context.interface.map(process_replay_trial_data, *sequences)
-
-    if plot:
-        analyze_decoded_position_replay_from_file(context.replay_data_file_path,
-                                                  (context.run_binned_t[0], context.run_binned_t[-1]), plot=True)
+        # return dicts to analyze
+        decoded_pos_matrix_dict = \
+            process_replay_data(context.replay_data_file_path, context.replay_trial_keys, context.export_data_key,
+                                context.replay_window_dur, context.replay_duration, context.run_window_dur,
+                                context.run_duration, export=context.export, disp=context.disp,
+                                plot_trial_keys=context.plot_replay_trial_keys)
+    else:
+        decoded_pos_matrix_dict = load_processed_replay_data(context.replay_data_file_path, context.export_data_key)
+        if plot and context.plot_n_trials > 0:
+            discard = process_replay_data(context.replay_data_file_path, context.plot_replay_trial_keys,
+                                          context.export_data_key, context.replay_window_dur, context.replay_duration,
+                                          context.run_window_dur, context.run_duration, export=False, temp_export=False,
+                                          disp=context.disp, plot_trial_keys=context.plot_replay_trial_keys)
 
     if context.disp:
         print('decode_simple_network_replay: processing replay data for %i trials took %.1f s' %
-              (len(context.replay_trial_keys), time.time() - start_time))
+              (len(context.replay_trial_keys), time.time() - current_time))
         sys.stdout.flush()
+
+    if plot:
+        analyze_decoded_trajectory_data(decoded_pos_matrix_dict, context.replay_window_dur, context.run_duration,
+                                        plot=True)
 
     if context.plot:
         context.interface.apply(plt.show)
@@ -104,9 +120,9 @@ def config_controller():
     with h5py.File(context.run_data_file_path, 'r') as f:
         group = get_h5py_group(f, [context.export_data_key, run_group_key])
         subgroup = get_h5py_group(group, [shared_context_key])
-        duration = get_h5py_attr(group.attrs, 'duration')
-        run_binned_t_edges = np.arange(0., duration + context.window_dur / 2., context.window_dur)
-        run_binned_t = run_binned_t_edges[:-1] + context.window_dur / 2.
+        run_duration = get_h5py_attr(subgroup.attrs, 'duration')
+        run_binned_t_edges = np.arange(0., run_duration + context.run_window_dur / 2., context.run_window_dur)
+        run_binned_t = run_binned_t_edges[:-1] + context.run_window_dur / 2.
         run_trial_keys = [key for key in group if key != shared_context_key]
 
         group = get_h5py_group(f, [context.export_data_key])
@@ -123,7 +139,10 @@ def config_controller():
     with h5py.File(context.replay_data_file_path, 'r') as f:
         group = get_h5py_group(f, [context.export_data_key, replay_group_key])
         subgroup = get_h5py_group(group, [shared_context_key])
-        replay_binned_t = subgroup['buffered_binned_t'][:]
+        replay_duration = get_h5py_attr(subgroup.attrs, 'duration')
+        replay_binned_t_edges = np.arange(0., replay_duration + context.replay_window_dur / 2.,
+                                          context.replay_window_dur)
+        replay_binned_t = replay_binned_t_edges[:-1] + context.replay_window_dur / 2.
         replay_trial_keys = [key for key in group if key != shared_context_key]
         context.plot_n_trials = min(int(context.plot_n_trials), len(replay_trial_keys))
         plot_replay_trial_keys = \
@@ -139,63 +158,14 @@ def config_controller():
     context.update(locals())
 
 
-def config_worker():
-
-    baks_alpha = 4.7725100028345535
-    baks_beta = 0.41969058927343522
-    baks_pad_dur = 3000.  # ms
-    baks_wrap_around = True
-
-    context.update(locals())
-
-
-def init_context():
-
-    replay_binned_t = context.replay_binned_t
-    replay_binned_dt = replay_binned_t[1] - replay_binned_t[0]
-    window_dur = context.window_dur
-    step_dur = context.step_dur
-
-    align_to_t = 0.
-    half_window_bins = int(window_dur // replay_binned_dt // 2)
-    window_bins = int(2 * half_window_bins + 1)
-    window_dur = window_bins * replay_binned_dt
-
-    step_bins = step_dur // replay_binned_dt
-    step_dur = step_bins * replay_binned_dt
-    half_step_dur = step_dur / 2.
-
-    # if possible, include a bin starting at align_to_t
-    binned_t_center_indexes = []
-    this_center_index = np.where(replay_binned_t >= align_to_t)[0] + half_window_bins
-    if len(this_center_index) > 0:
-        this_center_index = this_center_index[0]
-        if this_center_index < half_window_bins:
-            this_center_index = half_window_bins
-            binned_t_center_indexes.append(this_center_index)
-        else:
-            while this_center_index > half_window_bins:
-                binned_t_center_indexes.append(this_center_index)
-                this_center_index -= step_bins
-            binned_t_center_indexes.reverse()
-    else:
-        this_center_index = half_window_bins
-        binned_t_center_indexes.append(this_center_index)
-    this_center_index = binned_t_center_indexes[-1] + step_bins
-    while this_center_index < len(replay_binned_t) - half_window_bins:
-        binned_t_center_indexes.append(this_center_index)
-        this_center_index += step_bins
-
-    replay_binned_t_center_indexes = np.array(binned_t_center_indexes, dtype='int')
-    decode_binned_t = replay_binned_t[replay_binned_t_center_indexes]
-
-    context.update(locals())
-
-
-def export_processed_run_trial_data(trial_key):
+def process_run_single_trial(run_data_file_path, trial_key, export_data_key, bin_dur, disp=True):
     """
 
+    :param run_data_file_path: str
     :param trial_key: str
+    :param export_data_key: str
+    :param bin_dur: float
+    :param disp: bool
     """
     start_time = time.time()
     full_spike_times_dict = dict()
@@ -203,8 +173,8 @@ def export_processed_run_trial_data(trial_key):
 
     group_key = 'simple_network_exported_run_data'
     shared_context_key = 'shared_context'
-    with h5py.File(context.run_data_file_path, 'r') as f:
-        group = get_h5py_group(f, [context.export_data_key, group_key])
+    with h5py.File(run_data_file_path, 'r') as f:
+        group = get_h5py_group(f, [export_data_key, group_key])
         subgroup = group[shared_context_key]
         if 'tuning_peak_locs' in subgroup and len(subgroup['tuning_peak_locs']) > 0:
             data_group = subgroup['tuning_peak_locs']
@@ -212,7 +182,9 @@ def export_processed_run_trial_data(trial_key):
                 tuning_peak_locs[pop_name] = dict()
                 for target_gid, peak_loc in zip(data_group[pop_name]['target_gids'], data_group[pop_name]['peak_locs']):
                     tuning_peak_locs[pop_name][target_gid] = peak_loc
-        run_binned_t = subgroup['binned_t'][:]
+        duration = get_h5py_attr(subgroup.attrs, 'duration')
+        run_binned_t_edges = np.arange(0., duration + bin_dur / 2., bin_dur)
+        run_binned_t = run_binned_t_edges[:-1] + bin_dur / 2.
         subgroup = get_h5py_group(group, [trial_key])
         data_group = subgroup['full_spike_times']
         for pop_name in data_group:
@@ -220,15 +192,7 @@ def export_processed_run_trial_data(trial_key):
             for gid_key in data_group[pop_name]:
                 full_spike_times_dict[pop_name][int(gid_key)] = data_group[pop_name][gid_key][:]
 
-    if context.disp:
-        print('export_processed_run_trial_data: pid: %i took %.1f s to load spikes times for trial: %s' %
-              (os.getpid(), time.time() - start_time, trial_key))
-        sys.stdout.flush()
-    current_time = time.time()
-
-    binned_firing_rates_dict = \
-        infer_firing_rates_baks(full_spike_times_dict, run_binned_t, alpha=context.baks_alpha, beta=context.baks_beta,
-                                pad_dur=context.baks_pad_dur, wrap_around=context.baks_wrap_around)
+    binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict, run_binned_t_edges)
 
     sorted_gid_dict = dict()
     for pop_name in full_spike_times_dict:
@@ -241,52 +205,62 @@ def export_processed_run_trial_data(trial_key):
             this_target_gids = [int(gid_key) for gid_key in full_spike_times_dict[pop_name]]
             sorted_gid_dict[pop_name] = np.array(sorted(this_target_gids), dtype='int')
 
-    firing_rates_matrix_dict = dict()
-    for pop_name in binned_firing_rates_dict:
-        firing_rates_matrix_dict[pop_name] = np.empty((len(binned_firing_rates_dict[pop_name]), len(run_binned_t)))
+    binned_spike_count_matrix_dict = dict()
+    for pop_name in binned_spike_count_dict:
+        binned_spike_count_matrix_dict[pop_name] = np.empty((len(binned_spike_count_dict[pop_name]), len(run_binned_t)))
         for i, gid in enumerate(sorted_gid_dict[pop_name]):
-            firing_rates_matrix_dict[pop_name][i, :] = binned_firing_rates_dict[pop_name][gid]
+            binned_spike_count_matrix_dict[pop_name][i, :] = binned_spike_count_dict[pop_name][gid]
 
-    if context.disp:
-        print('export_processed_run_trial_data: pid: %i took %.1f s to process firing rates for trial: %s' %
-              (os.getpid(), time.time() - current_time, trial_key))
+    if disp:
+        print('process_run_single_trial: pid: %i took %.1f s to process binned spike count data for trial: %s' %
+              (os.getpid(), time.time() - start_time, trial_key))
         sys.stdout.flush()
 
     group_key = 'simple_network_processed_data'
     shared_context_key = 'shared_context'
     with h5py.File(context.temp_output_path, 'a') as f:
-        group = get_h5py_group(f, [context.export_data_key, group_key], create=True)
+        group = get_h5py_group(f, [export_data_key, group_key], create=True)
         if shared_context_key not in group:
             subgroup = get_h5py_group(group, [shared_context_key], create=True)
             data_group = subgroup.create_group('sorted_gids')
             for pop_name in sorted_gid_dict:
                 data_group.create_dataset(pop_name, data=sorted_gid_dict[pop_name], compression='gzip')
         subgroup = get_h5py_group(group, [trial_key], create=True)
-        data_group = subgroup.create_group('firing_rates_matrix')
-        for pop_name in firing_rates_matrix_dict:
-            data_group.create_dataset(pop_name, data=firing_rates_matrix_dict[pop_name], compression='gzip')
+        data_group = subgroup.create_group('binned_spike_count_matrix')
+        for pop_name in binned_spike_count_matrix_dict:
+            data_group.create_dataset(pop_name, data=binned_spike_count_matrix_dict[pop_name], compression='gzip')
 
-    if context.disp:
-        print('export_processed_run_trial_data: pid: %i exported data for trial: %s to temp_output_path: %s' %
+    if disp:
+        print('process_run_single_trial: pid: %i exported data for trial: %s to temp_output_path: %s' %
               (os.getpid(), trial_key, context.temp_output_path))
         sys.stdout.flush()
 
 
-def append_processed_run_data_to_file():
+def process_run_data(run_data_file_path, run_trial_keys, export_data_key, bin_dur, export=True, disp=True):
+    """
 
+    :param run_data_file_path: str (path)
+    :param run_trial_keys: list of str
+    :param export_data_key: str
+    :param bin_dur: float
+    :param export: bool
+    :param disp: bool
+    """
     start_time = time.time()
-    context.interface.apply(update_worker_contexts, baks_pad_dur=context.baks_pad_dur)
-    context.interface.map(export_processed_run_trial_data, *[context.run_trial_keys])
+    num_trials = len(run_trial_keys)
+    sequences = [[run_data_file_path] * num_trials, run_trial_keys, [export_data_key] * num_trials,
+                 [bin_dur] * num_trials, [disp] * num_trials]
+    context.interface.map(process_run_single_trial, *sequences)
     temp_output_path_list = [temp_output_path for temp_output_path in context.interface.get('context.temp_output_path')
                              if os.path.isfile(temp_output_path)]
 
-    run_trial_firing_rates_matrix_list_dict = dict()
+    binned_spike_count_matrix_dict_trial_list = []
     first = True
     group_key = 'simple_network_processed_data'
     shared_context_key = 'shared_context'
     for temp_output_path in temp_output_path_list:
         with h5py.File(temp_output_path, 'r') as f:
-            group = get_h5py_group(f, [context.export_data_key, group_key])
+            group = get_h5py_group(f, [export_data_key, group_key])
             if first:
                 subgroup = get_h5py_group(group, [shared_context_key])
                 sorted_gid_dict = dict()
@@ -296,124 +270,177 @@ def append_processed_run_data_to_file():
                 first = False
             for trial_key in (key for key in group if key != shared_context_key):
                 subgroup = get_h5py_group(group, [trial_key])
-                data_group = subgroup['firing_rates_matrix']
+                data_group = subgroup['binned_spike_count_matrix']
+                this_binned_spike_count_matrix_dict = dict()
                 for pop_name in data_group:
-                    this_run_trial_firing_rates_matrix = data_group[pop_name][:]
-                    if pop_name not in run_trial_firing_rates_matrix_list_dict:
-                        run_trial_firing_rates_matrix_list_dict[pop_name] = []
-                    run_trial_firing_rates_matrix_list_dict[pop_name].append(this_run_trial_firing_rates_matrix)
+                    this_binned_spike_count_matrix_dict[pop_name] = data_group[pop_name][:]
+                binned_spike_count_matrix_dict_trial_list.append(this_binned_spike_count_matrix_dict)
 
-    trial_averaged_run_firing_rate_matrix_dict = dict()
-    for pop_name in run_trial_firing_rates_matrix_list_dict:
-        trial_averaged_run_firing_rate_matrix_dict[pop_name] = \
-            np.mean(run_trial_firing_rates_matrix_list_dict[pop_name], axis=0)
+    trial_averaged_binned_spike_count_matrix_dict = dict()
+    for pop_name in binned_spike_count_matrix_dict_trial_list[0]:
+        trial_averaged_binned_spike_count_matrix_dict[pop_name] = \
+            np.mean([this_binned_spike_count_matrix_dict[pop_name]
+                     for this_binned_spike_count_matrix_dict in binned_spike_count_matrix_dict_trial_list], axis=0)
 
-    group_key = 'simple_network_processed_data'
-    shared_context_key = 'shared_context'
-    with h5py.File(context.run_data_file_path, 'a') as f:
-        group = get_h5py_group(f, [context.export_data_key, group_key, shared_context_key], create=True)
-        subgroup = group.create_group('sorted_gids')
-        for pop_name in sorted_gid_dict:
-            subgroup.create_dataset(pop_name, data=sorted_gid_dict[pop_name], compression='gzip')
-        subgroup = group.create_group('trial_averaged_firing_rate_matrix')
-        for pop_name in trial_averaged_run_firing_rate_matrix_dict:
-            subgroup.create_dataset(pop_name, data=trial_averaged_run_firing_rate_matrix_dict[pop_name],
-                                    compression='gzip')
+    trial_averaged_run_firing_rate_matrix_dict = \
+        get_firing_rates_from_binned_spike_count_matrix_dict(trial_averaged_binned_spike_count_matrix_dict,
+                                                             bin_dur=bin_dur, smooth=150., wrap=True)
+    if export:
+        group_key = 'simple_network_processed_data'
+        shared_context_key = 'shared_context'
+        with h5py.File(run_data_file_path, 'a') as f:
+            group = get_h5py_group(f, [export_data_key, group_key, shared_context_key], create=True)
+            subgroup = group.create_group('sorted_gids')
+            for pop_name in sorted_gid_dict:
+                subgroup.create_dataset(pop_name, data=sorted_gid_dict[pop_name], compression='gzip')
+            subgroup = group.create_group('trial_averaged_firing_rate_matrix')
+            for pop_name in trial_averaged_run_firing_rate_matrix_dict:
+                subgroup.create_dataset(pop_name, data=trial_averaged_run_firing_rate_matrix_dict[pop_name],
+                                        compression='gzip')
+
+        if disp:
+            print('process_run_data: pid: %i; exporting to run_data_file_path: %s '
+                  'took %.1f s' % (os.getpid(), run_data_file_path, time.time() - start_time))
+            sys.stdout.flush()
 
     for temp_output_path in temp_output_path_list:
         os.remove(temp_output_path)
 
-    if context.disp:
-        print('append_processed_run_data_to_file: pid: %i; exporting to run_data_file_path: %s '
-              'took %.1f s' % (os.getpid(), context.run_data_file_path, time.time() - start_time))
+    return sorted_gid_dict, trial_averaged_run_firing_rate_matrix_dict
 
 
-def load_processed_run_data_from_file():
+def load_processed_run_data_helper(run_data_file_path, export_data_key):
     """
 
+    :param run_data_file_path: str (path)
+    :param export_data_key: str
+    """
+    context.sorted_gid_dict, context.run_firing_rate_matrix_dict = \
+        load_processed_run_data(run_data_file_path, export_data_key)
+
+
+def load_processed_run_data(run_data_file_path, export_data_key):
+    """
+
+    :param run_data_file_path: str (path)
+    :param export_data_key: str
+    :return: tuple of dict of array
     """
     sorted_gid_dict = dict()
     run_firing_rate_matrix_dict = dict()
-    run_group_key = 'simple_network_exported_run_data'
     processed_group_key = 'simple_network_processed_data'
     shared_context_key = 'shared_context'
-    with h5py.File(context.run_data_file_path, 'r') as f:
-        group = get_h5py_group(f, [context.export_data_key, run_group_key, shared_context_key])
-        run_binned_t = group['binned_t'][:]
-        group = get_h5py_group(f, [context.export_data_key, processed_group_key, shared_context_key])
+    with h5py.File(run_data_file_path, 'r') as f:
+        group = get_h5py_group(f, [export_data_key, processed_group_key, shared_context_key])
         subgroup = group['sorted_gids']
         for pop_name in subgroup:
             sorted_gid_dict[pop_name] = subgroup[pop_name][:]
         subgroup = group['trial_averaged_firing_rate_matrix']
         for pop_name in subgroup:
-            run_firing_rate_matrix_dict[pop_name] = subgroup[pop_name][:]
-    context.update(locals())
+            run_firing_rate_matrix_dict[pop_name] = subgroup[pop_name][:,:]
+
+    return sorted_gid_dict, run_firing_rate_matrix_dict
 
 
-def process_replay_trial_data(trial_key, export=True):
+def process_replay_single_trial_helper(replay_data_file_path, trial_key, export_data_key, replay_bin_dur,
+                                       replay_duration, run_bin_dur, run_duration, export=False, disp=True, plot=False):
     """
 
+    :param replay_data_file_path: str (path)
     :param trial_key: str
+    :param export_data_key: str
+    :param replay_bin_dur: float (ms)
+    :param replay_duration: float (ms)
+    :param run_bin_dur: float (ms)
+    :param run_duration: float (ms)
     :param export: bool
+    :param disp: bool
+    :param plot: bool
     """
-    start_time = time.time()
-
     replay_full_spike_times_dict = dict()
-    replay_binned_spike_count_matrix_dict = dict()
     replay_group_key = 'simple_network_exported_replay_data'
-    with h5py.File(context.replay_data_file_path, 'r') as f:
-        group = get_h5py_group(f, [context.export_data_key, replay_group_key, trial_key, 'full_spike_times'])
-        for pop_name in group:
+    with h5py.File(replay_data_file_path, 'r') as f:
+        group = get_h5py_group(f, [export_data_key, replay_group_key])
+        subgroup = get_h5py_group(group, [trial_key, 'full_spike_times'])
+        for pop_name in subgroup:
             if pop_name not in replay_full_spike_times_dict:
                 replay_full_spike_times_dict[pop_name] = dict()
-            for gid_key in group[pop_name]:
-                replay_full_spike_times_dict[pop_name][int(gid_key)] = group[pop_name][gid_key][:]
-    replay_full_binned_spike_count_dict = \
-        get_binned_spike_count_dict(replay_full_spike_times_dict, context.replay_binned_t)
+            for gid_key in subgroup[pop_name]:
+                replay_full_spike_times_dict[pop_name][int(gid_key)] = subgroup[pop_name][gid_key][:]
 
-    for pop_name in replay_full_binned_spike_count_dict:
-        replay_binned_spike_count = np.empty((len(replay_full_binned_spike_count_dict[pop_name]),
-                                              len(context.replay_binned_t)))
-        for i, gid in enumerate(context.sorted_gid_dict[pop_name]):
-            replay_binned_spike_count[i, :] = replay_full_binned_spike_count_dict[pop_name][gid]
-        replay_binned_spike_count_matrix_dict[pop_name] = replay_binned_spike_count
+    decoded_pos_dict = \
+        process_replay_single_trial(replay_full_spike_times_dict, trial_key, replay_bin_dur, replay_duration,
+                                    run_bin_dur, run_duration, context.sorted_gid_dict,
+                                    context.run_firing_rate_matrix_dict, disp=disp, plot=plot)
 
-    p_pos_dict = decode_position_from_offline_replay(context.run_binned_t, context.run_firing_rate_matrix_dict,
-                                                     context.replay_binned_t,
-                                                     replay_binned_spike_count_matrix_dict,
-                                                     context.replay_binned_t_center_indexes,
-                                                     context.decode_binned_t, window_dur=context.window_dur)
+    if export:
+        group_key = 'simple_network_processed_data'
+        with h5py.File(context.temp_output_path, 'a') as f:
+            group = get_h5py_group(f, [export_data_key, group_key, trial_key], create=True)
+            subgroup = group.create_group('decoded_position')
+            for pop_name in decoded_pos_dict:
+                subgroup.create_dataset(pop_name, data=decoded_pos_dict[pop_name], compression='gzip')
+
+        if disp:
+            print('process_replay_single_trial_helper: pid: %i exported data for trial: %s to temp_output_path: %s' %
+                  (os.getpid(), trial_key, context.temp_output_path))
+            sys.stdout.flush()
+
+
+def process_replay_single_trial(replay_spike_times_dict, trial_key, replay_bin_dur, replay_duration, run_bin_dur,
+                                run_duration, sorted_gid_dict, run_firing_rate_matrix_dict, disp=False, plot=False):
+    """
+
+    :param replay_spike_times_dict: dict {pop_name: {gid: array}}
+    :param trial_key: str
+    :param replay_bin_dur: float (ms)
+    :param replay_duration: float (ms)
+    :param run_bin_dur: float (ms)
+    :param run_duration: float (ms)
+    :param sorted_gid_dict: dict of array of int
+    :param run_firing_rate_matrix_dict: dict of array of float
+    :param disp: bool
+    :param plot: bool
+    """
+    start_time = time.time()
+    replay_binned_t_edges = np.arange(0., replay_duration + replay_bin_dur / 2., replay_bin_dur)
+    replay_binned_t = replay_binned_t_edges[:-1] + replay_bin_dur / 2.
+    run_binned_t_edges = np.arange(0., run_duration + run_bin_dur / 2., run_bin_dur)
+    run_binned_t = run_binned_t_edges[:-1] + run_bin_dur / 2.
+
+    replay_binned_spike_count_dict = \
+        get_binned_spike_count_dict(replay_spike_times_dict, replay_binned_t_edges)
+
+    replay_binned_spike_count_matrix_dict = {}
+    for pop_name in replay_binned_spike_count_dict:
+        replay_binned_spike_count_matrix = np.empty((len(replay_binned_spike_count_dict[pop_name]),
+                                                     len(replay_binned_t)))
+        for i, gid in enumerate(sorted_gid_dict[pop_name]):
+            replay_binned_spike_count_matrix[i, :] = replay_binned_spike_count_dict[pop_name][gid]
+        replay_binned_spike_count_matrix_dict[pop_name] = replay_binned_spike_count_matrix
+
+    p_pos_dict = decode_position_from_offline_replay(replay_binned_spike_count_matrix_dict, run_firing_rate_matrix_dict,
+                                                     bin_dur=replay_bin_dur)
 
     decoded_pos_dict = dict()
     for pop_name in p_pos_dict:
-        this_decoded_pos = np.empty_like(context.decode_binned_t)
+        this_decoded_pos = np.empty_like(replay_binned_t)
         this_decoded_pos[:] = np.nan
         p_pos = p_pos_dict[pop_name]
         for pos_bin in range(p_pos.shape[1]):
             if np.any(~np.isnan(p_pos[:, pos_bin])):
                 index = np.nanargmax(p_pos[:, pos_bin])
-                this_decoded_pos[pos_bin] = context.run_binned_t[index]
+                val = p_pos[index, pos_bin]
+                if len(np.where(p_pos[:, pos_bin] == val)[0]) == 1:
+                    this_decoded_pos[pos_bin] = run_binned_t[index]
         decoded_pos_dict[pop_name] = this_decoded_pos
 
-    if context.disp:
-        print('process_replay_trial_data: pid: %i took %.1f s to decode position for trial: %s' %
+    if disp:
+        print('process_replay_single_trial: pid: %i took %.1f s to decode position for trial: %s' %
               (os.getpid(), time.time() - start_time, trial_key))
         sys.stdout.flush()
 
-    if export:
-        group_key = 'simple_network_processed_data'
-        with h5py.File(context.temp_output_path, 'a') as f:
-            group = get_h5py_group(f, [context.export_data_key, group_key, trial_key], create=True)
-            subgroup = group.create_group('decoded_position')
-            for pop_name in decoded_pos_dict:
-                subgroup.create_dataset(pop_name, data=decoded_pos_dict[pop_name], compression='gzip')
-
-        if context.disp:
-            print('process_replay_trial_data: pid: %i exported data for trial: %s to temp_output_path: %s' %
-                  (os.getpid(), trial_key, context.temp_output_path))
-            sys.stdout.flush()
-
-    if context.plot and trial_key in context.plot_replay_trial_keys:
+    if plot:
         ordered_pop_names = ['FF', 'E', 'I']
         for pop_name in ordered_pop_names:
             if pop_name not in p_pos_dict:
@@ -423,315 +450,290 @@ def process_replay_trial_data(trial_key, export=True):
                 ordered_pop_names.append(pop_name)
         fig, axes = plt.subplots(2, len(ordered_pop_names), figsize=(3.8 * len(ordered_pop_names) + 0.5, 7.5))
         decoded_x_mesh, decoded_y_mesh = \
-            np.meshgrid(context.decode_binned_t - context.half_step_dur, context.run_binned_t)
+            np.meshgrid(replay_binned_t_edges, run_binned_t_edges)
+        this_cmap = plt.get_cmap()
+        this_cmap.set_bad(this_cmap(0.))
         for col, pop_name in enumerate(ordered_pop_names):
             p_pos = p_pos_dict[pop_name]
-            replay_binned_spike_count = replay_binned_spike_count_matrix_dict[pop_name]
-            spikes_x_mesh, spikes_y_mesh = \
-                np.meshgrid(context.replay_binned_t, list(range(replay_binned_spike_count.shape[0])))
             axes[1][col].pcolormesh(decoded_x_mesh, decoded_y_mesh, p_pos, vmin=0.)
             axes[1][col].set_xlabel('Time (ms)')
-            axes[1][col].set_ylim([context.run_binned_t[-1], context.run_binned_t[0]])
-            axes[1][col].set_xlim([context.replay_binned_t[0], context.replay_binned_t[-1]])
+            axes[1][col].set_ylim((run_binned_t_edges[-1], run_binned_t_edges[0]))
+            axes[1][col].set_xlim((replay_binned_t_edges[0], replay_binned_t_edges[-1]))
             axes[1][col].set_ylabel('Decoded position')
             axes[1][col].set_title('Population: %s' % pop_name)
-            axes[0][col].scatter(spikes_x_mesh, spikes_y_mesh, replay_binned_spike_count, c='k')
+
+            for i, gid in enumerate(sorted_gid_dict[pop_name]):
+                this_spike_times = replay_spike_times_dict[pop_name][gid]
+                axes[0][col].scatter(this_spike_times, np.ones_like(this_spike_times) * i + 0.5, c='k', s=1.)
             axes[0][col].set_xlabel('Time (ms)')
-            axes[0][col].set_ylim([replay_binned_spike_count.shape[0] - 1, 0])
-            axes[0][col].set_xlim([context.replay_binned_t[0], context.replay_binned_t[-1]])
+            axes[0][col].set_ylim((len(sorted_gid_dict[pop_name]), 0))
+            axes[0][col].set_xlim((replay_binned_t_edges[0], replay_binned_t_edges[-1]))
             axes[0][col].set_ylabel('Sorted cells')
             axes[0][col].set_title('Population: %s' % pop_name)
         fig.suptitle('Trial # %s' % trial_key, y=0.99)
         fig.tight_layout()
         fig.subplots_adjust(wspace=0.4, hspace=0.4, top=0.9)
 
+    return decoded_pos_dict
 
-def append_processed_replay_data_to_file():
 
-    start_time = time.time()
-    temp_output_path_list = [temp_output_path for temp_output_path in context.interface.get('context.temp_output_path')
-                             if os.path.isfile(temp_output_path)]
+def process_replay_data(replay_data_file_path, replay_trial_keys, export_data_key, replay_bin_dur, replay_duration,
+                        run_bin_dur, run_duration, export=False, temp_export=True, disp=True, plot_trial_keys=None):
+    """
 
-    decoded_pos_list_dict = dict()
+    :param replay_data_file_path: str (path)
+    :param replay_trial_keys: list of str
+    :param export_data_key: str
+    :param replay_bin_dur: float (ms)
+    :param replay_duration: float (ms)
+    :param run_bin_dur: float (ms)
+    :param run_duration: float (ms)
+    :param export: bool
+    :param temp_export: bool
+    :param disp: bool
+    :param plot_trial_keys: list of str
+    :return: dict: {pop_name: 2D array}
+    """
+    num_trials = len(replay_trial_keys)
+    if plot_trial_keys is None or len(plot_trial_keys) == 0:
+        plot_list = [False] * num_trials
+    else:
+        plot_list = []
+        for trial_key in replay_trial_keys:
+            if trial_key in plot_trial_keys:
+                plot_list.append(True)
+            else:
+                plot_list.append(False)
+    sequences = [[replay_data_file_path] * num_trials, replay_trial_keys, [export_data_key] * num_trials,
+                 [replay_bin_dur] * num_trials, [replay_duration] * num_trials, [run_bin_dur] * num_trials,
+                 [run_duration] * num_trials, [temp_export] * num_trials, [disp] * num_trials, plot_list]
+    context.interface.map(process_replay_single_trial_helper, *sequences)
+
+    decoded_pos_array_list_dict = dict()
+    decoded_pos_matrix_dict = dict()
+
+    if temp_export:
+        start_time = time.time()
+        temp_output_path_list = \
+            [temp_output_path for temp_output_path in context.interface.get('context.temp_output_path')
+             if os.path.isfile(temp_output_path)]
+        trial_key_list = []
+
+        group_key = 'simple_network_processed_data'
+        shared_context_key = 'shared_context'
+        for temp_output_path in temp_output_path_list:
+            with h5py.File(temp_output_path, 'r') as f:
+                group = get_h5py_group(f, [export_data_key, group_key])
+                for trial_key in (key for key in group if key != shared_context_key):
+                    trial_key_list.append(trial_key)
+                    subgroup = get_h5py_group(group, [trial_key])
+                    data_group = subgroup['decoded_position']
+                    for pop_name in data_group:
+                        this_decoded_position = data_group[pop_name][:]
+                        if pop_name not in decoded_pos_array_list_dict:
+                            decoded_pos_array_list_dict[pop_name] = []
+                        decoded_pos_array_list_dict[pop_name].append(this_decoded_position)
+
+        sorted_trial_indexes = np.argsort(np.array(trial_key_list, dtype=int))
+        for pop_name in decoded_pos_array_list_dict:
+            decoded_pos_matrix_dict[pop_name] = \
+                np.asarray(decoded_pos_array_list_dict[pop_name])[sorted_trial_indexes,:]
+
+        if export:
+            with h5py.File(replay_data_file_path, 'a') as f:
+                group = get_h5py_group(f, [export_data_key, group_key, shared_context_key], create=True)
+                subgroup = group.create_group('decoded_pos_matrix')
+                for pop_name in decoded_pos_matrix_dict:
+                    subgroup.create_dataset(pop_name, data=decoded_pos_matrix_dict[pop_name], compression='gzip')
+            if disp:
+                print('process_replay_data: pid: %i; exporting to replay_data_file_path: %s took %.1f s' %
+                      (os.getpid(), replay_data_file_path, time.time() - start_time))
+
+        for temp_output_path in temp_output_path_list:
+            os.remove(temp_output_path)
+
+    return decoded_pos_matrix_dict
+
+
+def load_processed_replay_data(replay_data_file_path, export_data_key):
+    """
+
+    :param replay_data_file_path: str (path)
+    :param export_data_key: str
+    :return: dict: {pop_name: 2D array}
+    """
     group_key = 'simple_network_processed_data'
     shared_context_key = 'shared_context'
-    for temp_output_path in temp_output_path_list:
-        with h5py.File(temp_output_path, 'r') as f:
-            group = get_h5py_group(f, [context.export_data_key, group_key])
-            for trial_key in (key for key in group if key != shared_context_key):
-                subgroup = get_h5py_group(group, [trial_key])
-                data_group = subgroup['decoded_position']
-                for pop_name in data_group:
-                    this_decoded_position = data_group[pop_name][:]
-                    if pop_name not in decoded_pos_list_dict:
-                        decoded_pos_list_dict[pop_name] = []
-                    decoded_pos_list_dict[pop_name].append(this_decoded_position)
+    decoded_pos_matrix_dict = dict()
+    slope_array_dict = dict()
+    p_val_array_dict = dict()
+    with h5py.File(replay_data_file_path, 'a') as f:
+        group = get_h5py_group(f, [export_data_key, group_key, shared_context_key])
+        subgroup = get_h5py_group(group, ['decoded_pos_matrix'])
+        for pop_name in subgroup:
+            decoded_pos_matrix_dict[pop_name] = subgroup[pop_name][:,:]
 
-    if context.debug:
-        context.update(decoded_pos_list_dict=decoded_pos_list_dict)
-
-    with h5py.File(context.replay_data_file_path, 'a') as f:
-        group = get_h5py_group(f, [context.export_data_key, group_key, shared_context_key], create=True)
-        group.create_dataset('decode_binned_t', data=context.decode_binned_t, compression='gzip')
-        subgroup = group.create_group('decoded_pos_matrix')
-        for pop_name in decoded_pos_list_dict:
-            subgroup.create_dataset(pop_name, data=np.asarray(decoded_pos_list_dict[pop_name]), compression='gzip')
-
-    for temp_output_path in temp_output_path_list:
-        os.remove(temp_output_path)
-
-    if context.disp:
-        print('append_processed_replay_data_to_file: pid: %i; exporting to replay_data_file_path: %s '
-              'took %.1f s' % (os.getpid(), context.replay_data_file_path, time.time() - start_time))
+    return decoded_pos_matrix_dict
 
 
-def analyze_decoded_position_replay_from_file(replay_data_file_path, run_range, plot=True, full_output=False):
+def analyze_decoded_trajectory_data(decoded_pos_matrix_dict, bin_dur, run_duration, plot=True):
     """
 
-    :param replay_data_file_path: str (path) or list of str
-    :param run_range: tuple of float
+    :param decoded_pos_matrix_dict: dict or list of dict: {pop_name: 2d array of float}
+    :param bin_dur: float
+    :param run_duration: float
     :param plot: bool
-    :param full_output: bool
-    :return: tuple
+    :return:
     """
-    track_start = run_range[0]
-    track_length = run_range[1] - run_range[0]
-
-    if not isinstance(replay_data_file_path, list):
-        replay_data_file_path_list = [replay_data_file_path]
+    if not isinstance(decoded_pos_matrix_dict, list):
+        decoded_pos_matrix_dict_instances_list = [decoded_pos_matrix_dict]
     else:
-        replay_data_file_path_list = replay_data_file_path
+        decoded_pos_matrix_dict_instances_list = decoded_pos_matrix_dict
 
-    num_instances = len(replay_data_file_path_list)
+    all_decoded_pos_instances_list_dict = defaultdict(list)
+    decoded_velocity_var_instances_list_dict = defaultdict(list)
+    decoded_path_len_instances_list_dict = defaultdict(list)
+    decoded_velocity_mean_instances_list_dict = defaultdict(list)
 
-    band_freq_dict_instances_list = defaultdict(lambda: defaultdict(list))
-    band_tuning_index_dict_instances_list = defaultdict(lambda: defaultdict(list))
-    all_decoded_pos_dict_instances_list = defaultdict(list)
-    decoded_pos_diff_var_dict_instances_list = defaultdict(list)
-    decoded_path_len_dict_instances_list = defaultdict(list)
-    decoded_distance_dict_instances_list = defaultdict(list)
-    first = True
-
-    processed_group_key = 'simple_network_processed_data'
-    replay_group_key = 'simple_network_exported_replay_data'
-    shared_context_key = 'shared_context'
-    for replay_data_file_path in replay_data_file_path_list:
-        decoded_pos_matrix_dict = dict()
-        band_freq_dict = defaultdict(lambda: defaultdict(list))
-        band_tuning_index_dict = defaultdict(lambda: defaultdict(list))
-        with h5py.File(replay_data_file_path, 'r') as f:
-            group = get_h5py_group(f, [context.export_data_key, processed_group_key])
-            subgroup = get_h5py_group(group, [shared_context_key, 'decoded_pos_matrix'])
-            for pop_name in subgroup:
-                decoded_pos_matrix_dict[pop_name] = subgroup[pop_name][:]
-            group = get_h5py_group(f, [context.export_data_key, replay_group_key])
-            for trial_key in (key for key in group if key != shared_context_key):
-                subgroup = get_h5py_group(group, [trial_key, 'filter_results'])
-                data_group = subgroup['centroid_freq']
-                for band in data_group:
-                    for pop_name in data_group[band].attrs:
-                        band_freq_dict[band][pop_name].append(data_group[band].attrs[pop_name])
-                data_group = subgroup['freq_tuning_index']
-                for band in data_group:
-                    for pop_name in data_group[band].attrs:
-                        band_tuning_index_dict[band][pop_name].append(data_group[band].attrs[pop_name])
-
+    for decoded_pos_matrix_dict in decoded_pos_matrix_dict_instances_list:
         all_decoded_pos_dict = dict()
         decoded_path_len_dict = defaultdict(list)
-        decoded_distance_dict = defaultdict(list)
-        decoded_pos_diff_var_dict = defaultdict(list)
-
+        decoded_velocity_var_dict = defaultdict(list)
+        decoded_velocity_mean_dict = defaultdict(list)
         for pop_name in decoded_pos_matrix_dict:
-            this_decoded_pos_matrix = (decoded_pos_matrix_dict[pop_name] - track_start) / track_length
+            this_decoded_pos_matrix = decoded_pos_matrix_dict[pop_name][:, :] / run_duration
             clean_indexes = ~np.isnan(this_decoded_pos_matrix)
             all_decoded_pos_dict[pop_name] = this_decoded_pos_matrix[clean_indexes]
-            this_decoded_pos_diff = np.diff(this_decoded_pos_matrix, axis=1)
-            for trial in range(this_decoded_pos_diff.shape[0]):
-                this_trial_diff = this_decoded_pos_diff[trial, :]
-                clean_indexes = ~np.isnan(this_trial_diff)
+            for trial in range(this_decoded_pos_matrix.shape[0]):
+                this_trial_pos = this_decoded_pos_matrix[trial, :]
+                clean_indexes = ~np.isnan(this_trial_pos)
                 if len(clean_indexes) > 0:
-                    this_trial_diff = this_trial_diff[clean_indexes]
+                    this_trial_diff = np.diff(this_trial_pos[clean_indexes])
                     this_trial_diff[np.where(this_trial_diff < -0.5)] += 1.
                     this_trial_diff[np.where(this_trial_diff > 0.5)] -= 1.
                     this_path_len = np.sum(np.abs(this_trial_diff))
                     decoded_path_len_dict[pop_name].append(this_path_len)
-                    this_distance = np.sum(this_trial_diff)
-                    decoded_distance_dict[pop_name].append(this_distance)
+                    this_trial_velocity = this_trial_diff / (bin_dur / 1000.)
+                    this_trial_velocity_mean = np.mean(this_trial_velocity)
+                    decoded_velocity_mean_dict[pop_name].append(this_trial_velocity_mean)
                     if len(clean_indexes) > 1:
-                        this_trial_diff_var = np.var(this_trial_diff)
-                        decoded_pos_diff_var_dict[pop_name].append(this_trial_diff_var)
-            all_decoded_pos_dict_instances_list[pop_name].append(all_decoded_pos_dict[pop_name])
-            decoded_path_len_dict_instances_list[pop_name].append(decoded_path_len_dict[pop_name])
-            decoded_distance_dict_instances_list[pop_name].append(decoded_distance_dict[pop_name])
-            decoded_pos_diff_var_dict_instances_list[pop_name].append(decoded_pos_diff_var_dict[pop_name])
-        for band in band_freq_dict:
-            for pop_name in band_freq_dict[band]:
-                band_freq_dict_instances_list[band][pop_name].append(band_freq_dict[band][pop_name])
-        for band in band_tuning_index_dict:
-            for pop_name in band_tuning_index_dict[band]:
-                band_tuning_index_dict_instances_list[band][pop_name].append(band_tuning_index_dict[band][pop_name])
+                        this_trial_velocity_var = np.var(this_trial_velocity)
+                        decoded_velocity_var_dict[pop_name].append(this_trial_velocity_var)
+            all_decoded_pos_instances_list_dict[pop_name].append(all_decoded_pos_dict[pop_name])
+            decoded_path_len_instances_list_dict[pop_name].append(decoded_path_len_dict[pop_name])
+            decoded_velocity_var_instances_list_dict[pop_name].append(decoded_velocity_var_dict[pop_name])
+            decoded_velocity_mean_instances_list_dict[pop_name].append(decoded_velocity_mean_dict[pop_name])
 
-    if plot:
-        ordered_pop_names = ['FF', 'E', 'I']
-        for pop_name in ordered_pop_names:
-            if pop_name not in all_decoded_pos_dict_instances_list:
-                ordered_pop_names.remove(pop_name)
-        for pop_name in all_decoded_pos_dict_instances_list:
-            if pop_name not in ordered_pop_names:
-                ordered_pop_names.append(pop_name)
-        fig, axes = plt.subplots(3, 2, figsize=(8.5, 10.5), constrained_layout=True)
+    ordered_pop_names = ['FF', 'E', 'I']
+    for pop_name in ordered_pop_names:
+        if pop_name not in all_decoded_pos_instances_list_dict:
+            ordered_pop_names.remove(pop_name)
+    for pop_name in all_decoded_pos_instances_list_dict:
+        if pop_name not in ordered_pop_names:
+            ordered_pop_names.append(pop_name)
+    fig, axes = plt.subplots(2, 2, figsize=(8.5, 7.5), constrained_layout=True)
 
-        max_variance = np.max(list(decoded_pos_diff_var_dict_instances_list.values()))
-        max_path_len = np.max(list(decoded_path_len_dict_instances_list.values()))
-        max_distance = np.max(np.abs(list(decoded_distance_dict_instances_list.values())))
-        min_freq = np.min(list(band_freq_dict_instances_list['Ripple'].values()))
-        max_freq = np.max(list(band_freq_dict_instances_list['Ripple'].values()))
-        min_tuning_index = np.min(list(band_tuning_index_dict_instances_list['Ripple'].values()))
-        max_tuning_index = np.max(list(band_tuning_index_dict_instances_list['Ripple'].values()))
+    max_vel_var = np.max(list(decoded_velocity_var_instances_list_dict.values()))
+    max_path_len = np.max(list(decoded_path_len_instances_list_dict.values()))
+    max_vel_mean = np.max(list(decoded_velocity_mean_instances_list_dict.values()))
+    min_vel_mean = np.min(list(decoded_velocity_mean_instances_list_dict.values()))
 
-        for pop_name in ordered_pop_names:
-            hist_list = []
-            for all_decoded_pos in all_decoded_pos_dict_instances_list[pop_name]:
-                hist, edges = np.histogram(all_decoded_pos, bins=np.linspace(0., 1., 101), density=True)
-                bin_width = (edges[1] - edges[0])
-                hist *= bin_width
-                hist_list.append(hist)
-            if num_instances == 1:
-                axes[1][0].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
-            else:
-                mean_hist = np.mean(hist_list, axis=0)
-                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-                axes[1][0].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
-                axes[1][0].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
-                                        alpha=0.25, linewidth=0)
+    num_instances = len(decoded_pos_matrix_dict_instances_list)
+    for pop_name in ordered_pop_names:
+        hist_list = []
+        for all_decoded_pos in all_decoded_pos_instances_list_dict[pop_name]:
+            hist, edges = np.histogram(all_decoded_pos, bins=np.linspace(0., 1., 21), density=True)
+            bin_width = (edges[1] - edges[0])
+            hist *= bin_width
+            hist_list.append(hist)
+        if num_instances == 1:
+            axes[1][0].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
+        else:
+            mean_hist = np.mean(hist_list, axis=0)
+            mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
+            axes[1][0].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
+            axes[1][0].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                                    alpha=0.25, linewidth=0)
 
-            hist_list = []
-            for decoded_pos_diff_var in decoded_pos_diff_var_dict_instances_list[pop_name]:
-                hist, edges = np.histogram(decoded_pos_diff_var, bins=np.linspace(0., max_variance, 21),
-                                           density=True)
-                bin_width = (edges[1] - edges[0])
-                hist *= bin_width
-                hist_list.append(hist)
-            if num_instances == 1:
-                axes[0][1].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
-            else:
-                mean_hist = np.mean(hist_list, axis=0)
-                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-                axes[0][1].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
-                axes[0][1].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
-                                        alpha=0.25, linewidth=0)
+        hist_list = []
+        for decoded_velocity_var in decoded_velocity_var_instances_list_dict[pop_name]:
+            hist, edges = np.histogram(decoded_velocity_var, bins=np.linspace(0., max_vel_var, 21),
+                                       density=True)
+            bin_width = (edges[1] - edges[0])
+            hist *= bin_width
+            hist_list.append(hist)
+        if num_instances == 1:
+            axes[0][1].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
+        else:
+            mean_hist = np.mean(hist_list, axis=0)
+            mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
+            axes[0][1].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
+            axes[0][1].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                                    alpha=0.25, linewidth=0)
 
-            hist_list = []
-            for decoded_path_len in decoded_path_len_dict_instances_list[pop_name]:
-                hist, edges = np.histogram(decoded_path_len, bins=np.linspace(0., max_path_len, 21),
-                                           density=True)
-                bin_width = (edges[1] - edges[0])
-                hist *= bin_width
-                hist_list.append(hist)
-            if num_instances == 1:
-                axes[0][0].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
-            else:
-                mean_hist = np.mean(hist_list, axis=0)
-                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-                axes[0][0].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
-                axes[0][0].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
-                                        alpha=0.25, linewidth=0)
+        hist_list = []
+        for decoded_path_len in decoded_path_len_instances_list_dict[pop_name]:
+            hist, edges = np.histogram(decoded_path_len, bins=np.linspace(0., max_path_len, 21),
+                                       density=True)
+            bin_width = (edges[1] - edges[0])
+            hist *= bin_width
+            hist_list.append(hist)
+        if num_instances == 1:
+            axes[0][0].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
+        else:
+            mean_hist = np.mean(hist_list, axis=0)
+            mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
+            axes[0][0].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
+            axes[0][0].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                                    alpha=0.25, linewidth=0)
 
-            hist_list = []
-            for decoded_distance in decoded_distance_dict_instances_list[pop_name]:
-                hist, edges = np.histogram(decoded_distance,
-                                           bins=np.linspace(-max_distance, max_distance, 21),
-                                           density=True)
-                bin_width = (edges[1] - edges[0])
-                hist *= bin_width
-                hist_list.append(hist)
-            if num_instances == 1:
-                axes[1][1].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
-            else:
-                mean_hist = np.mean(hist_list, axis=0)
-                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-                axes[1][1].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
-                axes[1][1].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
-                                        alpha=0.25, linewidth=0)
+        hist_list = []
+        for decoded_velocity_mean in decoded_velocity_mean_instances_list_dict[pop_name]:
+            hist, edges = np.histogram(decoded_velocity_mean, bins=np.linspace(min_vel_mean, max_vel_mean, 21),
+                                       density=True)
+            bin_width = (edges[1] - edges[0])
+            hist *= bin_width
+            hist_list.append(hist)
+        if num_instances == 1:
+            axes[1][1].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
+        else:
+            mean_hist = np.mean(hist_list, axis=0)
+            mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
+            axes[1][1].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
+            axes[1][1].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                                    alpha=0.25, linewidth=0)
 
-            hist_list = []
-            for band_freq in band_freq_dict_instances_list['Ripple'][pop_name]:
-                hist, edges = np.histogram(band_freq, bins=np.linspace(min_freq, max_freq, 21),
-                                           density=True)
-                bin_width = (edges[1] - edges[0])
-                hist *= bin_width
-                hist_list.append(hist)
-            if num_instances == 1:
-                axes[2][0].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
-            else:
-                mean_hist = np.mean(hist_list, axis=0)
-                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-                axes[2][0].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
-                axes[2][0].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
-                                        alpha=0.25, linewidth=0)
+    axes[0][0].set_xlim((0., max_path_len))
+    axes[0][0].set_ylim((0., axes[0][0].get_ylim()[1]))
+    axes[0][0].set_xlabel('Normalized path length')
+    axes[0][0].set_ylabel('Probability')
+    axes[0][0].legend(loc='best', frameon=False, framealpha=0.5)
+    axes[0][0].set_title('Path length of decoded trajectories')
 
-            hist_list = []
-            for band_tuning_index in band_tuning_index_dict_instances_list['Ripple'][pop_name]:
-                hist, edges = np.histogram(band_tuning_index,
-                                           bins=np.linspace(min_tuning_index, max_tuning_index, 51),
-                                           density=True)
-                bin_width = (edges[1] - edges[0])
-                hist *= bin_width
-                hist_list.append(hist)
-            if num_instances == 1:
-                axes[2][1].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
-            else:
-                mean_hist = np.mean(hist_list, axis=0)
-                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-                axes[2][1].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
-                axes[2][1].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
-                                        alpha=0.25, linewidth=0)
+    axes[0][1].set_xlim((0., max_vel_var))
+    axes[0][1].set_ylim((0., axes[0][1].get_ylim()[1]))
+    axes[0][1].set_xlabel('Variance (/s^2)')
+    axes[0][1].set_ylabel('Probability')
+    axes[0][1].legend(loc='best', frameon=False, framealpha=0.5)
+    axes[0][1].set_title('Variance of velocity of decoded trajectories')
 
-        axes[0][0].set_xlim((0., max_path_len))
-        axes[0][0].set_ylim((0., axes[0][0].get_ylim()[1]))
-        axes[0][0].set_xlabel('Path length')
-        axes[0][0].set_ylabel('Probability')
-        axes[0][0].legend(loc='best', frameon=False, framealpha=0.5)
-        axes[0][0].set_title('Path length of decoded trajectory')
+    axes[1][0].set_xlim((0., 1.))
+    axes[1][0].set_ylim((0., axes[1][0].get_ylim()[1]))
+    axes[1][0].set_xlabel('Normalized position')
+    axes[1][0].set_ylabel('Probability')
+    axes[1][0].legend(loc='best', frameon=False, framealpha=0.5)
+    axes[1][0].set_title('Decoded positions')
 
-        axes[0][1].set_xlim((0., max_variance))
-        axes[0][1].set_ylim((0., axes[0][1].get_ylim()[1]))
-        axes[0][1].set_xlabel('Variance')
-        axes[0][1].set_ylabel('Probability')
-        axes[0][1].legend(loc='best', frameon=False, framealpha=0.5)
-        axes[0][1].set_title('Variance of steps within decoded trajectory')
+    axes[1][1].set_xlim((min_vel_mean, max_vel_mean))
+    axes[1][1].set_ylim((0., axes[1][1].get_ylim()[1]))
+    axes[1][1].set_xlabel('Trajectory velocity (/s)')
+    axes[1][1].set_ylabel('Probability')
+    axes[1][1].legend(loc='best', frameon=False, framealpha=0.5)
+    axes[1][1].set_title('Mean velocity of decoded trajectories')
 
-        axes[1][0].set_xlim((0., 1.))
-        axes[1][0].set_ylim((0., axes[1][0].get_ylim()[1]))
-        axes[1][0].set_xlabel('Decoded position')
-        axes[1][0].set_ylabel('Probability')
-        axes[1][0].legend(loc='best', frameon=False, framealpha=0.5)
-        axes[1][0].set_title('Decoded positions')
-
-        axes[1][1].set_xlim((-max_distance, max_distance))
-        axes[1][1].set_ylim((0., axes[1][1].get_ylim()[1]))
-        axes[1][1].set_xlabel('Distance')
-        axes[1][1].set_ylabel('Probability')
-        axes[1][1].legend(loc='best', frameon=False, framealpha=0.5)
-        axes[1][1].set_title('Distance traveled by decoded trajectory')
-
-        axes[2][0].set_xlim((min_freq, max_freq))
-        axes[2][0].set_ylim((0., axes[2][0].get_ylim()[1]))
-        axes[2][0].set_xlabel('Frequency (Hz)')
-        axes[2][0].set_ylabel('Probability')
-        axes[2][0].legend(loc='best', frameon=False, framealpha=0.5)
-        axes[2][0].set_title('Oscillation frequency')
-
-        axes[2][1].set_xlim((min_tuning_index, max_tuning_index))
-        axes[2][1].set_ylim((0., axes[2][1].get_ylim()[1]))
-        axes[2][1].set_xlabel('Frequency tuning index')
-        axes[2][1].set_ylabel('Probability')
-        axes[2][1].legend(loc='best', frameon=False, framealpha=0.5)
-        axes[2][1].set_title('Oscillation frequency tuning index')
-
-        clean_axes(axes)
-        fig.set_constrained_layout_pads(hspace=0.15, wspace=0.15)
-        fig.show()
+    clean_axes(axes)
+    fig.set_constrained_layout_pads(hspace=0.15, wspace=0.15)
+    fig.show()
 
 
 if __name__ == '__main__':
