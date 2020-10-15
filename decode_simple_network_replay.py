@@ -80,7 +80,7 @@ def main(cli, run_data_file_path, replay_data_file_path, export_data_key, plot_n
         decoded_pos_matrix_dict = \
             process_replay_data(context.replay_data_file_path, context.replay_trial_keys, context.export_data_key,
                                 context.replay_window_dur, context.replay_duration, context.run_window_dur,
-                                context.run_duration, export=context.export, disp=context.disp,
+                                context.run_duration, export=context.export, disp=context.disp, plot=context.plot,
                                 plot_trial_keys=context.plot_replay_trial_keys)
     else:
         decoded_pos_matrix_dict = load_processed_replay_data(context.replay_data_file_path, context.export_data_key)
@@ -88,7 +88,7 @@ def main(cli, run_data_file_path, replay_data_file_path, export_data_key, plot_n
             discard = process_replay_data(context.replay_data_file_path, context.plot_replay_trial_keys,
                                           context.export_data_key, context.replay_window_dur, context.replay_duration,
                                           context.run_window_dur, context.run_duration, export=False, temp_export=False,
-                                          disp=context.disp, plot_trial_keys=context.plot_replay_trial_keys)
+                                          disp=context.disp, plot=True, plot_trial_keys=context.plot_replay_trial_keys)
 
     if context.disp:
         print('decode_simple_network_replay: processing replay data for %i trials took %.1f s' %
@@ -478,7 +478,8 @@ def process_replay_single_trial(replay_spike_times_dict, trial_key, replay_bin_d
 
 
 def process_replay_data(replay_data_file_path, replay_trial_keys, export_data_key, replay_bin_dur, replay_duration,
-                        run_bin_dur, run_duration, export=False, temp_export=True, disp=True, plot_trial_keys=None):
+                        run_bin_dur, run_duration, export=False, temp_export=True, disp=True, plot=False,
+                        plot_trial_keys=None):
     """
 
     :param replay_data_file_path: str (path)
@@ -491,11 +492,12 @@ def process_replay_data(replay_data_file_path, replay_trial_keys, export_data_ke
     :param export: bool
     :param temp_export: bool
     :param disp: bool
+    :param plot: bool
     :param plot_trial_keys: list of str
     :return: dict: {pop_name: 2D array}
     """
     num_trials = len(replay_trial_keys)
-    if plot_trial_keys is None or len(plot_trial_keys) == 0:
+    if not plot or plot_trial_keys is None or len(plot_trial_keys) == 0:
         plot_list = [False] * num_trials
     else:
         plot_list = []

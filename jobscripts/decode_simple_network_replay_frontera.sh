@@ -21,5 +21,5 @@ set -x
 cd $WORK/optimize_simple_network
 
 ibrun -n 112 python3 decode_simple_network_replay.py --run-data-file-path=$RUN_DATA_FILE_PATH \
-    --replay-data-file-path=$REPLAY_DATA_FILE_PATH --output-dir=$SCRATCH/data/optimize_simple_network
+    --replay-data-file-path=$REPLAY_DATA_FILE_PATH --output-dir=$SCRATCH/data/optimize_simple_network --export
 EOT
