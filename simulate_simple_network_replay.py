@@ -416,7 +416,7 @@ def analyze_network_output(network, ensemble_id=None, trial=None, export=False, 
     full_spike_times_dict = network.get_spike_times_dict()
     coarse_binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict, coarse_binned_t_edges)
     firing_rates_from_coarse_binned_spike_count_dict = \
-        get_firing_rate_from_binned_spike_count(coarse_binned_spike_count_dict, context.coarse_binned_dt)
+        get_firing_rates_from_binned_spike_count_dict(coarse_binned_spike_count_dict, context.coarse_binned_dt)
     buffered_fine_binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict,
                                                                         buffered_fine_binned_t_edges)
 

@@ -1040,8 +1040,28 @@ def get_firing_rate_from_binned_spike_count(binned_spike_count, bin_dur=20., smo
         return gaussian_filter1d(binned_spike_count / (bin_dur / 1000.), sigma)
 
 
-def get_firing_rates_from_binned_spike_count_matrix_dict(binned_spike_count_matrix_dict, bin_dur=20.,
-                                                         smooth=None, wrap=False):
+def get_firing_rates_from_binned_spike_count_dict(binned_spike_count_dict, bin_dur=20., smooth=None, wrap=False):
+    """
+    Use a gaussian filter to estimate firing rate for each cell population in a dict of binned spike count arrays.
+    :param binned_spike_count_dict: dict: {pop_name: {gid: array with shape == (bins,) } }
+    :param bin_dur: float (ms)
+    :param smooth: float (ms): standard deviation of temporal gaussian filter to smooth firing rate estimate
+    :param wrap: bool
+    :return: tuple of dict
+    """
+    firing_rates_dict = {}
+    for pop_name in binned_spike_count_dict:
+        firing_rates_dict[pop_name] = {}
+        for gid in binned_spike_count_dict[pop_name]:
+            this_binned_spike_count = binned_spike_count_dict[pop_name][gid]
+            firing_rates_dict[pop_name][gid] = \
+                get_firing_rate_from_binned_spike_count(this_binned_spike_count, bin_dur, smooth, wrap)
+
+    return firing_rates_dict
+
+
+def get_firing_rates_from_binned_spike_count_matrix_dict(binned_spike_count_matrix_dict, bin_dur=20., smooth=None, 
+                                                         wrap=False):
     """
     Use a gaussian filter to estimate firing rate for each cell population in a dict of binned spike count arrays.
     :param binned_spike_count_matrix_dict: dict: {pop_name: array with shape == (cells, bins) }

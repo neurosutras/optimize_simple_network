@@ -567,8 +567,6 @@ def load_processed_replay_data(replay_data_file_path, export_data_key):
     group_key = 'simple_network_processed_data'
     shared_context_key = 'shared_context'
     decoded_pos_matrix_dict = dict()
-    slope_array_dict = dict()
-    p_val_array_dict = dict()
     with h5py.File(replay_data_file_path, 'a') as f:
         group = get_h5py_group(f, [export_data_key, group_key, shared_context_key])
         subgroup = get_h5py_group(group, ['decoded_pos_matrix'])
@@ -649,17 +647,33 @@ def analyze_decoded_trajectory_data(decoded_pos_matrix_dict, bin_dur, run_durati
             hist *= bin_width
             hist_list.append(hist)
         if num_instances == 1:
-            axes[1][0].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
+            axes[0][0].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
         else:
             mean_hist = np.mean(hist_list, axis=0)
             mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-            axes[1][0].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
-            axes[1][0].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+            axes[0][0].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
+            axes[0][0].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
                                     alpha=0.25, linewidth=0)
 
         hist_list = []
         for decoded_velocity_var in decoded_velocity_var_instances_list_dict[pop_name]:
             hist, edges = np.histogram(decoded_velocity_var, bins=np.linspace(0., max_vel_var, 21),
+                                       density=True)
+            bin_width = (edges[1] - edges[0])
+            hist *= bin_width
+            hist_list.append(hist)
+        if num_instances == 1:
+            axes[1][1].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
+        else:
+            mean_hist = np.mean(hist_list, axis=0)
+            mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
+            axes[1][1].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
+            axes[1][1].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                                    alpha=0.25, linewidth=0)
+
+        hist_list = []
+        for decoded_path_len in decoded_path_len_instances_list_dict[pop_name]:
+            hist, edges = np.histogram(decoded_path_len, bins=np.linspace(0., max_path_len, 21),
                                        density=True)
             bin_width = (edges[1] - edges[0])
             hist *= bin_width
@@ -674,22 +688,6 @@ def analyze_decoded_trajectory_data(decoded_pos_matrix_dict, bin_dur, run_durati
                                     alpha=0.25, linewidth=0)
 
         hist_list = []
-        for decoded_path_len in decoded_path_len_instances_list_dict[pop_name]:
-            hist, edges = np.histogram(decoded_path_len, bins=np.linspace(0., max_path_len, 21),
-                                       density=True)
-            bin_width = (edges[1] - edges[0])
-            hist *= bin_width
-            hist_list.append(hist)
-        if num_instances == 1:
-            axes[0][0].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
-        else:
-            mean_hist = np.mean(hist_list, axis=0)
-            mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-            axes[0][0].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
-            axes[0][0].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
-                                    alpha=0.25, linewidth=0)
-
-        hist_list = []
         for decoded_velocity_mean in decoded_velocity_mean_instances_list_dict[pop_name]:
             hist, edges = np.histogram(decoded_velocity_mean, bins=np.linspace(min_vel_mean, max_vel_mean, 21),
                                        density=True)
@@ -697,45 +695,70 @@ def analyze_decoded_trajectory_data(decoded_pos_matrix_dict, bin_dur, run_durati
             hist *= bin_width
             hist_list.append(hist)
         if num_instances == 1:
-            axes[1][1].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
+            axes[1][0].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
         else:
             mean_hist = np.mean(hist_list, axis=0)
             mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-            axes[1][1].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
-            axes[1][1].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+            axes[1][0].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
+            axes[1][0].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
                                     alpha=0.25, linewidth=0)
 
-    axes[0][0].set_xlim((0., max_path_len))
-    axes[0][0].set_ylim((0., axes[0][0].get_ylim()[1]))
-    axes[0][0].set_xlabel('Normalized path length')
-    axes[0][0].set_ylabel('Probability')
-    axes[0][0].legend(loc='best', frameon=False, framealpha=0.5)
-    axes[0][0].set_title('Path length of decoded trajectories')
-
-    axes[0][1].set_xlim((0., max_vel_var))
+    axes[0][1].set_xlim((0., max_path_len))
     axes[0][1].set_ylim((0., axes[0][1].get_ylim()[1]))
-    axes[0][1].set_xlabel('Variance (/s^2)')
+    axes[0][1].set_xlabel('Normalized path length')
     axes[0][1].set_ylabel('Probability')
     axes[0][1].legend(loc='best', frameon=False, framealpha=0.5)
-    axes[0][1].set_title('Variance of velocity of decoded trajectories')
+    axes[0][1].set_title('Path length of decoded trajectories')
 
-    axes[1][0].set_xlim((0., 1.))
-    axes[1][0].set_ylim((0., axes[1][0].get_ylim()[1]))
-    axes[1][0].set_xlabel('Normalized position')
-    axes[1][0].set_ylabel('Probability')
-    axes[1][0].legend(loc='best', frameon=False, framealpha=0.5)
-    axes[1][0].set_title('Decoded positions')
-
-    axes[1][1].set_xlim((min_vel_mean, max_vel_mean))
+    axes[1][1].set_xlim((0., max_vel_var))
     axes[1][1].set_ylim((0., axes[1][1].get_ylim()[1]))
-    axes[1][1].set_xlabel('Trajectory velocity (/s)')
+    axes[1][1].set_xlabel('Variance (/s^2)')
     axes[1][1].set_ylabel('Probability')
     axes[1][1].legend(loc='best', frameon=False, framealpha=0.5)
-    axes[1][1].set_title('Mean velocity of decoded trajectories')
+    axes[1][1].set_title('Variance of velocity of decoded trajectories')
+    
+    axes[0][0].set_xlim((0., 1.))
+    # axes[0][0].set_ylim((0., axes[0][0].get_ylim()[1]))
+    axes[0][0].set_ylim((0., 0.2))
+    axes[0][0].set_xlabel('Normalized position')
+    axes[0][0].set_ylabel('Probability')
+    axes[0][0].legend(loc='best', frameon=False, framealpha=0.5)
+    axes[0][0].set_title('Decoded positions')
+
+    axes[1][0].set_xlim((min_vel_mean, max_vel_mean))
+    axes[1][0].set_ylim((0., axes[1][0].get_ylim()[1]))
+    axes[1][0].set_xlabel('Trajectory velocity (/s)')
+    axes[1][0].set_ylabel('Probability')
+    axes[1][0].legend(loc='best', frameon=False, framealpha=0.5)
+    axes[1][0].set_title('Mean velocity of decoded trajectories')
 
     clean_axes(axes)
     fig.set_constrained_layout_pads(hspace=0.15, wspace=0.15)
     fig.show()
+
+
+def batch_analyze_decoded_trajectory_data(replay_data_file_path_list, export_data_key_list=None, bin_dur=20.,
+                                          run_duration=None, plot=True):
+    """
+
+    :param replay_data_file_path_list: list of str (path)
+    :param export_data_key_list: list of str, or single str to be applied to all files
+    :param plot: bool
+    """
+    if run_duration is None:
+        if 'run_duration' not in context():
+            raise RuntimeError('batch_analyze_decoded_trajectory_data: missing required parameter: run_duration')
+        else:
+            run_duration = context.run_duration
+    if export_data_key_list is None:
+        export_data_key_list = ['0'] * len(replay_data_file_path_list)
+    elif not isinstance(export_data_key_list, list):
+        export_data_key_list = [export_data_key_list] * len(replay_data_file_path_list)
+    decoded_pos_matrix_dict_list = []
+    for replay_data_file_path, export_data_key in zip(replay_data_file_path_list, export_data_key_list):
+        decoded_pos_matrix_dict = load_processed_replay_data(replay_data_file_path, export_data_key)
+        decoded_pos_matrix_dict_list.append(decoded_pos_matrix_dict)
+    analyze_decoded_trajectory_data(decoded_pos_matrix_dict_list, bin_dur=bin_dur, run_duration=run_duration, plot=plot)
 
 
 if __name__ == '__main__':

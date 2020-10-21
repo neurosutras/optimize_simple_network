@@ -152,7 +152,7 @@ kwargs:
       pop_over_representation:
         loc: 0.75
         width: 0.25
-        depth: 0.5
+        depth: 0.25  # 20201021 - changed from 0.5
   pop_cell_types:
     FF: input
     E: IB
