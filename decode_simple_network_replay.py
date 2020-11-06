@@ -450,14 +450,15 @@ def process_replay_single_trial(replay_spike_times_dict, trial_key, replay_bin_d
                 ordered_pop_names.append(pop_name)
         fig, axes = plt.subplots(2, len(ordered_pop_names), figsize=(3.8 * len(ordered_pop_names) + 0.5, 7.5))
         decoded_x_mesh, decoded_y_mesh = \
-            np.meshgrid(replay_binned_t_edges, run_binned_t_edges)
+            np.meshgrid(replay_binned_t_edges, run_binned_t_edges / run_duration)
         this_cmap = plt.get_cmap()
         this_cmap.set_bad(this_cmap(0.))
         for col, pop_name in enumerate(ordered_pop_names):
             p_pos = p_pos_dict[pop_name]
             axes[1][col].pcolormesh(decoded_x_mesh, decoded_y_mesh, p_pos, vmin=0.)
             axes[1][col].set_xlabel('Time (ms)')
-            axes[1][col].set_ylim((run_binned_t_edges[-1], run_binned_t_edges[0]))
+            # axes[1][col].set_ylim((run_binned_t_edges[-1], run_binned_t_edges[0]))
+            axes[1][col].set_ylim((1., 0.))
             axes[1][col].set_xlim((replay_binned_t_edges[0], replay_binned_t_edges[-1]))
             axes[1][col].set_ylabel('Decoded position')
             axes[1][col].set_title('Population: %s' % pop_name)
@@ -631,7 +632,7 @@ def analyze_decoded_trajectory_data(decoded_pos_matrix_dict, bin_dur, run_durati
     for pop_name in all_decoded_pos_instances_list_dict:
         if pop_name not in ordered_pop_names:
             ordered_pop_names.append(pop_name)
-    fig, axes = plt.subplots(2, 2, figsize=(8.5, 7.5), constrained_layout=True)
+    fig, axes = plt.subplots(2, 2, figsize=(10., 6.5), constrained_layout=True)
 
     max_vel_var = np.max(list(decoded_velocity_var_instances_list_dict.values()))
     max_path_len = np.max(list(decoded_path_len_instances_list_dict.values()))
@@ -707,33 +708,33 @@ def analyze_decoded_trajectory_data(decoded_pos_matrix_dict, bin_dur, run_durati
     axes[0][1].set_ylim((0., axes[0][1].get_ylim()[1]))
     axes[0][1].set_xlabel('Normalized path length')
     axes[0][1].set_ylabel('Probability')
-    axes[0][1].legend(loc='best', frameon=False, framealpha=0.5)
-    axes[0][1].set_title('Path length of decoded trajectories')
+    axes[0][1].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
+    axes[0][1].set_title('Decoded path length', y=1.05, fontsize=mpl.rcParams['font.size'])
 
     axes[1][1].set_xlim((0., max_vel_var))
     axes[1][1].set_ylim((0., axes[1][1].get_ylim()[1]))
-    axes[1][1].set_xlabel('Variance (/s^2)')
+    axes[1][1].set_xlabel('Velocity variance (/s^2)')
     axes[1][1].set_ylabel('Probability')
-    axes[1][1].legend(loc='best', frameon=False, framealpha=0.5)
-    axes[1][1].set_title('Variance of velocity of decoded trajectories')
+    axes[1][1].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
+    axes[1][1].set_title('Decoded velocity variance', y=1.05, fontsize=mpl.rcParams['font.size'])
     
     axes[0][0].set_xlim((0., 1.))
     # axes[0][0].set_ylim((0., axes[0][0].get_ylim()[1]))
     axes[0][0].set_ylim((0., 0.2))
     axes[0][0].set_xlabel('Normalized position')
     axes[0][0].set_ylabel('Probability')
-    axes[0][0].legend(loc='best', frameon=False, framealpha=0.5)
-    axes[0][0].set_title('Decoded positions')
+    axes[0][0].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
+    axes[0][0].set_title('Decoded positions', y=1.05, fontsize=mpl.rcParams['font.size'])
 
     axes[1][0].set_xlim((min_vel_mean, max_vel_mean))
     axes[1][0].set_ylim((0., axes[1][0].get_ylim()[1]))
-    axes[1][0].set_xlabel('Trajectory velocity (/s)')
+    axes[1][0].set_xlabel('Mean velocity (/s)')
     axes[1][0].set_ylabel('Probability')
-    axes[1][0].legend(loc='best', frameon=False, framealpha=0.5)
-    axes[1][0].set_title('Mean velocity of decoded trajectories')
+    axes[1][0].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
+    axes[1][0].set_title('Mean decoded velocity', y=1.05, fontsize=mpl.rcParams['font.size'])
 
     clean_axes(axes)
-    fig.set_constrained_layout_pads(hspace=0.15, wspace=0.15)
+    fig.set_constrained_layout_pads(hspace=0.15, wspace=0.1)
     fig.show()
 
 
@@ -751,7 +752,7 @@ def batch_analyze_decoded_trajectory_data(replay_data_file_path_list, export_dat
         else:
             run_duration = context.run_duration
     if export_data_key_list is None:
-        export_data_key_list = ['0'] * len(replay_data_file_path_list)
+        export_data_key_list = [context.export_data_key] * len(replay_data_file_path_list)
     elif not isinstance(export_data_key_list, list):
         export_data_key_list = [export_data_key_list] * len(replay_data_file_path_list)
     decoded_pos_matrix_dict_list = []

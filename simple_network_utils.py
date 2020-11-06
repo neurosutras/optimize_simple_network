@@ -4,6 +4,9 @@ from scipy.signal import butter, sosfiltfilt, sosfreqz, hilbert, periodogram, sa
 from scipy.ndimage import gaussian_filter1d
 from collections import namedtuple, defaultdict
 
+mpl.rcParams['font.size'] = 16.
+mpl.rcParams['font.sans-serif'] = 'Arial'
+
 
 # Based on http://modeldb.yale.edu/39948
 izhi_cell_type_param_names = ['C', 'k', 'vr', 'vt', 'vpeak', 'a', 'b', 'c', 'd', 'celltype']
@@ -1612,15 +1615,15 @@ def plot_bandpass_filtered_signal_summary(t, signal, filtered_signal, filter_ban
     axes[0][1].plot(t, np.ones_like(t) * mean_signal, c='k', zorder=1)
     axes[0][1].plot(t, envelope, label='Envelope amplitude', c='r', alpha=0.5, zorder=2)
     axes[0][1].plot(t, np.ones_like(t) * mean_envelope, c='darkred', zorder=0)
-    axes[0][0].set_ylabel('%s\n(mean subtracted) (%s)' % (axis_label, units))
+    axes[0][0].set_ylabel('%s (%s)\n(mean subtracted)' % (axis_label, units))
     axes[0][1].set_ylabel('%s (%s)' % (axis_label, units))
     box = axes[0][0].get_position()
     axes[0][0].set_position([box.x0, box.y0, box.width, box.height * 0.8])
-    axes[0][0].legend(loc='lower center', bbox_to_anchor=(0.5, 1.0), frameon=False, framealpha=0.5)
+    axes[0][0].legend(loc='lower center', bbox_to_anchor=(0.5, 1.0), frameon=False, framealpha=0.5, handlelength=1)
     axes[0][0].set_xlabel('Time (ms)')
     box = axes[0][1].get_position()
     axes[0][1].set_position([box.x0, box.y0, box.width, box.height * 0.8])
-    axes[0][1].legend(loc='lower center', bbox_to_anchor=(0.5, 1.0), frameon=False, framealpha=0.5)
+    axes[0][1].legend(loc='lower center', bbox_to_anchor=(0.5, 1.0), frameon=False, framealpha=0.5, handlelength=1)
     axes[0][1].set_xlabel('Time (ms)')
 
     axes[1][0].plot(psd_f, psd_power, c='k')
@@ -2008,12 +2011,11 @@ def plot_weight_matrix(connection_weights_dict, pop_gid_ranges, tuning_peak_locs
         fig, axes = plt.subplots(1, cols, sharey=True, figsize=(5 * cols, 5))
         y_interval = max(2, target_pop_size // 10)
         yticks = list(range(0, target_pop_size, y_interval))
+        ylabels = np.add(yticks, pop_gid_ranges[target_pop_name][0])
         if target_pop_name in sorted_gid_indexes:
             axes[0].set_ylabel('Target: %s\nSorted Cell ID' % target_pop_name)
-            ylabels = yticks
         else:
             axes[0].set_ylabel('Target: %s\nCell ID' % target_pop_name)
-            ylabels = np.add(yticks, pop_gid_ranges[target_pop_name][0])
 
         for col, source_pop_name in enumerate(connection_weights_dict[target_pop_name]):
             if source_pop_name not in sorted_gid_indexes and source_pop_name in tuning_peak_locs and \
@@ -2031,11 +2033,10 @@ def plot_weight_matrix(connection_weights_dict, pop_gid_ranges, tuning_peak_locs
             source_pop_size = pop_gid_ranges[source_pop_name][1] - pop_gid_ranges[source_pop_name][0]
             x_interval = max(2, source_pop_size // 10)
             xticks = list(range(0, source_pop_size, x_interval))
+            xlabels = np.add(xticks, pop_gid_ranges[source_pop_name][0])
             if source_pop_name in sorted_gid_indexes:
-                xlabels = xticks
                 axes[col].set_xlabel('Sorted Cell ID\nSource: %s' % source_pop_name)
             else:
-                xlabels = np.add(xticks, pop_gid_ranges[source_pop_name][0])
                 axes[col].set_xlabel('Cell ID\nSource: %s' % source_pop_name)
 
             plot_heatmap_from_matrix(weight_matrix, xticks=xticks, xtick_labels=xlabels, yticks=yticks,
@@ -2075,8 +2076,9 @@ def plot_firing_rate_heatmaps(firing_rates_dict, input_t, valid_t=None, pop_name
         for i, gid in enumerate(sorted_gids):
             rate_matrix[i][:] = firing_rates_dict[pop_name][gid][valid_indexes]
         y_interval = max(2, len(sorted_gids) // 10)
+        min_gid = np.min(sorted_gids)
         yticks = list(range(0, len(sorted_gids), y_interval))
-        ylabels = np.array(sorted_gids)[yticks]
+        ylabels = np.add(yticks, min_gid)
         x_interval = max(1, math.floor(len(valid_t) / 10))
         xticks = list(range(0, len(valid_t), x_interval))
         xlabels = np.array(valid_t)[xticks].astype('int32')
@@ -2086,7 +2088,7 @@ def plot_firing_rate_heatmaps(firing_rates_dict, input_t, valid_t=None, pop_name
         axes.set_xlabel('Time (ms)')
         if sort:
             axes.set_title('Firing rate: %s population' % pop_name, fontsize=mpl.rcParams['font.size'])
-            axes.set_ylabel('Cell ID - (sorted)')
+            axes.set_ylabel('Sorted Cell ID')
         else:
             axes.set_title('Firing rate: %s population' % pop_name, fontsize=mpl.rcParams['font.size'])
             axes.set_ylabel('Cell ID')

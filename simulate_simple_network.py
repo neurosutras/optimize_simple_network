@@ -495,8 +495,8 @@ def analyze_network_output(network, trial=None, export=False, plot=False):
         if plot:
             plot_inferred_spike_rates(full_spike_times_dict, binned_firing_rates_dict, input_t=binned_t_edges,
                                       active_rate_threshold=context.active_rate_threshold)
-            plot_voltage_traces(subset_full_voltage_rec_dict, full_rec_t, valid_t=rec_t,
-                                spike_times_dict=full_spike_times_dict)
+            plot_voltage_traces(subset_full_voltage_rec_dict, full_rec_t, valid_t=rec_t)
+                                # spike_times_dict=full_spike_times_dict)
             plot_weight_matrix(connection_weights_dict, pop_gid_ranges=context.pop_gid_ranges,
                                tuning_peak_locs=context.tuning_peak_locs)
             plot_firing_rate_heatmaps(binned_firing_rates_dict, input_t=binned_t_edges,
