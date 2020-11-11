@@ -12,7 +12,7 @@ sbatch <<EOT
 #SBATCH -N 40
 #SBATCH -n 2240
 #SBATCH -t 8:00:00
-#SBATCH --mail-user=aaronmil@stanford.edu
+#SBATCH --mail-user=neurosutras@gmail.com
 #SBATCH --mail-type=BEGIN,END,FAIL
 
 set -x
