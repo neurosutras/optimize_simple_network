@@ -2049,13 +2049,16 @@ def plot_weight_matrix(connection_weights_dict, pop_gid_ranges, tuning_peak_locs
         fig.show()
 
 
-def plot_firing_rate_heatmaps(firing_rates_dict, input_t, valid_t=None, pop_names=None, tuning_peak_locs=None):
+def plot_firing_rate_heatmaps(firing_rates_dict, input_t, valid_t=None, pop_names=None, tuning_peak_locs=None,
+                              sorted_gids=None):
     """
 
     :param firing_rates_dict: dict of array
     :param input_t: array
     :param valid_t: array
     :param pop_names: list of str
+    :param tuning_peak_locs: dict: {pop_name (str): {gid (int): float} }
+    :param sorted_gids: dict: {pop_name (str): array of int}
     """
     if valid_t is None:
         valid_t = input_t
@@ -2065,24 +2068,82 @@ def plot_firing_rate_heatmaps(firing_rates_dict, input_t, valid_t=None, pop_name
     if pop_names is None:
         pop_names = sorted(list(firing_rates_dict.keys()))
     for pop_name in pop_names:
-        sort = pop_name in tuning_peak_locs and len(tuning_peak_locs[pop_name]) > 0
-        if sort:
-            sorted_indexes = np.argsort(list(tuning_peak_locs[pop_name].values()))
-            sorted_gids = np.array(list(tuning_peak_locs[pop_name].keys()))[sorted_indexes]
+        if tuning_peak_locs is not None:
+            sort = pop_name in tuning_peak_locs and len(tuning_peak_locs[pop_name]) > 0
+            if sort:
+                sorted_indexes = np.argsort(list(tuning_peak_locs[pop_name].values()))
+                this_sorted_gids = np.array(list(tuning_peak_locs[pop_name].keys()))[sorted_indexes]
+            else:
+                this_sorted_gids = sorted(list(firing_rates_dict[pop_name].keys()))
+        elif sorted_gids is not None:
+            sort = pop_name in sorted_gids and len(sorted_gids[pop_name]) > 0
+            if sort:
+                this_sorted_gids = sorted_gids[pop_name]
+            else:
+                this_sorted_gids = sorted(list(firing_rates_dict[pop_name].keys()))
         else:
-            sorted_gids = sorted(list(firing_rates_dict[pop_name].keys()))
+            sort = False
+            this_sorted_gids = sorted(list(firing_rates_dict[pop_name].keys()))
         fig, axes = plt.subplots()
-        rate_matrix = np.empty((len(sorted_gids), len(valid_t)), dtype='float32')
-        for i, gid in enumerate(sorted_gids):
+        rate_matrix = np.empty((len(this_sorted_gids), len(valid_t)), dtype='float32')
+        for i, gid in enumerate(this_sorted_gids):
             rate_matrix[i][:] = firing_rates_dict[pop_name][gid][valid_indexes]
-        y_interval = max(2, len(sorted_gids) // 10)
-        min_gid = np.min(sorted_gids)
-        yticks = list(range(0, len(sorted_gids), y_interval))
+        y_interval = max(2, len(this_sorted_gids) // 10)
+        min_gid = np.min(this_sorted_gids)
+        yticks = list(range(0, len(this_sorted_gids), y_interval))
         ylabels = np.add(yticks, min_gid)
         x_interval = max(1, math.floor(len(valid_t) / 10))
         xticks = list(range(0, len(valid_t), x_interval))
         xlabels = np.array(valid_t)[xticks].astype('int32')
         plot_heatmap_from_matrix(rate_matrix, xticks=xticks, xtick_labels=xlabels, yticks=yticks,
+                                 ytick_labels=ylabels, ax=axes, aspect='auto', cbar_label='Firing rate (Hz)',
+                                 vmin=0.)
+        axes.set_xlabel('Time (ms)')
+        if sort:
+            axes.set_title('Firing rate: %s population' % pop_name, fontsize=mpl.rcParams['font.size'])
+            axes.set_ylabel('Sorted Cell ID')
+        else:
+            axes.set_title('Firing rate: %s population' % pop_name, fontsize=mpl.rcParams['font.size'])
+            axes.set_ylabel('Cell ID')
+        clean_axes(axes)
+        fig.tight_layout()
+        fig.show()
+
+
+def plot_firing_rate_heatmaps_from_matrix(firing_rates_matrix_dict, binned_t_edges, pop_names=None, sorted_gids=None,
+                                          normalize_t=True):
+    """
+
+    :param firing_rates_matrix_dict: dict of array
+    :param binned_t_edges: array
+    :param pop_names: list of str
+    :param sorted_gids: dict: {pop_name (str): array of int}
+    :param normalize_t: bool
+    """
+    if pop_names is None:
+        pop_names = sorted(list(firing_rates_matrix_dict.keys()))
+    for pop_name in pop_names:
+        this_firing_rate_matrix = firing_rates_matrix_dict[pop_name]
+        if sorted_gids is not None:
+            sort = pop_name in sorted_gids and len(sorted_gids[pop_name]) > 0
+            if sort:
+                this_sorted_gids = sorted_gids[pop_name]
+            else:
+                this_sorted_gids = np.array(list(range(this_firing_rate_matrix.shape[0])))
+        else:
+            sort = False
+            this_sorted_gids = np.array(list(range(this_firing_rate_matrix.shape[0])))
+        fig, axes = plt.subplots()
+        y_interval = max(2, len(this_sorted_gids) // 10)
+        min_gid = np.min(this_sorted_gids)
+        yticks = list(range(0, len(this_sorted_gids), y_interval))
+        ylabels = np.add(yticks, min_gid)
+        xticks = np.linspace(0, len(binned_t_edges), 6)
+        if normalize_t is None:
+            xlabels = binned_t_edges[xticks].astype('int32')
+        else:
+            xlabels = np.linspace(0., 1., 6)
+        plot_heatmap_from_matrix(this_firing_rate_matrix, xticks=xticks, xtick_labels=xlabels, yticks=yticks,
                                  ytick_labels=ylabels, ax=axes, aspect='auto', cbar_label='Firing rate (Hz)',
                                  vmin=0.)
         axes.set_xlabel('Time (ms)')

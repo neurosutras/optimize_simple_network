@@ -66,6 +66,16 @@ def main(cli, run_data_file_path, replay_data_file_path, export_data_key, plot_n
     else:
         context.sorted_gid_dict, context.run_firing_rate_matrix_dict = \
             load_processed_run_data(context.run_data_file_path, context.export_data_key)
+
+    if context.plot:
+        """
+        plot_firing_rate_heatmaps_from_matrix(context.run_firing_rate_matrix_dict, context.run_binned_t_edges,
+                                              sorted_gids=context.sorted_gid_dict)
+        """
+        plot_firing_rate_heatmaps_from_matrix(context.run_firing_rate_matrix_dict, context.run_binned_t_edges,
+                                              duration=context.run_duration, sorted_gids=context.sorted_gid_dict)
+
+
     context.interface.update_worker_contexts(sorted_gid_dict=context.sorted_gid_dict,
                                              run_firing_rate_matrix_dict=context.run_firing_rate_matrix_dict)
 
@@ -95,11 +105,9 @@ def main(cli, run_data_file_path, replay_data_file_path, export_data_key, plot_n
               (len(context.replay_trial_keys), time.time() - current_time))
         sys.stdout.flush()
 
-    if plot:
+    if context.plot:
         analyze_decoded_trajectory_data(decoded_pos_matrix_dict, context.replay_window_dur, context.run_duration,
                                         plot=True)
-
-    if context.plot:
         context.interface.apply(plt.show)
 
     if not interactive:
@@ -319,11 +327,12 @@ def load_processed_run_data_helper(run_data_file_path, export_data_key):
         load_processed_run_data(run_data_file_path, export_data_key)
 
 
-def load_processed_run_data(run_data_file_path, export_data_key):
+def load_processed_run_data(run_data_file_path, export_data_key, plot=False):
     """
 
     :param run_data_file_path: str (path)
     :param export_data_key: str
+    :param plot: bool
     :return: tuple of dict of array
     """
     sorted_gid_dict = dict()
@@ -340,6 +349,46 @@ def load_processed_run_data(run_data_file_path, export_data_key):
             run_firing_rate_matrix_dict[pop_name] = subgroup[pop_name][:,:]
 
     return sorted_gid_dict, run_firing_rate_matrix_dict
+
+
+def plot_firing_rate_heatmaps_from_matrix(firing_rate_matrix_dict, binned_t_edges, duration, sorted_gids):
+    """
+
+    :param firing_rate_matrix_dict: dict: {pop_name (str): 2d array of float}
+    :param binned_t_edges: array
+    :param duration: float
+    :param sorted_gids: dict: {pop_name (str): array of int}
+    """
+    ordered_pop_names = ['FF', 'E', 'I']
+    for pop_name in ordered_pop_names:
+        if pop_name not in firing_rate_matrix_dict:
+            ordered_pop_names.remove(pop_name)
+    for pop_name in firing_rate_matrix_dict:
+        if pop_name not in ordered_pop_names:
+            ordered_pop_names.append(pop_name)
+    fig, axes = plt.subplots(1, len(ordered_pop_names), figsize=(4.5 * len(ordered_pop_names) + 0.5, 4.25))
+    this_cmap = plt.get_cmap()
+    this_cmap.set_bad(this_cmap(0.))
+    for col, pop_name in enumerate(ordered_pop_names):
+        min_gid = np.min(sorted_gids[pop_name])
+        this_sorted_gids = np.add(min_gid, list(range(len(sorted_gids[pop_name]) + 1)))
+        decoded_x_mesh, decoded_y_mesh = \
+            np.meshgrid(binned_t_edges / duration, this_sorted_gids)
+        this_rate_matrix = firing_rate_matrix_dict[pop_name]
+        pcm = axes[col].pcolormesh(decoded_x_mesh, decoded_y_mesh, this_rate_matrix, vmin=0., edgecolors='face')
+        cbar = axes[col].figure.colorbar(pcm, ax=axes[col])
+        cbar.ax.set_ylabel('Firing rate (Hz)', rotation=-90, va="bottom")
+        axes[col].set_xlabel('Normalized position')
+        # axes[col].set_ylim((run_binned_t_edges[-1], run_binned_t_edges[0]))
+        axes[col].set_ylim((len(sorted_gids[pop_name]) + min_gid, min_gid))
+        axes[col].set_xlim((0., 1.))
+        axes[col].set_xticks(np.linspace(0., 1., 5))
+        axes[col].set_ylabel('Sorted cells')
+        axes[col].set_title('Population: %s' % pop_name)
+
+    fig.suptitle('Average spatial firing rates during run', y=0.97)
+    fig.tight_layout()
+    fig.subplots_adjust(wspace=0.55, hspace=0.4, top=0.80)
 
 
 def process_replay_single_trial_helper(replay_data_file_path, trial_key, export_data_key, replay_bin_dur,
@@ -455,7 +504,7 @@ def process_replay_single_trial(replay_spike_times_dict, trial_key, replay_bin_d
         this_cmap.set_bad(this_cmap(0.))
         for col, pop_name in enumerate(ordered_pop_names):
             p_pos = p_pos_dict[pop_name]
-            axes[1][col].pcolormesh(decoded_x_mesh, decoded_y_mesh, p_pos, vmin=0.)
+            axes[1][col].pcolormesh(decoded_x_mesh, decoded_y_mesh, p_pos, vmin=0., edgecolors='face')
             axes[1][col].set_xlabel('Time (ms)')
             # axes[1][col].set_ylim((run_binned_t_edges[-1], run_binned_t_edges[0]))
             axes[1][col].set_ylim((1., 0.))
@@ -632,7 +681,7 @@ def analyze_decoded_trajectory_data(decoded_pos_matrix_dict, bin_dur, run_durati
     for pop_name in all_decoded_pos_instances_list_dict:
         if pop_name not in ordered_pop_names:
             ordered_pop_names.append(pop_name)
-    fig, axes = plt.subplots(2, 2, figsize=(10., 6.5), constrained_layout=True)
+    fig, axes = plt.subplots(2, 2, figsize=(8.5, 6.5), constrained_layout=True)
 
     max_vel_var = np.max(list(decoded_velocity_var_instances_list_dict.values()))
     max_path_len = np.max(list(decoded_path_len_instances_list_dict.values()))
@@ -719,8 +768,7 @@ def analyze_decoded_trajectory_data(decoded_pos_matrix_dict, bin_dur, run_durati
     axes[1][1].set_title('Decoded velocity variance', y=1.05, fontsize=mpl.rcParams['font.size'])
     
     axes[0][0].set_xlim((0., 1.))
-    # axes[0][0].set_ylim((0., axes[0][0].get_ylim()[1]))
-    axes[0][0].set_ylim((0., 0.2))
+    axes[0][0].set_ylim((0., max(axes[0][0].get_ylim()[1], 0.2)))
     axes[0][0].set_xlabel('Normalized position')
     axes[0][0].set_ylabel('Probability')
     axes[0][0].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
