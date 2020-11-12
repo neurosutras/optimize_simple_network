@@ -178,6 +178,10 @@ objective_names:
 - I_mean_active_rate_run
 - E_frac_active_run
 - I_frac_active_run
+- E_theta_envelope_ratio_run
+- I_theta_envelope_ratio_run
+- E_gamma_envelope_ratio_run
+- I_gamma_envelope_ratio_run
 # - E_frac_active_replay_residuals
 - E_frac_active_replay
 - E_mean_active_rate_replay
@@ -236,10 +240,10 @@ target_val:
   I_mean_active_rate_run: 20.
   E_frac_active_run: .6
   I_frac_active_run: .95
-  E_theta_envelope_ratio_run: .5
-  I_theta_envelope_ratio_run: .5
-  E_gamma_envelope_ratio_run: .25
-  I_gamma_envelope_ratio_run: .25
+  E_theta_envelope_ratio_run: 0.
+  I_theta_envelope_ratio_run: 0.
+  E_gamma_envelope_ratio_run: 0.
+  I_gamma_envelope_ratio_run: 0.
   E_centroid_theta_freq_run: 7.
   I_centroid_theta_freq_run: 7.
   E_centroid_gamma_freq_run: 70.
