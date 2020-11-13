@@ -172,6 +172,7 @@ kwargs:
         g_unit: 0.0005275
       I:
         g_unit: 0.0005275
+  use_FF_rhythmicity_as_targets: True
 objective_names:
 - E_mean_peak_rate_run
 - E_mean_min_rate_run

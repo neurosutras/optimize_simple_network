@@ -1168,6 +1168,13 @@ def get_objectives(features, model_id=None, export=False):
                 else:
                     objectives[objective_name] = ((replay_val - run_val) /
                                                   context.target_range[objective_name]) ** 2.
+            elif 'use_FF_rhythmicity_as_targets' in context() and context.use_FF_rhythmicity_as_targets and \
+                    objective_name.find('envelope_ratio_run') != -1:
+                pop_name, _, base_name = objective_name.partition('_')
+                this_pop_val = features[objective_name]
+                FF_val = features['FF_%s' % base_name]
+                objectives[objective_name] = ((this_pop_val - FF_val) /
+                                              context.target_range[objective_name]) ** 2.
             elif objective_name == 'E_mean_active_rate_replay':
                 E_val = features['E_mean_active_rate_replay']
                 FF_val = features['FF_mean_active_rate_replay']
