@@ -1149,12 +1149,16 @@ def get_objectives(features, model_id=None, export=False):
     :param export: bool
     :return: tuple of dict
     """
+    arrythmic_target = 'arrythmic_target' in context() and context.arrythmic_target
     if context.comm.rank == 0:
         objectives = {}
         for objective_name in context.objective_names:
-            if (objective_name.find('tuning_index') != -1 and
-                    features[objective_name] >= context.target_val[objective_name]):
-                objectives[objective_name] = 0.
+            if objective_name.find('tuning_index') != -1:
+                if not arrythmic_target and features[objective_name] >= context.target_val[objective_name]:
+                    objectives[objective_name] = 0.
+                else:
+                    objectives[objective_name] = ((context.target_val[objective_name] - features[objective_name]) /
+                                                  context.target_range[objective_name]) ** 2.
             elif objective_name.find('ripple_envelope_score') != -1:
                 base_name = 'ripple_envelope_ratio'
                 if objective_name == 'E_ripple_envelope_score':
@@ -1168,8 +1172,7 @@ def get_objectives(features, model_id=None, export=False):
                 else:
                     objectives[objective_name] = ((replay_val - run_val) /
                                                   context.target_range[objective_name]) ** 2.
-            elif 'use_FF_rhythmicity_as_targets' in context() and context.use_FF_rhythmicity_as_targets and \
-                    objective_name.find('envelope_ratio_run') != -1:
+            elif objective_name.find('envelope_ratio_run') != -1 and arrythmic_target:
                 pop_name, _, base_name = objective_name.partition('_')
                 this_pop_val = features[objective_name]
                 FF_val = features['FF_%s' % base_name]
