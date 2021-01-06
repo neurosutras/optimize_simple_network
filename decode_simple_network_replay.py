@@ -792,6 +792,8 @@ def batch_analyze_decoded_trajectory_data(replay_data_file_path_list, export_dat
 
     :param replay_data_file_path_list: list of str (path)
     :param export_data_key_list: list of str, or single str to be applied to all files
+    :param bin_dur: float
+    :param run_duration: float
     :param plot: bool
     """
     if run_duration is None:

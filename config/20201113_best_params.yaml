@@ -143,29 +143,29 @@ L:
   I_I_weight_norm_sigma: 2.212054E-01
   I_norm_syn_count: 3.644747E-01
 M:
-  E_E_FF_syn_proportion: 9.585665E-01
-  E_E_mean_weight: 2.583548E+00
-  E_E_syn_proportion: 7.473115E-01
-  E_E_tau_offset: 1.636138E+01
-  E_E_weight_norm_sigma: 8.061647E-01
-  E_FF_mean_weight: 3.146180E-01
-  E_FF_weight_norm_sigma: 9.478746E-01
-  E_I_mean_weight: 7.178823E-01
-  E_I_tau_offset: 1.946989E+01
-  E_I_weight_norm_sigma: 4.143638E-01
-  E_norm_syn_count: 1.028448E-01
-  E_peak_delta_weight: 3.474560E+00
-  I_E_FF_syn_proportion: 2.819639E-02
-  I_E_mean_weight: 1.030745E+00
-  I_E_syn_proportion: 8.124361E-01
-  I_E_tau_offset: 1.683554E+01
-  I_E_weight_norm_sigma: 8.128258E-01
-  I_FF_mean_weight: 1.740216E-01
-  I_FF_weight_norm_sigma: 4.391097E-01
-  I_I_mean_weight: 1.330609E+00
-  I_I_tau_offset: 1.776600E+01
-  I_I_weight_norm_sigma: 4.458130E-01
-  I_norm_syn_count: 1.520039E-01
+  E_E_FF_syn_proportion: 5.946442E-01
+  E_E_mean_weight: 8.522491E-01
+  E_E_syn_proportion: 6.068607E-01
+  E_E_tau_offset: 1.123178E+01
+  E_E_weight_norm_sigma: 6.913977E-01
+  E_FF_mean_weight: 4.885343E-01
+  E_FF_weight_norm_sigma: 9.547029E-01
+  E_I_mean_weight: 2.866649E+00
+  E_I_tau_offset: 9.398857E+00
+  E_I_weight_norm_sigma: 7.461324E-01
+  E_norm_syn_count: 6.850559E-01
+  E_peak_delta_weight: 3.286188E+00
+  I_E_FF_syn_proportion: 5.437828E-01
+  I_E_mean_weight: 2.187675E+00
+  I_E_syn_proportion: 6.557913E-01
+  I_E_tau_offset: 1.742995E+01
+  I_E_weight_norm_sigma: 4.299173E-01
+  I_FF_mean_weight: 3.008055E-01
+  I_FF_weight_norm_sigma: 2.146264E-01
+  I_I_mean_weight: 2.069757E+00
+  I_I_tau_offset: 1.381074E+01
+  I_I_weight_norm_sigma: 4.208826E-01
+  I_norm_syn_count: 2.681252E-01
 N:
   E_E_FF_syn_proportion: 5.682351E-01
   E_E_mean_weight: 4.741553E-01
