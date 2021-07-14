@@ -519,8 +519,8 @@ def analyze_network_output_run(network, model_id=None, export=False, plot=False)
                     for pop_name in context.pop_gid_ranges:
                         data_group.create_dataset(pop_name, data=context.pop_gid_ranges[pop_name])
                     data_group = subgroup.create_group('filter_bands')
-                    for filter, band in viewitems(context.filter_bands):
-                        data_group.create_dataset(filter, data=band)
+                    for this_filter, band in viewitems(context.filter_bands):
+                        data_group.create_dataset(this_filter, data=band)
                     data_group = subgroup.create_group('connection_weights')
                     for target_pop_name in connection_weights_dict:
                         data_group.create_group(target_pop_name)
@@ -802,8 +802,8 @@ def analyze_network_output_replay(network, ensemble_id=None, trial=None, model_i
                     for pop_name in context.pop_gid_ranges:
                         data_group.create_dataset(pop_name, data=context.pop_gid_ranges[pop_name])
                     data_group = subgroup.create_group('filter_bands')
-                    for filter, band in viewitems(context.filter_bands):
-                        data_group.create_dataset(filter, data=band)
+                    for this_filter, band in viewitems(context.filter_bands):
+                        data_group.create_dataset(this_filter, data=band)
                     data_group = subgroup.create_group('connection_weights')
                     for target_pop_name in connection_weights_dict:
                         data_group.create_group(target_pop_name)

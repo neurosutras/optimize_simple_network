@@ -7,12 +7,14 @@ context = Context()
 
 
 @click.command(context_settings=dict(ignore_unknown_options=True, allow_extra_args=True, ))
-@click.option("--run-data-file-path", type=click.Path(exists=True, file_okay=True, dir_okay=False), required=True)
-@click.option("--replay-data-file-path", type=click.Path(exists=True, file_okay=True, dir_okay=False), required=True)
+@click.option("--template-data-file-path", type=click.Path(exists=True, file_okay=True, dir_okay=False), required=True)
+@click.option("--decode-data-file-path", type=click.Path(exists=True, file_okay=True, dir_okay=False), required=True)
+@click.option("--template-group-key", type=str, default='simple_network_exported_run_data')
+@click.option("--decode-group-key", type=str, default='simple_network_exported_replay_data')
 @click.option("--export-data-key", type=int, default=0)
 @click.option("--plot-n-trials", type=int, default=10)
-@click.option("--run-window-dur", type=float, default=20.)
-@click.option("--replay-window-dur", type=float, default=20.)
+@click.option("--template-window-dur", type=float, default=20.)
+@click.option("--decode-window-dur", type=float, default=20.)
 @click.option("--step-dur", type=float, default=20.)
 @click.option("--output-dir", type=str, default='data')
 @click.option("--interactive", is_flag=True)
@@ -21,17 +23,20 @@ context = Context()
 @click.option("--plot", is_flag=True)
 @click.option("--debug", is_flag=True)
 @click.pass_context
-def main(cli, run_data_file_path, replay_data_file_path, export_data_key, plot_n_trials, run_window_dur,
-         replay_window_dur, step_dur, output_dir, interactive, verbose, export, plot, debug):
+def main(cli, template_data_file_path, decode_data_file_path, template_group_key, decode_group_key, export_data_key,
+         plot_n_trials, template_window_dur, decode_window_dur, step_dur, output_dir, interactive, verbose, export,
+         plot, debug):
     """
 
     :param cli: contains unrecognized args as list of str
-    :param run_data_file_path: str (path)
-    :param replay_data_file_path: str (path)
+    :param template_data_file_path: str (path)
+    :param decode_data_file_path: str (path)
+    :param template_group_key: str
+    :param decode_group_key: str
     :param export_data_key: str
     :param plot_n_trials: int
-    :param run_window_dur: float
-    :param replay_window_dur: float
+    :param template_window_dur: float
+    :param decode_window_dur: float
     :param step_dur: float
     :param output_dir: str (path to dir)
     :param interactive: bool
@@ -51,62 +56,61 @@ def main(cli, run_data_file_path, replay_data_file_path, export_data_key, plot_n
 
     config_parallel_interface(__file__, disp=context.disp, interface=context.interface, output_dir=output_dir,
                               verbose=verbose, plot=plot, debug=debug, export_data_key=export_data_key, export=export,
-                              **kwargs)
+                              template_group_key=template_group_key, decode_group_key=decode_group_key, **kwargs)
 
-    context.interface.update_worker_contexts(run_duration=context.run_duration, run_window_dur=context.run_window_dur,
-                                             replay_duration=context.replay_duration,
-                                             replay_window_dur=context.replay_window_dur)
+    context.interface.update_worker_contexts(template_duration=context.template_duration,
+                                             template_window_dur=context.template_window_dur,
+                                             decode_duration=context.decode_duration,
+                                             decode_window_dur=context.decode_window_dur)
 
     start_time = time.time()
 
-    if not context.run_data_is_processed:
-        context.sorted_gid_dict, context.run_firing_rate_matrix_dict = \
-            process_run_data(context.run_data_file_path, context.run_trial_keys, context.export_data_key,
-                             context.run_window_dur, export=context.export, disp=context.disp)
+    if not context.template_data_is_processed:
+        context.sorted_gid_dict, context.template_firing_rate_matrix_dict = \
+            process_template_data(context.template_data_file_path, context.template_trial_keys,
+                                  context.template_group_key, context.export_data_key, context.template_window_dur,
+                                  export=context.export, disp=context.disp)
     else:
-        context.sorted_gid_dict, context.run_firing_rate_matrix_dict = \
-            load_processed_run_data(context.run_data_file_path, context.export_data_key)
+        context.sorted_gid_dict, context.template_firing_rate_matrix_dict = \
+            load_processed_template_data(context.template_data_file_path, context.export_data_key)
 
     if context.plot:
-        """
-        plot_firing_rate_heatmaps_from_matrix(context.run_firing_rate_matrix_dict, context.run_binned_t_edges,
-                                              sorted_gids=context.sorted_gid_dict)
-        """
-        plot_firing_rate_heatmaps_from_matrix(context.run_firing_rate_matrix_dict, context.run_binned_t_edges,
-                                              duration=context.run_duration, sorted_gids=context.sorted_gid_dict)
+        plot_firing_rate_heatmaps_from_matrix(context.template_firing_rate_matrix_dict, context.template_binned_t_edges,
+                                              duration=context.template_duration, sorted_gids=context.sorted_gid_dict)
 
 
     context.interface.update_worker_contexts(sorted_gid_dict=context.sorted_gid_dict,
-                                             run_firing_rate_matrix_dict=context.run_firing_rate_matrix_dict)
+                                             template_firing_rate_matrix_dict=context.template_firing_rate_matrix_dict)
 
     if context.disp:
-        print('decode_simple_network_replay: processing run data for %i trials took %.1f s' %
-              (len(context.run_trial_keys), time.time() - start_time))
+        print('decode_simple_network_replay: processing template data for %i trials took %.1f s' %
+              (len(context.template_trial_keys), time.time() - start_time))
         sys.stdout.flush()
     current_time = time.time()
 
-    if not context.replay_data_is_processed:
+    if not context.decode_data_is_processed:
         # return dicts to analyze
         decoded_pos_matrix_dict = \
-            process_replay_data(context.replay_data_file_path, context.replay_trial_keys, context.export_data_key,
-                                context.replay_window_dur, context.replay_duration, context.run_window_dur,
-                                context.run_duration, export=context.export, disp=context.disp, plot=context.plot,
-                                plot_trial_keys=context.plot_replay_trial_keys)
+            decode_data(context.decode_data_file_path, context.decode_trial_keys, context.decode_group_key,
+                        context.export_data_key, context.decode_window_dur, context.decode_duration,
+                        context.template_window_dur, context.template_duration, export=context.export,
+                        disp=context.disp, plot=context.plot, plot_trial_keys=context.plot_decode_trial_keys)
     else:
-        decoded_pos_matrix_dict = load_processed_replay_data(context.replay_data_file_path, context.export_data_key)
+        decoded_pos_matrix_dict = load_decoded_data(context.decode_data_file_path, context.export_data_key)
         if plot and context.plot_n_trials > 0:
-            discard = process_replay_data(context.replay_data_file_path, context.plot_replay_trial_keys,
-                                          context.export_data_key, context.replay_window_dur, context.replay_duration,
-                                          context.run_window_dur, context.run_duration, export=False, temp_export=False,
-                                          disp=context.disp, plot=True, plot_trial_keys=context.plot_replay_trial_keys)
+            discard = decode_data(context.decode_data_file_path, context.plot_decode_trial_keys,
+                                  context.decode_group_key, context.export_data_key, context.decode_window_dur,
+                                  context.decode_duration, context.template_window_dur, context.template_duration,
+                                  export=False, temp_export=False, disp=context.disp, plot=True,
+                                  plot_trial_keys=context.plot_decode_trial_keys)
 
     if context.disp:
-        print('decode_simple_network_replay: processing replay data for %i trials took %.1f s' %
-              (len(context.replay_trial_keys), time.time() - current_time))
+        print('decode_simple_network_replay: decoding data for %i trials took %.1f s' %
+              (len(context.decode_trial_keys), time.time() - current_time))
         sys.stdout.flush()
 
     if context.plot:
-        analyze_decoded_trajectory_data(decoded_pos_matrix_dict, context.replay_window_dur, context.run_duration,
+        analyze_decoded_trajectory_data(decoded_pos_matrix_dict, context.decode_window_dur, context.template_duration,
                                         plot=True)
         context.interface.apply(plt.show)
 
@@ -118,59 +122,60 @@ def main(cli, run_data_file_path, replay_data_file_path, export_data_key, plot_n
 
 def config_controller():
 
-    if not os.path.isfile(context.run_data_file_path):
-        raise IOError('decode_simple_network_replay: invalid run_data_file_path: %s' %
-                      context.run_data_file_path)
+    if not os.path.isfile(context.template_data_file_path):
+        raise IOError('decode_simple_network_replay: invalid template_data_file_path: %s' %
+                      context.template_data_file_path)
 
-    run_group_key = 'simple_network_exported_run_data'
     processed_group_key = 'simple_network_processed_data'
     shared_context_key = 'shared_context'
-    with h5py.File(context.run_data_file_path, 'r') as f:
-        group = get_h5py_group(f, [context.export_data_key, run_group_key])
+    with h5py.File(context.template_data_file_path, 'r') as f:
+        group = get_h5py_group(f, [context.export_data_key, context.template_group_key])
         subgroup = get_h5py_group(group, [shared_context_key])
-        run_duration = get_h5py_attr(subgroup.attrs, 'duration')
-        run_binned_t_edges = np.arange(0., run_duration + context.run_window_dur / 2., context.run_window_dur)
-        run_binned_t = run_binned_t_edges[:-1] + context.run_window_dur / 2.
-        run_trial_keys = [key for key in group if key != shared_context_key]
+        template_duration = get_h5py_attr(subgroup.attrs, 'duration')
+        template_binned_t_edges = np.arange(0., template_duration + context.template_window_dur / 2.,
+                                            context.template_window_dur)
+        template_binned_t = template_binned_t_edges[:-1] + context.template_window_dur / 2.
+        template_trial_keys = [key for key in group if key != shared_context_key]
 
         group = get_h5py_group(f, [context.export_data_key])
         if processed_group_key in group and shared_context_key in group[processed_group_key] and \
                 'trial_averaged_firing_rate_matrix' in group[processed_group_key][shared_context_key]:
-            run_data_is_processed = True
+            template_data_is_processed = True
         else:
-            run_data_is_processed = False
+            template_data_is_processed = False
 
-    if not os.path.isfile(context.replay_data_file_path):
-        raise IOError('decode_simple_network_replay: invalid replay_data_file_path: %s' %
-                      context.replay_data_file_path)
-    replay_group_key = 'simple_network_exported_replay_data'
-    with h5py.File(context.replay_data_file_path, 'r') as f:
-        group = get_h5py_group(f, [context.export_data_key, replay_group_key])
+    if not os.path.isfile(context.decode_data_file_path):
+        raise IOError('decode_simple_network_replay: invalid decode_data_file_path: %s' %
+                      context.decode_data_file_path)
+
+    with h5py.File(context.decode_data_file_path, 'r') as f:
+        group = get_h5py_group(f, [context.export_data_key, context.decode_group_key])
         subgroup = get_h5py_group(group, [shared_context_key])
-        replay_duration = get_h5py_attr(subgroup.attrs, 'duration')
-        replay_binned_t_edges = np.arange(0., replay_duration + context.replay_window_dur / 2.,
-                                          context.replay_window_dur)
-        replay_binned_t = replay_binned_t_edges[:-1] + context.replay_window_dur / 2.
-        replay_trial_keys = [key for key in group if key != shared_context_key]
-        context.plot_n_trials = min(int(context.plot_n_trials), len(replay_trial_keys))
-        plot_replay_trial_keys = \
-            list(np.random.choice(replay_trial_keys, context.plot_n_trials, replace=False))
+        decode_duration = get_h5py_attr(subgroup.attrs, 'duration')
+        decode_binned_t_edges = np.arange(0., decode_duration + context.decode_window_dur / 2.,
+                                            context.decode_window_dur)
+        decode_binned_t = decode_binned_t_edges[:-1] + context.decode_window_dur / 2.
+        decode_trial_keys = [key for key in group if key != shared_context_key]
+        context.plot_n_trials = min(int(context.plot_n_trials), len(decode_trial_keys))
+        plot_decode_trial_keys = \
+            list(np.random.choice(decode_trial_keys, context.plot_n_trials, replace=False))
 
         group = get_h5py_group(f, [context.export_data_key])
         if processed_group_key in group and shared_context_key in group[processed_group_key] and \
                 'decoded_pos_matrix' in group[processed_group_key][shared_context_key]:
-            replay_data_is_processed = True
+            decode_data_is_processed = True
         else:
-            replay_data_is_processed = False
+            decode_data_is_processed = False
 
     context.update(locals())
 
 
-def process_run_single_trial(run_data_file_path, trial_key, export_data_key, bin_dur, disp=True):
+def process_template_single_trial(template_data_file_path, trial_key, group_key, export_data_key, bin_dur, disp=True):
     """
 
-    :param run_data_file_path: str
+    :param template_data_file_path: str
     :param trial_key: str
+    :param group_key: str
     :param export_data_key: str
     :param bin_dur: float
     :param disp: bool
@@ -179,9 +184,8 @@ def process_run_single_trial(run_data_file_path, trial_key, export_data_key, bin
     full_spike_times_dict = dict()
     tuning_peak_locs = dict()
 
-    group_key = 'simple_network_exported_run_data'
     shared_context_key = 'shared_context'
-    with h5py.File(run_data_file_path, 'r') as f:
+    with h5py.File(template_data_file_path, 'r') as f:
         group = get_h5py_group(f, [export_data_key, group_key])
         subgroup = group[shared_context_key]
         if 'tuning_peak_locs' in subgroup and len(subgroup['tuning_peak_locs']) > 0:
@@ -191,8 +195,8 @@ def process_run_single_trial(run_data_file_path, trial_key, export_data_key, bin
                 for target_gid, peak_loc in zip(data_group[pop_name]['target_gids'], data_group[pop_name]['peak_locs']):
                     tuning_peak_locs[pop_name][target_gid] = peak_loc
         duration = get_h5py_attr(subgroup.attrs, 'duration')
-        run_binned_t_edges = np.arange(0., duration + bin_dur / 2., bin_dur)
-        run_binned_t = run_binned_t_edges[:-1] + bin_dur / 2.
+        template_binned_t_edges = np.arange(0., duration + bin_dur / 2., bin_dur)
+        template_binned_t = template_binned_t_edges[:-1] + bin_dur / 2.
         subgroup = get_h5py_group(group, [trial_key])
         data_group = subgroup['full_spike_times']
         for pop_name in data_group:
@@ -200,7 +204,7 @@ def process_run_single_trial(run_data_file_path, trial_key, export_data_key, bin
             for gid_key in data_group[pop_name]:
                 full_spike_times_dict[pop_name][int(gid_key)] = data_group[pop_name][gid_key][:]
 
-    binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict, run_binned_t_edges)
+    binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict, template_binned_t_edges)
 
     sorted_gid_dict = dict()
     for pop_name in full_spike_times_dict:
@@ -215,12 +219,13 @@ def process_run_single_trial(run_data_file_path, trial_key, export_data_key, bin
 
     binned_spike_count_matrix_dict = dict()
     for pop_name in binned_spike_count_dict:
-        binned_spike_count_matrix_dict[pop_name] = np.empty((len(binned_spike_count_dict[pop_name]), len(run_binned_t)))
+        binned_spike_count_matrix_dict[pop_name] = np.empty((len(binned_spike_count_dict[pop_name]),
+                                                             len(template_binned_t)))
         for i, gid in enumerate(sorted_gid_dict[pop_name]):
             binned_spike_count_matrix_dict[pop_name][i, :] = binned_spike_count_dict[pop_name][gid]
 
     if disp:
-        print('process_run_single_trial: pid: %i took %.1f s to process binned spike count data for trial: %s' %
+        print('process_template_single_trial: pid: %i took %.1f s to process binned spike count data for trial: %s' %
               (os.getpid(), time.time() - start_time, trial_key))
         sys.stdout.flush()
 
@@ -239,26 +244,28 @@ def process_run_single_trial(run_data_file_path, trial_key, export_data_key, bin
             data_group.create_dataset(pop_name, data=binned_spike_count_matrix_dict[pop_name], compression='gzip')
 
     if disp:
-        print('process_run_single_trial: pid: %i exported data for trial: %s to temp_output_path: %s' %
+        print('process_template_single_trial: pid: %i exported data for trial: %s to temp_output_path: %s' %
               (os.getpid(), trial_key, context.temp_output_path))
         sys.stdout.flush()
 
 
-def process_run_data(run_data_file_path, run_trial_keys, export_data_key, bin_dur, export=True, disp=True):
+def process_template_data(template_data_file_path, template_trial_keys, template_group_key, export_data_key, bin_dur,
+                          export=True, disp=True):
     """
 
-    :param run_data_file_path: str (path)
-    :param run_trial_keys: list of str
+    :param template_data_file_path: str (path)
+    :param template_trial_keys: list of str
+    :param template_group_key: str
     :param export_data_key: str
     :param bin_dur: float
     :param export: bool
     :param disp: bool
     """
     start_time = time.time()
-    num_trials = len(run_trial_keys)
-    sequences = [[run_data_file_path] * num_trials, run_trial_keys, [export_data_key] * num_trials,
-                 [bin_dur] * num_trials, [disp] * num_trials]
-    context.interface.map(process_run_single_trial, *sequences)
+    num_trials = len(template_trial_keys)
+    sequences = [[template_data_file_path] * num_trials, template_trial_keys, [template_group_key] * num_trials,
+                 [export_data_key] * num_trials, [bin_dur] * num_trials, [disp] * num_trials]
+    context.interface.map(process_template_single_trial, *sequences)
     temp_output_path_list = [temp_output_path for temp_output_path in context.interface.get('context.temp_output_path')
                              if os.path.isfile(temp_output_path)]
 
@@ -290,65 +297,55 @@ def process_run_data(run_data_file_path, run_trial_keys, export_data_key, bin_du
             np.mean([this_binned_spike_count_matrix_dict[pop_name]
                      for this_binned_spike_count_matrix_dict in binned_spike_count_matrix_dict_trial_list], axis=0)
 
-    trial_averaged_run_firing_rate_matrix_dict = \
+    trial_averaged_template_firing_rate_matrix_dict = \
         get_firing_rates_from_binned_spike_count_matrix_dict(trial_averaged_binned_spike_count_matrix_dict,
                                                              bin_dur=bin_dur, smooth=150., wrap=True)
     if export:
         group_key = 'simple_network_processed_data'
         shared_context_key = 'shared_context'
-        with h5py.File(run_data_file_path, 'a') as f:
+        with h5py.File(template_data_file_path, 'a') as f:
             group = get_h5py_group(f, [export_data_key, group_key, shared_context_key], create=True)
             subgroup = group.create_group('sorted_gids')
             for pop_name in sorted_gid_dict:
                 subgroup.create_dataset(pop_name, data=sorted_gid_dict[pop_name], compression='gzip')
             subgroup = group.create_group('trial_averaged_firing_rate_matrix')
-            for pop_name in trial_averaged_run_firing_rate_matrix_dict:
-                subgroup.create_dataset(pop_name, data=trial_averaged_run_firing_rate_matrix_dict[pop_name],
+            for pop_name in trial_averaged_template_firing_rate_matrix_dict:
+                subgroup.create_dataset(pop_name, data=trial_averaged_template_firing_rate_matrix_dict[pop_name],
                                         compression='gzip')
 
         if disp:
-            print('process_run_data: pid: %i; exporting to run_data_file_path: %s '
-                  'took %.1f s' % (os.getpid(), run_data_file_path, time.time() - start_time))
+            print('process_template_data: pid: %i; exporting to template_data_file_path: %s '
+                  'took %.1f s' % (os.getpid(), template_data_file_path, time.time() - start_time))
             sys.stdout.flush()
 
     for temp_output_path in temp_output_path_list:
         os.remove(temp_output_path)
 
-    return sorted_gid_dict, trial_averaged_run_firing_rate_matrix_dict
+    return sorted_gid_dict, trial_averaged_template_firing_rate_matrix_dict
 
 
-def load_processed_run_data_helper(run_data_file_path, export_data_key):
+def load_processed_template_data(template_data_file_path, export_data_key, plot=False):
     """
 
-    :param run_data_file_path: str (path)
-    :param export_data_key: str
-    """
-    context.sorted_gid_dict, context.run_firing_rate_matrix_dict = \
-        load_processed_run_data(run_data_file_path, export_data_key)
-
-
-def load_processed_run_data(run_data_file_path, export_data_key, plot=False):
-    """
-
-    :param run_data_file_path: str (path)
+    :param template_data_file_path: str (path)
     :param export_data_key: str
     :param plot: bool
     :return: tuple of dict of array
     """
     sorted_gid_dict = dict()
-    run_firing_rate_matrix_dict = dict()
+    template_firing_rate_matrix_dict = dict()
     processed_group_key = 'simple_network_processed_data'
     shared_context_key = 'shared_context'
-    with h5py.File(run_data_file_path, 'r') as f:
+    with h5py.File(template_data_file_path, 'r') as f:
         group = get_h5py_group(f, [export_data_key, processed_group_key, shared_context_key])
         subgroup = group['sorted_gids']
         for pop_name in subgroup:
             sorted_gid_dict[pop_name] = subgroup[pop_name][:]
         subgroup = group['trial_averaged_firing_rate_matrix']
         for pop_name in subgroup:
-            run_firing_rate_matrix_dict[pop_name] = subgroup[pop_name][:,:]
+            template_firing_rate_matrix_dict[pop_name] = subgroup[pop_name][:,:]
 
-    return sorted_gid_dict, run_firing_rate_matrix_dict
+    return sorted_gid_dict, template_firing_rate_matrix_dict
 
 
 def plot_firing_rate_heatmaps_from_matrix(firing_rate_matrix_dict, binned_t_edges, duration, sorted_gids):
@@ -379,7 +376,6 @@ def plot_firing_rate_heatmaps_from_matrix(firing_rate_matrix_dict, binned_t_edge
         cbar = axes[col].figure.colorbar(pcm, ax=axes[col])
         cbar.ax.set_ylabel('Firing rate (Hz)', rotation=-90, va="bottom")
         axes[col].set_xlabel('Normalized position')
-        # axes[col].set_ylim((run_binned_t_edges[-1], run_binned_t_edges[0]))
         axes[col].set_ylim((len(sorted_gids[pop_name]) + min_gid, min_gid))
         axes[col].set_xlim((0., 1.))
         axes[col].set_xticks(np.linspace(0., 1., 5))
@@ -391,36 +387,37 @@ def plot_firing_rate_heatmaps_from_matrix(firing_rate_matrix_dict, binned_t_edge
     fig.subplots_adjust(wspace=0.55, hspace=0.4, top=0.80)
 
 
-def process_replay_single_trial_helper(replay_data_file_path, trial_key, export_data_key, replay_bin_dur,
-                                       replay_duration, run_bin_dur, run_duration, export=False, disp=True, plot=False):
+def decode_single_trial_helper(decode_data_file_path, trial_key, decode_group_key, export_data_key, decode_bin_dur,
+                               decode_duration, template_bin_dur, template_duration, export=False, disp=True,
+                               plot=False):
     """
 
-    :param replay_data_file_path: str (path)
+    :param decode_data_file_path: str (path)
     :param trial_key: str
+    :param decode_group_key: str
     :param export_data_key: str
-    :param replay_bin_dur: float (ms)
-    :param replay_duration: float (ms)
-    :param run_bin_dur: float (ms)
-    :param run_duration: float (ms)
+    :param decode_bin_dur: float (ms)
+    :param decode_duration: float (ms)
+    :param template_bin_dur: float (ms)
+    :param template_duration: float (ms)
     :param export: bool
     :param disp: bool
     :param plot: bool
     """
-    replay_full_spike_times_dict = dict()
-    replay_group_key = 'simple_network_exported_replay_data'
-    with h5py.File(replay_data_file_path, 'r') as f:
-        group = get_h5py_group(f, [export_data_key, replay_group_key])
+    decode_full_spike_times_dict = dict()
+    with h5py.File(decode_data_file_path, 'r') as f:
+        group = get_h5py_group(f, [export_data_key, decode_group_key])
         subgroup = get_h5py_group(group, [trial_key, 'full_spike_times'])
         for pop_name in subgroup:
-            if pop_name not in replay_full_spike_times_dict:
-                replay_full_spike_times_dict[pop_name] = dict()
+            if pop_name not in decode_full_spike_times_dict:
+                decode_full_spike_times_dict[pop_name] = dict()
             for gid_key in subgroup[pop_name]:
-                replay_full_spike_times_dict[pop_name][int(gid_key)] = subgroup[pop_name][gid_key][:]
+                decode_full_spike_times_dict[pop_name][int(gid_key)] = subgroup[pop_name][gid_key][:]
 
     decoded_pos_dict = \
-        process_replay_single_trial(replay_full_spike_times_dict, trial_key, replay_bin_dur, replay_duration,
-                                    run_bin_dur, run_duration, context.sorted_gid_dict,
-                                    context.run_firing_rate_matrix_dict, disp=disp, plot=plot)
+        decode_single_trial(decode_full_spike_times_dict, trial_key, decode_bin_dur, decode_duration,
+                                    template_bin_dur, template_duration, context.sorted_gid_dict,
+                                    context.template_firing_rate_matrix_dict, disp=disp, plot=plot)
 
     if export:
         group_key = 'simple_network_processed_data'
@@ -431,49 +428,49 @@ def process_replay_single_trial_helper(replay_data_file_path, trial_key, export_
                 subgroup.create_dataset(pop_name, data=decoded_pos_dict[pop_name], compression='gzip')
 
         if disp:
-            print('process_replay_single_trial_helper: pid: %i exported data for trial: %s to temp_output_path: %s' %
+            print('decode_single_trial_helper: pid: %i exported data for trial: %s to temp_output_path: %s' %
                   (os.getpid(), trial_key, context.temp_output_path))
             sys.stdout.flush()
 
 
-def process_replay_single_trial(replay_spike_times_dict, trial_key, replay_bin_dur, replay_duration, run_bin_dur,
-                                run_duration, sorted_gid_dict, run_firing_rate_matrix_dict, disp=False, plot=False):
+def decode_single_trial(decode_spike_times_dict, trial_key, decode_bin_dur, decode_duration, template_bin_dur,
+                                template_duration, sorted_gid_dict, template_firing_rate_matrix_dict, disp=False, plot=False):
     """
 
-    :param replay_spike_times_dict: dict {pop_name: {gid: array}}
+    :param decode_spike_times_dict: dict {pop_name: {gid: array}}
     :param trial_key: str
-    :param replay_bin_dur: float (ms)
-    :param replay_duration: float (ms)
-    :param run_bin_dur: float (ms)
-    :param run_duration: float (ms)
+    :param decode_bin_dur: float (ms)
+    :param decode_duration: float (ms)
+    :param template_bin_dur: float (ms)
+    :param template_duration: float (ms)
     :param sorted_gid_dict: dict of array of int
-    :param run_firing_rate_matrix_dict: dict of array of float
+    :param template_firing_rate_matrix_dict: dict of array of float
     :param disp: bool
     :param plot: bool
     """
     start_time = time.time()
-    replay_binned_t_edges = np.arange(0., replay_duration + replay_bin_dur / 2., replay_bin_dur)
-    replay_binned_t = replay_binned_t_edges[:-1] + replay_bin_dur / 2.
-    run_binned_t_edges = np.arange(0., run_duration + run_bin_dur / 2., run_bin_dur)
-    run_binned_t = run_binned_t_edges[:-1] + run_bin_dur / 2.
+    decode_binned_t_edges = np.arange(0., decode_duration + decode_bin_dur / 2., decode_bin_dur)
+    decode_binned_t = decode_binned_t_edges[:-1] + decode_bin_dur / 2.
+    template_binned_t_edges = np.arange(0., template_duration + template_bin_dur / 2., template_bin_dur)
+    template_binned_t = template_binned_t_edges[:-1] + template_bin_dur / 2.
 
-    replay_binned_spike_count_dict = \
-        get_binned_spike_count_dict(replay_spike_times_dict, replay_binned_t_edges)
+    decode_binned_spike_count_dict = \
+        get_binned_spike_count_dict(decode_spike_times_dict, decode_binned_t_edges)
 
-    replay_binned_spike_count_matrix_dict = {}
-    for pop_name in replay_binned_spike_count_dict:
-        replay_binned_spike_count_matrix = np.empty((len(replay_binned_spike_count_dict[pop_name]),
-                                                     len(replay_binned_t)))
+    decode_binned_spike_count_matrix_dict = {}
+    for pop_name in decode_binned_spike_count_dict:
+        decode_binned_spike_count_matrix = np.empty((len(decode_binned_spike_count_dict[pop_name]),
+                                                     len(decode_binned_t)))
         for i, gid in enumerate(sorted_gid_dict[pop_name]):
-            replay_binned_spike_count_matrix[i, :] = replay_binned_spike_count_dict[pop_name][gid]
-        replay_binned_spike_count_matrix_dict[pop_name] = replay_binned_spike_count_matrix
+            decode_binned_spike_count_matrix[i, :] = decode_binned_spike_count_dict[pop_name][gid]
+        decode_binned_spike_count_matrix_dict[pop_name] = decode_binned_spike_count_matrix
 
-    p_pos_dict = decode_position_from_offline_replay(replay_binned_spike_count_matrix_dict, run_firing_rate_matrix_dict,
-                                                     bin_dur=replay_bin_dur)
+    p_pos_dict = decode_position(decode_binned_spike_count_matrix_dict, template_firing_rate_matrix_dict,
+                                 bin_dur=decode_bin_dur)
 
     decoded_pos_dict = dict()
     for pop_name in p_pos_dict:
-        this_decoded_pos = np.empty_like(replay_binned_t)
+        this_decoded_pos = np.empty_like(decode_binned_t)
         this_decoded_pos[:] = np.nan
         p_pos = p_pos_dict[pop_name]
         for pos_bin in range(p_pos.shape[1]):
@@ -481,11 +478,11 @@ def process_replay_single_trial(replay_spike_times_dict, trial_key, replay_bin_d
                 index = np.nanargmax(p_pos[:, pos_bin])
                 val = p_pos[index, pos_bin]
                 if len(np.where(p_pos[:, pos_bin] == val)[0]) == 1:
-                    this_decoded_pos[pos_bin] = run_binned_t[index]
+                    this_decoded_pos[pos_bin] = template_binned_t[index]
         decoded_pos_dict[pop_name] = this_decoded_pos
 
     if disp:
-        print('process_replay_single_trial: pid: %i took %.1f s to decode position for trial: %s' %
+        print('decode_single_trial: pid: %i took %.1f s to decode position for trial: %s' %
               (os.getpid(), time.time() - start_time, trial_key))
         sys.stdout.flush()
 
@@ -499,25 +496,24 @@ def process_replay_single_trial(replay_spike_times_dict, trial_key, replay_bin_d
                 ordered_pop_names.append(pop_name)
         fig, axes = plt.subplots(2, len(ordered_pop_names), figsize=(3.8 * len(ordered_pop_names) + 0.5, 7.5))
         decoded_x_mesh, decoded_y_mesh = \
-            np.meshgrid(replay_binned_t_edges, run_binned_t_edges / run_duration)
+            np.meshgrid(decode_binned_t_edges, template_binned_t_edges / template_duration)
         this_cmap = plt.get_cmap()
         this_cmap.set_bad(this_cmap(0.))
         for col, pop_name in enumerate(ordered_pop_names):
             p_pos = p_pos_dict[pop_name]
             axes[1][col].pcolormesh(decoded_x_mesh, decoded_y_mesh, p_pos, vmin=0., edgecolors='face')
             axes[1][col].set_xlabel('Time (ms)')
-            # axes[1][col].set_ylim((run_binned_t_edges[-1], run_binned_t_edges[0]))
             axes[1][col].set_ylim((1., 0.))
-            axes[1][col].set_xlim((replay_binned_t_edges[0], replay_binned_t_edges[-1]))
+            axes[1][col].set_xlim((decode_binned_t_edges[0], decode_binned_t_edges[-1]))
             axes[1][col].set_ylabel('Decoded position')
             axes[1][col].set_title('Population: %s' % pop_name)
 
             for i, gid in enumerate(sorted_gid_dict[pop_name]):
-                this_spike_times = replay_spike_times_dict[pop_name][gid]
+                this_spike_times = decode_spike_times_dict[pop_name][gid]
                 axes[0][col].scatter(this_spike_times, np.ones_like(this_spike_times) * i + 0.5, c='k', s=1.)
             axes[0][col].set_xlabel('Time (ms)')
             axes[0][col].set_ylim((len(sorted_gid_dict[pop_name]), 0))
-            axes[0][col].set_xlim((replay_binned_t_edges[0], replay_binned_t_edges[-1]))
+            axes[0][col].set_xlim((decode_binned_t_edges[0], decode_binned_t_edges[-1]))
             axes[0][col].set_ylabel('Sorted cells')
             axes[0][col].set_title('Population: %s' % pop_name)
         fig.suptitle('Trial # %s' % trial_key, y=0.99)
@@ -527,18 +523,19 @@ def process_replay_single_trial(replay_spike_times_dict, trial_key, replay_bin_d
     return decoded_pos_dict
 
 
-def process_replay_data(replay_data_file_path, replay_trial_keys, export_data_key, replay_bin_dur, replay_duration,
-                        run_bin_dur, run_duration, export=False, temp_export=True, disp=True, plot=False,
-                        plot_trial_keys=None):
+def decode_data(decode_data_file_path, decode_trial_keys, decode_group_key, export_data_key, decode_bin_dur,
+                decode_duration, template_bin_dur, template_duration, export=False, temp_export=True, disp=True,
+                plot=False, plot_trial_keys=None):
     """
 
-    :param replay_data_file_path: str (path)
-    :param replay_trial_keys: list of str
+    :param decode_data_file_path: str (path)
+    :param decode_trial_keys: list of str
+    :param decode_group_key: str
     :param export_data_key: str
-    :param replay_bin_dur: float (ms)
-    :param replay_duration: float (ms)
-    :param run_bin_dur: float (ms)
-    :param run_duration: float (ms)
+    :param decode_bin_dur: float (ms)
+    :param decode_duration: float (ms)
+    :param template_bin_dur: float (ms)
+    :param template_duration: float (ms)
     :param export: bool
     :param temp_export: bool
     :param disp: bool
@@ -546,20 +543,21 @@ def process_replay_data(replay_data_file_path, replay_trial_keys, export_data_ke
     :param plot_trial_keys: list of str
     :return: dict: {pop_name: 2D array}
     """
-    num_trials = len(replay_trial_keys)
+    num_trials = len(decode_trial_keys)
     if not plot or plot_trial_keys is None or len(plot_trial_keys) == 0:
         plot_list = [False] * num_trials
     else:
         plot_list = []
-        for trial_key in replay_trial_keys:
+        for trial_key in decode_trial_keys:
             if trial_key in plot_trial_keys:
                 plot_list.append(True)
             else:
                 plot_list.append(False)
-    sequences = [[replay_data_file_path] * num_trials, replay_trial_keys, [export_data_key] * num_trials,
-                 [replay_bin_dur] * num_trials, [replay_duration] * num_trials, [run_bin_dur] * num_trials,
-                 [run_duration] * num_trials, [temp_export] * num_trials, [disp] * num_trials, plot_list]
-    context.interface.map(process_replay_single_trial_helper, *sequences)
+    sequences = [[decode_data_file_path] * num_trials, decode_trial_keys, [decode_group_key] * num_trials,
+                 [export_data_key] * num_trials, [decode_bin_dur] * num_trials, [decode_duration] * num_trials,
+                 [template_bin_dur] * num_trials, [template_duration] * num_trials, [temp_export] * num_trials,
+                 [disp] * num_trials, plot_list]
+    context.interface.map(decode_single_trial_helper, *sequences)
 
     decoded_pos_array_list_dict = dict()
     decoded_pos_matrix_dict = dict()
@@ -592,14 +590,14 @@ def process_replay_data(replay_data_file_path, replay_trial_keys, export_data_ke
                 np.asarray(decoded_pos_array_list_dict[pop_name])[sorted_trial_indexes,:]
 
         if export:
-            with h5py.File(replay_data_file_path, 'a') as f:
+            with h5py.File(decode_data_file_path, 'a') as f:
                 group = get_h5py_group(f, [export_data_key, group_key, shared_context_key], create=True)
                 subgroup = group.create_group('decoded_pos_matrix')
                 for pop_name in decoded_pos_matrix_dict:
                     subgroup.create_dataset(pop_name, data=decoded_pos_matrix_dict[pop_name], compression='gzip')
             if disp:
-                print('process_replay_data: pid: %i; exporting to replay_data_file_path: %s took %.1f s' %
-                      (os.getpid(), replay_data_file_path, time.time() - start_time))
+                print('decode_data: pid: %i; exporting to decode_data_file_path: %s took %.1f s' %
+                      (os.getpid(), decode_data_file_path, time.time() - start_time))
 
         for temp_output_path in temp_output_path_list:
             os.remove(temp_output_path)
@@ -607,17 +605,17 @@ def process_replay_data(replay_data_file_path, replay_trial_keys, export_data_ke
     return decoded_pos_matrix_dict
 
 
-def load_processed_replay_data(replay_data_file_path, export_data_key):
+def load_decoded_data(decode_data_file_path, export_data_key):
     """
 
-    :param replay_data_file_path: str (path)
+    :param decode_data_file_path: str (path)
     :param export_data_key: str
     :return: dict: {pop_name: 2D array}
     """
     group_key = 'simple_network_processed_data'
     shared_context_key = 'shared_context'
     decoded_pos_matrix_dict = dict()
-    with h5py.File(replay_data_file_path, 'a') as f:
+    with h5py.File(decode_data_file_path, 'a') as f:
         group = get_h5py_group(f, [export_data_key, group_key, shared_context_key])
         subgroup = get_h5py_group(group, ['decoded_pos_matrix'])
         for pop_name in subgroup:
@@ -626,12 +624,12 @@ def load_processed_replay_data(replay_data_file_path, export_data_key):
     return decoded_pos_matrix_dict
 
 
-def analyze_decoded_trajectory_data(decoded_pos_matrix_dict, bin_dur, run_duration, plot=True):
+def analyze_decoded_trajectory_data(decoded_pos_matrix_dict, bin_dur, template_duration, plot=True):
     """
 
     :param decoded_pos_matrix_dict: dict or list of dict: {pop_name: 2d array of float}
     :param bin_dur: float
-    :param run_duration: float
+    :param template_duration: float
     :param plot: bool
     :return:
     """
@@ -651,7 +649,7 @@ def analyze_decoded_trajectory_data(decoded_pos_matrix_dict, bin_dur, run_durati
         decoded_velocity_var_dict = defaultdict(list)
         decoded_velocity_mean_dict = defaultdict(list)
         for pop_name in decoded_pos_matrix_dict:
-            this_decoded_pos_matrix = decoded_pos_matrix_dict[pop_name][:, :] / run_duration
+            this_decoded_pos_matrix = decoded_pos_matrix_dict[pop_name][:, :] / template_duration
             clean_indexes = ~np.isnan(this_decoded_pos_matrix)
             all_decoded_pos_dict[pop_name] = this_decoded_pos_matrix[clean_indexes]
             for trial in range(this_decoded_pos_matrix.shape[0]):
@@ -786,30 +784,31 @@ def analyze_decoded_trajectory_data(decoded_pos_matrix_dict, bin_dur, run_durati
     fig.show()
 
 
-def batch_analyze_decoded_trajectory_data(replay_data_file_path_list, export_data_key_list=None, bin_dur=20.,
-                                          run_duration=None, plot=True):
+def batch_analyze_decoded_trajectory_data(decode_data_file_path_list, export_data_key_list=None, bin_dur=20.,
+                                          template_duration=None, plot=True):
     """
 
-    :param replay_data_file_path_list: list of str (path)
+    :param decode_data_file_path_list: list of str (path)
     :param export_data_key_list: list of str, or single str to be applied to all files
     :param bin_dur: float
-    :param run_duration: float
+    :param template_duration: float
     :param plot: bool
     """
-    if run_duration is None:
-        if 'run_duration' not in context():
-            raise RuntimeError('batch_analyze_decoded_trajectory_data: missing required parameter: run_duration')
+    if template_duration is None:
+        if 'template_duration' not in context():
+            raise RuntimeError('batch_analyze_decoded_trajectory_data: missing required parameter: template_duration')
         else:
-            run_duration = context.run_duration
+            template_duration = context.template_duration
     if export_data_key_list is None:
-        export_data_key_list = [context.export_data_key] * len(replay_data_file_path_list)
+        export_data_key_list = [context.export_data_key] * len(decode_data_file_path_list)
     elif not isinstance(export_data_key_list, list):
-        export_data_key_list = [export_data_key_list] * len(replay_data_file_path_list)
+        export_data_key_list = [export_data_key_list] * len(decode_data_file_path_list)
     decoded_pos_matrix_dict_list = []
-    for replay_data_file_path, export_data_key in zip(replay_data_file_path_list, export_data_key_list):
-        decoded_pos_matrix_dict = load_processed_replay_data(replay_data_file_path, export_data_key)
+    for decode_data_file_path, export_data_key in zip(decode_data_file_path_list, export_data_key_list):
+        decoded_pos_matrix_dict = load_decoded_data(decode_data_file_path, export_data_key)
         decoded_pos_matrix_dict_list.append(decoded_pos_matrix_dict)
-    analyze_decoded_trajectory_data(decoded_pos_matrix_dict_list, bin_dur=bin_dur, run_duration=run_duration, plot=plot)
+    analyze_decoded_trajectory_data(decoded_pos_matrix_dict_list, bin_dur=bin_dur, template_duration=template_duration,
+                                    plot=plot)
 
 
 if __name__ == '__main__':

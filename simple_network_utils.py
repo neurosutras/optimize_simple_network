@@ -1216,13 +1216,16 @@ def get_pop_mean_rate_from_binned_spike_count(binned_spike_count_dict, dt):
     return pop_mean_rate_dict
 
 
-def get_pop_activity_stats(firing_rates_dict, input_t, valid_t=None, threshold=2., plot=False):
+def get_pop_activity_stats(firing_rates_dict, input_t, valid_t=None, threshold=2., pop_order=None, label_dict=None,
+                           color_dict=None, plot=False):
     """
     Calculate firing rate statistics for each cell population.
     :param firing_rates_dict: nested dict of array
     :param input_t: array
     :param valid_t: array
     :param threshold: firing rate threshold for "active" cells: float (Hz)
+    :param label_dict: dict; {pop_name: label}
+    :param color_dict: dict; {pop_name: str}
     :param plot: bool
     :return: tuple of dict
     """
@@ -1238,6 +1241,7 @@ def get_pop_activity_stats(firing_rates_dict, input_t, valid_t=None, threshold=2
         valid_indexes = ()
     else:
         valid_indexes = np.where((input_t >= valid_t[0]) & (input_t <= valid_t[-1]))[0]
+
     for pop_name in firing_rates_dict:
         this_active_cell_count = np.zeros_like(valid_t)
         this_summed_rate_active_cells = np.zeros_like(valid_t)
@@ -1266,20 +1270,120 @@ def get_pop_activity_stats(firing_rates_dict, input_t, valid_t=None, threshold=2
             mean_peak_rate_dict[pop_name] = 0.
 
     if plot:
-        fig, axes = plt.subplots(1, 2)
-        for pop_name in pop_fraction_active_dict:
-            axes[0].plot(valid_t, pop_fraction_active_dict[pop_name], label=pop_name)
-            axes[0].set_title('Active fraction of population', fontsize=mpl.rcParams['font.size'])
-            axes[1].plot(valid_t, mean_rate_active_cells_dict[pop_name])
-            axes[1].set_title('Mean firing rate of active cells', fontsize=mpl.rcParams['font.size'])
-        axes[0].set_ylim(0., axes[0].get_ylim()[1])
-        axes[1].set_ylim(0., axes[1].get_ylim()[1])
-        axes[0].legend(loc='best', frameon=False, framealpha=0.5, fontsize=mpl.rcParams['font.size'])
-        clean_axes(axes)
-        fig.tight_layout()
-        fig.show()
+        plot_pop_activity_stats(valid_t, mean_rate_active_cells_dict, pop_fraction_active_dict, pop_order=pop_order,
+                                label_dict=label_dict, color_dict=color_dict)
 
     return mean_min_rate_dict, mean_peak_rate_dict, mean_rate_active_cells_dict, pop_fraction_active_dict
+
+
+def get_trial_averaged_pop_activity_stats(mean_rate_active_cells_dict_list, pop_fraction_active_dict_list):
+    """
+    Given lists of dicts containing data across trials or network instances, return dicts containing the mean and sem
+    for the fraction active and mean rate of active cells for each cell population.
+    :param mean_rate_active_cells_dict_list: list of dict of array of float
+    :param pop_fraction_active_dict_list: list of dict of array of float
+    :return: tuple of dict
+    """
+    mean_rate_active_cells_mean_dict = {}
+    mean_rate_active_cells_sem_dict = {}
+    pop_fraction_active_mean_dict = {}
+    pop_fraction_active_sem_dict = {}
+
+    num_instances = len(mean_rate_active_cells_dict_list)
+    for mean_rate_active_cells_dict_instance in mean_rate_active_cells_dict_list:
+        for pop_name in mean_rate_active_cells_dict_instance:
+            if pop_name not in mean_rate_active_cells_mean_dict:
+                mean_rate_active_cells_mean_dict[pop_name] = []
+            mean_rate_active_cells_mean_dict[pop_name].append(mean_rate_active_cells_dict_instance[pop_name])
+    for pop_name in mean_rate_active_cells_mean_dict:
+        mean_rate_active_cells_sem_dict[pop_name] = np.std(mean_rate_active_cells_mean_dict[pop_name],
+                                                           axis=0) / np.sqrt(num_instances)
+        mean_rate_active_cells_mean_dict[pop_name] = np.mean(mean_rate_active_cells_mean_dict[pop_name], axis=0)
+
+    for pop_fraction_active_dict_instance in pop_fraction_active_dict_list:
+        for pop_name in pop_fraction_active_dict_instance:
+            if pop_name not in pop_fraction_active_mean_dict:
+                pop_fraction_active_mean_dict[pop_name] = []
+            pop_fraction_active_mean_dict[pop_name].append(pop_fraction_active_dict_instance[pop_name])
+    for pop_name in pop_fraction_active_mean_dict:
+        pop_fraction_active_sem_dict[pop_name] = np.std(pop_fraction_active_mean_dict[pop_name], axis=0) / np.sqrt(
+            num_instances)
+        pop_fraction_active_mean_dict[pop_name] = np.mean(pop_fraction_active_mean_dict[pop_name], axis=0)
+
+    return mean_rate_active_cells_mean_dict, mean_rate_active_cells_sem_dict, pop_fraction_active_mean_dict, \
+           pop_fraction_active_sem_dict
+
+
+def plot_pop_activity_stats(t, mean_rate_active_cells_mean_dict, pop_fraction_active_mean_dict,
+                            mean_rate_active_cells_sem_dict=None,
+                            pop_fraction_active_sem_dict=None, pop_order=None, label_dict=None, color_dict=None):
+    """
+    Plot fraction active and mean rate of active cells for each cell population.
+    :param t: array of float
+    :param mean_rate_active_cells_mean_dict: dict of array of float
+    :param pop_fraction_active_mean_dict: dict of array of float
+    :param mean_rate_active_cells_sem_dict: dict of array of float
+    :param pop_fraction_active_sem_dict: dict of array of float
+    :param pop_order: list of str; order of populations for plot legend
+    :param label_dict: dict; {pop_name: label}
+    :param color_dict: dict; {pop_name: str}
+    """
+    if pop_order is None:
+        pop_order = sorted(list(mean_rate_active_cells_mean_dict.keys()))
+
+    fig, axes = plt.subplots(1, 2, figsize=(7., 4.))
+    for pop_name in pop_order:
+        if label_dict is not None:
+            label = label_dict[pop_name]
+        else:
+            label = pop_name
+        if color_dict is not None:
+            color = color_dict[pop_name]
+            axes[0].plot(t / 1000., pop_fraction_active_mean_dict[pop_name], label=label, color=color, linewidth=2.)
+            if pop_fraction_active_sem_dict is not None:
+                axes[0].fill_between(t / 1000.,
+                                     pop_fraction_active_mean_dict[pop_name] - pop_fraction_active_sem_dict[pop_name],
+                                     pop_fraction_active_mean_dict[pop_name] + pop_fraction_active_sem_dict[pop_name],
+                                     color=color,
+                                     alpha=0.25, linewidth=0)
+            axes[1].plot(t / 1000., mean_rate_active_cells_mean_dict[pop_name], color=color, linewidth=2.)
+            if mean_rate_active_cells_sem_dict is not None:
+                axes[1].fill_between(t / 1000.,
+                                     mean_rate_active_cells_mean_dict[pop_name] - mean_rate_active_cells_sem_dict[
+                                         pop_name],
+                                     mean_rate_active_cells_mean_dict[pop_name] + mean_rate_active_cells_sem_dict[
+                                         pop_name], color=color,
+                                     alpha=0.25, linewidth=0)
+        else:
+            axes[0].plot(valid_t / 1000., pop_fraction_active_mean_dict[pop_name], label=label, linewidth=2.)
+            if pop_fraction_active_sem_dict is not None:
+                axes[0].fill_between(t / 1000.,
+                                     pop_fraction_active_mean_dict[pop_name] - pop_fraction_active_sem_dict[pop_name],
+                                     pop_fraction_active_mean_dict[pop_name] + pop_fraction_active_sem_dict[pop_name],
+                                     alpha=0.25, linewidth=0)
+            axes[1].plot(valid_t / 1000., mean_rate_active_cells_mean_dict[pop_name], linewidth=2.)
+            if mean_rate_active_cells_sem_dict is not None:
+                axes[1].fill_between(t / 1000.,
+                                     mean_rate_active_cells_mean_dict[pop_name] - mean_rate_active_cells_sem_dict[
+                                         pop_name],
+                                     mean_rate_active_cells_mean_dict[pop_name] + mean_rate_active_cells_sem_dict[
+                                         pop_name],
+                                     alpha=0.25, linewidth=0)
+
+    axes[0].set_title('Active fraction\nof population', fontsize=mpl.rcParams['font.size'])
+    axes[1].set_title('Mean firing rate\nof active cells', fontsize=mpl.rcParams['font.size'])
+    axes[0].set_ylim((0., axes[0].get_ylim()[1]))
+    axes[1].set_ylim((0., axes[1].get_ylim()[1]))
+    axes[0].set_ylabel('Fraction')
+    axes[1].set_ylabel('Firing rate (Hz)')
+    axes[0].set_xlabel('Time (s)')
+    axes[1].set_xlabel('Time (s)')
+    axes[0].set_xticks(np.arange(0., axes[0].get_xlim()[1], 1.))
+    axes[1].set_xticks(np.arange(0., axes[1].get_xlim()[1], 1.))
+    axes[0].legend(loc='best', frameon=False, framealpha=0.5, fontsize=mpl.rcParams['font.size'], handlelength=1)
+    clean_axes(axes)
+    fig.tight_layout()
+    fig.show()
 
 
 def get_butter_bandpass_filter(filter_band, sampling_rate, order, filter_label='', plot=False):
@@ -1796,7 +1900,7 @@ def get_pop_lowpass_filtered_signal_stats(signal_dict, filter_band_dict, input_t
 
 
 def plot_heatmap_from_matrix(data, xticks=None, xtick_labels=None, yticks=None, ytick_labels=None, ax=None,
-                             cbar_kw={}, cbar_label="", **kwargs):
+                             cbar_kw={}, cbar_label="", rotate_xtick_labels=False, **kwargs):
     """
     Create a heatmap from a numpy array and two lists of labels.
 
@@ -1813,6 +1917,7 @@ def plot_heatmap_from_matrix(data, xticks=None, xtick_labels=None, yticks=None, 
         cbar_kw    : A dictionary with arguments to
                      :meth:`matplotlib.Figure.colorbar`.
         cbar_label  : The label for the colorbar
+        rotate_xtick_labels    : bool; whether to rotate xtick labels
     All other arguments are directly passed on to the imshow call.
     """
     if not ax:
@@ -1834,9 +1939,10 @@ def plot_heatmap_from_matrix(data, xticks=None, xtick_labels=None, yticks=None, 
     if ytick_labels is not None:
         ax.set_yticklabels(ytick_labels)
 
-    # Rotate the tick labels and set their alignment.
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right",
-             rotation_mode="anchor")
+    if rotate_xtick_labels:
+        # Rotate the tick labels and set their alignment.
+        plt.setp(ax.get_xticklabels(), rotation=45, ha="right",
+                 rotation_mode="anchor")
 
 
 def get_mass_index(signal, fraction=0.5, subtract_min=True):
@@ -1988,8 +2094,9 @@ def plot_weight_matrix(connection_weights_dict, pop_gid_ranges, tuning_peak_locs
     """
     Plots heat maps of connection strengths across all connected cell populations. If input activity or input weights
     are spatially tuned, cell ids are also sorted by peak location.
-    :param connection_weights_dict: nested dict: {'target_pop_name': {'target_gid': {'source_pop_name':
-                                                    {'source_gid': float} } } }
+    Assumes rows and columns of connection weight matrices are sorted by gid, not by peak location.
+    :param connection_weights_dict: nested dict: {'target_pop_name': {'source_pop_name':
+                2d array of float with shape (num_target_cells, num_source_cells) } }
     :param pop_gid_ranges: dict: {'pop_name', tuple of int}
     :param tuning_peak_locs: nested dict: {'pop_name': {'gid': float} }
     :param pop_names: list of str
@@ -2110,52 +2217,100 @@ def plot_firing_rate_heatmaps(firing_rates_dict, input_t, valid_t=None, pop_name
         fig.show()
 
 
-def plot_firing_rate_heatmaps_from_matrix(firing_rates_matrix_dict, binned_t_edges, pop_names=None, sorted_gids=None,
+def plot_firing_rate_heatmaps_from_matrix(firing_rates_matrix_dict, binned_t_edges, gids_sorted=True, pop_order=None,
+                                          label_dict=None,
                                           normalize_t=True):
     """
 
     :param firing_rates_matrix_dict: dict of array
     :param binned_t_edges: array
-    :param pop_names: list of str
-    :param sorted_gids: dict: {pop_name (str): array of int}
+    :param gids_sorted: bool; whether to label cell ids as sorted
+    :param pop_order: list of str; order of populations for plot legend
+    :param label_dict: dict; {pop_name: label}
     :param normalize_t: bool
     """
-    if pop_names is None:
-        pop_names = sorted(list(firing_rates_matrix_dict.keys()))
-    for pop_name in pop_names:
+    if pop_order is None:
+        pop_order = sorted(list(firing_rates_matrix_dict.keys()))
+
+    num_pops = len(firing_rates_matrix_dict)
+    fig, axes = plt.subplots(1, num_pops, figsize=(4. * num_pops, 3.5))
+
+    for i, pop_name in enumerate(pop_order):
         this_firing_rate_matrix = firing_rates_matrix_dict[pop_name]
-        if sorted_gids is not None:
-            sort = pop_name in sorted_gids and len(sorted_gids[pop_name]) > 0
-            if sort:
-                this_sorted_gids = sorted_gids[pop_name]
-            else:
-                this_sorted_gids = np.array(list(range(this_firing_rate_matrix.shape[0])))
+        if normalize_t:
+            extent = (0., 1., len(this_firing_rate_matrix) - 0.5, -0.5)
         else:
-            sort = False
-            this_sorted_gids = np.array(list(range(this_firing_rate_matrix.shape[0])))
-        fig, axes = plt.subplots()
-        y_interval = max(2, len(this_sorted_gids) // 10)
-        min_gid = np.min(this_sorted_gids)
-        yticks = list(range(0, len(this_sorted_gids), y_interval))
-        ylabels = np.add(yticks, min_gid)
-        xticks = np.linspace(0, len(binned_t_edges), 6)
-        if normalize_t is None:
-            xlabels = binned_t_edges[xticks].astype('int32')
+            extent = (binned_t_edges[0] / 1000., binned_t_edges[-1] / 1000., len(this_firing_rate_matrix) - 0.5, -0.5)
+
+        plot_heatmap_from_matrix(this_firing_rate_matrix, ax=axes[i], aspect='auto', cbar_label='Firing rate (Hz)',
+                                 vmin=0., extent=extent)
+        if normalize_t:
+            axes[i].set_xlabel('Normalized track length')
         else:
-            xlabels = np.linspace(0., 1., 6)
-        plot_heatmap_from_matrix(this_firing_rate_matrix, xticks=xticks, xtick_labels=xlabels, yticks=yticks,
-                                 ytick_labels=ylabels, ax=axes, aspect='auto', cbar_label='Firing rate (Hz)',
-                                 vmin=0.)
-        axes.set_xlabel('Time (ms)')
-        if sort:
-            axes.set_title('Firing rate: %s population' % pop_name, fontsize=mpl.rcParams['font.size'])
-            axes.set_ylabel('Sorted Cell ID')
+            axes[i].set_xlabel('Time (s)')
+        if gids_sorted:
+            axes[i].set_ylabel('Sorted Cell ID')
         else:
-            axes.set_title('Firing rate: %s population' % pop_name, fontsize=mpl.rcParams['font.size'])
-            axes.set_ylabel('Cell ID')
-        clean_axes(axes)
-        fig.tight_layout()
-        fig.show()
+            axes[i].set_ylabel('Cell ID')
+        if label_dict is not None:
+            label = label_dict[pop_name]
+        else:
+            label = pop_name
+        axes[i].set_title('%s' % label, fontsize=mpl.rcParams['font.size'])
+
+    clean_axes(axes)
+    fig.tight_layout()
+    fig.show()
+
+
+def plot_average_selectivity(binned_t_edges, centered_firing_rate_mean_dict, centered_firing_rate_sem_dict=None,
+                             pop_order=None, label_dict=None, color_dict=None):
+    """
+
+    :param binned_t_edges: array of float
+    :param centered_firing_rate_mean_dict: dict of array of float
+    :param centered_firing_rate_sem_dict: dict of array of float
+    :param pop_order: list of str; order of populations for plot legend
+    :param label_dict: dict; {pop_name: label}
+    :param color_dict: dict; {pop_name: str}
+    """
+    center_index = len(binned_t_edges) // 2
+    offset_binned_t_edges = (binned_t_edges - binned_t_edges[center_index]) / 1000.
+
+    fig, axis = plt.subplots(1, figsize=(4., 3.5))
+
+    if pop_order is None:
+        pop_order = sorted(list(centered_firing_rate_mean_dict.keys()))
+
+    for pop_name in pop_order:
+        if label_dict is not None:
+            label = label_dict[pop_name]
+        else:
+            label = pop_name
+        if color_dict is not None:
+            color = color_dict[pop_name]
+            axis.plot(offset_binned_t_edges, centered_firing_rate_mean_dict[pop_name], color=color, label=label)
+            if centered_firing_rate_sem_dict is not None:
+                axis.fill_between(offset_binned_t_edges,
+                                  centered_firing_rate_mean_dict[pop_name] - centered_firing_rate_sem_dict[pop_name],
+                                  centered_firing_rate_mean_dict[pop_name] + centered_firing_rate_sem_dict[pop_name],
+                                  color=color, alpha=0.25, linewidth=0)
+        else:
+            axis.plot(offset_binned_t_edges, centered_firing_rate_mean_dict[pop_name], label=label)
+            if centered_firing_rate_sem_dict is not None:
+                axis.fill_between(offset_binned_t_edges,
+                                  centered_firing_rate_mean_dict[pop_name] - centered_firing_rate_sem_dict[pop_name],
+                                  centered_firing_rate_mean_dict[pop_name] + centered_firing_rate_sem_dict[pop_name],
+                                  alpha=0.25, linewidth=0)
+
+    axis.set_ylim((0., axis.get_ylim()[1]))
+    axis.set_title('Selectivity', fontsize=mpl.rcParams['font.size'])
+    axis.set_ylabel('Firing rate (Hz)')
+    axis.set_xlabel('Time to peak firing rate (s)')
+    axis.legend(loc='best', fontsize=mpl.rcParams['font.size'], frameon=False, framealpha=0.5, handlelength=1)
+    clean_axes([axis])
+    fig.tight_layout()
+    fig.show()
 
 
 def plot_population_spike_rasters(binned_spike_count_dict, input_t, valid_t=None, pop_names=None,
@@ -2282,21 +2437,193 @@ def plot_2D_connection_distance(pop_syn_proportions, pop_cell_positions, connect
                 fig.show()
 
 
-def analyze_simple_network_run_data_from_file(data_file_path, data_key=None, trial=None, verbose=False,
-                                              return_context=False, plot=True):
+def get_firing_rate_matrix_dict_from_nested_dict(firing_rates_dict, binned_t_edges):
+    """
+    Given a dictionary of firing rates organized by population and gid, return a dictionary containing a firing rate
+    matrix for each population. Also return a dictionary with the unsorted gid order of each matrix.
+    :param firing_rates_dict: nested dict of float: {pop_name (str): {gid (int): float } }
+    :param binned_t_edges: array of float
+    :return: tuple: dict of 2d array of float: {pop_name: 2d array with shape (num_cells, num bins)},
+                    dict of array of int: {pop_name: array of gids}
+    """
+    firing_rate_matrix_dict = {}
+    gid_order_dict = {}
+
+    for pop_name in firing_rates_dict:
+        firing_rate_matrix_dict[pop_name] = np.empty((len(firing_rates_dict[pop_name]), len(binned_t_edges)))
+        gid_order = sorted(list(firing_rates_dict[pop_name].keys()))
+        for i, gid in enumerate(gid_order):
+            firing_rate_matrix_dict[pop_name][i, :] = firing_rates_dict[pop_name][gid]
+        gid_order_dict[pop_name] = np.array(gid_order)
+
+    return firing_rate_matrix_dict, gid_order_dict
+
+
+def analyze_selectivity_from_firing_rate_matrix_dict(firing_rate_matrix_dict, gid_order_dict):
     """
 
+    :param firing_rate_matrix_dict: dict of 2d array of float: {pop_name: 2d array with shape (num_cells, num bins)}
+    :param gid_order_dict: dict of array of int
+    :return: tuple: dict of array of float: {pop_name: array of length (num bins)}; population mean, peak centered,
+                    dict of array of float: {pop_name: array of length (num bins)}; population sem, peak centered,
+                    dict of array of int: {pop_name: array of gids}; sorted gid order
+    """
+    centered_firing_rate_mean_dict = {}
+    centered_firing_rate_sem_dict = {}
+    sorted_gid_dict = {}
+
+    for pop_name in firing_rate_matrix_dict:
+        centered_firing_rate_matrix = np.empty_like(firing_rate_matrix_dict[pop_name])
+        peak_indexes = []
+        center_index = centered_firing_rate_matrix.shape[1] // 2
+        for i in range(len(centered_firing_rate_matrix)):
+            rate = firing_rate_matrix_dict[pop_name][i]
+            peak_index = np.argmax(rate)
+            peak_indexes.append(peak_index)
+            centered_firing_rate_matrix[i] = np.roll(rate, -peak_index + center_index)
+        sorted_gid_indexes = np.argsort(peak_indexes)
+        sorted_gid_dict[pop_name] = gid_order_dict[pop_name][sorted_gid_indexes]
+        centered_firing_rate_mean_dict[pop_name] = np.mean(centered_firing_rate_matrix, axis=0)
+        centered_firing_rate_sem_dict[pop_name] = \
+            np.std(centered_firing_rate_matrix, axis=0) / np.sqrt(len(centered_firing_rate_matrix))
+
+    return centered_firing_rate_mean_dict, centered_firing_rate_sem_dict, sorted_gid_dict
+
+
+def sort_firing_rate_matrix_dict(firing_rate_matrix_dict, gid_order_dict, sorted_gid_dict):
+    """
+    Given a dictionary of firing rate matrices organized by population, re-sort the matrices according to the
+    specified sorted_gid_dict.
+    cell. Also return a dictionary with the sorted gid order of each matrix.
+    :param firing_rate_matrix_dict: dict of 2d array of float: {pop_name: 2d array with shape (num_cells, num bins)}
+    :param gid_order_dict: dict of array of int; initial sorting
+    :param sorted_gid_dict: dict of array of int; new sorting
+    :return: tuple: dict of 2d array of float: {pop_name: 2d array with shape (num_cells, num bins)},
+                    dict of array of int: {pop_name: array of gids}
+    """
+    sorted_firing_rate_matrix_dict = {}
+    for pop_name in firing_rate_matrix_dict:
+        gid_index_dict = dict(zip(gid_order_dict[pop_name], range(len(gid_order_dict[pop_name]))))
+        sorted_indexes = []
+        for gid in sorted_gid_dict[pop_name]:
+            index = gid_index_dict[gid]
+            sorted_indexes.append(index)
+        sorted_indexes = np.asarray(sorted_indexes)
+        sorted_firing_rate_matrix_dict[pop_name] = firing_rate_matrix_dict[pop_name][sorted_indexes]
+
+    return sorted_firing_rate_matrix_dict
+
+
+def get_trial_averaged_fft_power(fft_f, fft_power_dict_list):
+    """
+    Given lists of dicts containing data across trials or network instances, return dicts containing the mean and sem
+    for fft power for each cell population.
+    :param fft_f: array of float
+    :param fft_power_dict_list: list of dict: {pop_name: array of float}
+    :return: tuple of dict
+    """
+    fft_power_mean_dict = {}
+    fft_power_sem_dict = {}
+    num_instances = len(fft_power_dict_list)
+    for fft_power_dict in fft_power_dict_list:
+        for pop_name in fft_power_dict:
+            if pop_name not in fft_power_mean_dict:
+                fft_power_mean_dict[pop_name] = []
+            fft_power_mean_dict[pop_name].append(fft_power_dict[pop_name])
+    for pop_name in fft_power_mean_dict:
+        fft_power_sem_dict[pop_name] = np.std(fft_power_mean_dict[pop_name], axis=0) / np.sqrt(num_instances)
+        fft_power_mean_dict[pop_name] = np.mean(fft_power_mean_dict[pop_name], axis=0)
+
+    return fft_power_mean_dict, fft_power_sem_dict
+
+
+def plot_rhythmicity(fft_f, fft_power_mean_dict, fft_power_sem_dict=None, freq_max=250., pop_order=None,
+                     label_dict=None, color_dict=None):
+    """
+
+    :param fft_f: array of float
+    :param fft_power_mean_dict: dict: {pop_name: array of float}
+    :param fft_power_sem_dict: dict: {pop_name: array of float}
+    :param freq_max: float
+    :param pop_order: list of str; order of populations for plot legend
+    :param label_dict: dict; {pop_name: label}
+    :param color_dict: dict; {pop_name: str}
+    """
+    fig, axes = plt.subplots(1, figsize=(4., 3.5))
+    freq_max_index = np.where(fft_f >= freq_max)[0][0]
+
+    if pop_order is None:
+        pop_order = sorted(list(fft_power_mean_dict.keys()))
+
+    for pop_name in pop_order:
+        if label_dict is not None:
+            label = label_dict[pop_name]
+        else:
+            label = pop_name
+        if color_dict is not None:
+            color = color_dict[pop_name]
+            axes.semilogy(fft_f[1:freq_max_index], fft_power_mean_dict[pop_name][1:freq_max_index],
+                          label=label, color=color)
+            if fft_power_sem_dict is not None:
+                axes.fill_between(fft_f[1:freq_max_index], fft_power_mean_dict[pop_name][1:freq_max_index] +
+                                  fft_power_sem_dict[pop_name][1:freq_max_index],
+                                  fft_power_mean_dict[pop_name][1:freq_max_index] -
+                                  fft_power_sem_dict[pop_name][1:freq_max_index], alpha=0.25, linewidth=0,
+                                  color=color)
+        else:
+            axes.semilogy(fft_f[1:freq_max_index], fft_power_mean_dict[pop_name][1:freq_max_index],
+                          label=label)
+            if fft_power_sem_dict is not None:
+                axes.fill_between(fft_f[1:freq_max_index], fft_power_mean_dict[pop_name][1:freq_max_index] +
+                                  fft_power_sem_dict[pop_name][1:freq_max_index],
+                                  fft_power_mean_dict[pop_name][1:freq_max_index] -
+                                  fft_power_sem_dict[pop_name][1:freq_max_index], alpha=0.25, linewidth=0)
+    axes.set_xlabel('Frequency (Hz)')
+    axes.set_ylabel('Power spectral density\n(units$^{2}$/Hz) (Log scale)')
+    axes.legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
+    clean_axes(axes)
+    fig.tight_layout()
+    fig.show()
+
+
+def get_trial_averaged_firing_rate_matrix_dict(firing_rate_matrix_dict_list):
+    """
+    Given a list of firing rate matrix dicts with the same default gid ordering, average across the trials in the list
+    and returned the mean firing rate matrix dict.
+    :param firing_rate_matrix_dict_list: list of dict of 2d array of float (num cells, num time points)
+    :return: list of dict of 2d array of float (num cells, num time points)
+    """
+    mean_firing_rate_matrix_dict = dict()
+    for pop_name in firing_rate_matrix_dict_list[0]:
+        mean_firing_rate_matrix_dict[pop_name] = \
+            np.mean([this_firing_rate_matrix_dict[pop_name]
+                     for this_firing_rate_matrix_dict in firing_rate_matrix_dict_list], axis=0)
+
+    return mean_firing_rate_matrix_dict
+
+
+def analyze_simple_network_run_data_from_file(data_file_path, data_key='0', example_trial=0, fine_binned_dt=1.,
+                                              coarse_binned_dt=20., verbose=False, pop_order=None, label_dict=None,
+                                              color_dict=None, plot=True):
+    """
+    Given an hdf5 file containing multiple trials from one network instance, import data, process data, plot example
+    traces from the specified trial, and plot trial averages for sparsity, selectivity, and rhythmicity.
     :param data_file_path: str (path)
     :param data_key: int or str
-    :param trial: int
+    :param example_trial: int
+    :param fine_binned_dt: float
+    :param coarse_binned_dt: float
     :param verbose: bool
-    :param return_context: bool
+    :param pop_order: list of str; order of populations for plot legend
+    :param label_dict: dict; {pop_name: label}
+    :param color_dict: dict; {pop_name: str}
     :param plot: bool
     """
     if not os.path.isfile(data_file_path):
         raise IOError('analyze_simple_network_run_data_from_file: invalid data file path: %s' % data_file_path)
 
-    full_spike_times_dict = defaultdict(dict)
+    trial_key_list = []
+    full_spike_times_dict_list = []
     binned_firing_rates_dict = defaultdict(dict)
     filter_bands = dict()
     subset_full_voltage_rec_dict = defaultdict(dict)
@@ -2314,6 +2641,7 @@ def analyze_simple_network_run_data_from_file(data_file_path, data_key=None, tri
         connectivity_type = get_h5py_attr(subgroup.attrs, 'connectivity_type')
         active_rate_threshold = subgroup.attrs['active_rate_threshold']
         duration = get_h5py_attr(subgroup.attrs, 'duration')
+        buffer = get_h5py_attr(subgroup.attrs, 'buffer')
         network_id = get_h5py_attr(subgroup.attrs, 'network_id')
         network_instance = get_h5py_attr(subgroup.attrs, 'network_instance')
         baks_alpha = get_h5py_attr(subgroup.attrs, 'baks_alpha')
@@ -2321,14 +2649,19 @@ def analyze_simple_network_run_data_from_file(data_file_path, data_key=None, tri
         baks_pad_dur = get_h5py_attr(subgroup.attrs, 'baks_pad_dur')
         baks_wrap_around = get_h5py_attr(subgroup.attrs, 'baks_wrap_around')
 
+        if 'full_rec_t' in subgroup:
+            full_rec_t = subgroup['full_rec_t'][:]
+            dt = full_rec_t[1] - full_rec_t[0]
+        else:
+            full_rec_t = None
+            dt = None
+
         pop_gid_ranges = dict()
         for pop_name in subgroup['pop_gid_ranges']:
             pop_gid_ranges[pop_name] = tuple(subgroup['pop_gid_ranges'][pop_name][:])
-        buffered_binned_t = subgroup['buffered_binned_t'][:]
-        binned_t = subgroup['binned_t'][:]
         data_group = subgroup['filter_bands']
-        for filter in data_group:
-            filter_bands[filter] = data_group[filter][:]
+        for this_filter in data_group:
+            filter_bands[this_filter] = data_group[this_filter][:]
         data_group = subgroup['connection_weights']
         for target_pop_name in data_group:
             connection_weights_dict[target_pop_name] = dict()
@@ -2365,62 +2698,111 @@ def analyze_simple_network_run_data_from_file(data_file_path, data_key=None, tri
             for gid, position in zip(data_group[pop_name]['gids'][:], data_group[pop_name]['positions'][:]):
                 pop_cell_positions[pop_name][gid] = position
 
-        subgroup = get_h5py_group(group, [trial])
-        full_binned_t = subgroup['full_binned_t'][:]
-        data_group = subgroup['full_spike_times']
-        for pop_name in data_group:
-            for gid_key in data_group[pop_name]:
-                full_spike_times_dict[pop_name][int(gid_key)] = data_group[pop_name][gid_key][:]
-        if 'binned_firing_rates' in subgroup:
-            data_group = subgroup['binned_firing_rates']
+        example_trial_key = str(example_trial)
+        for trial_key in (key for key in group if key != shared_context_key):
+            subgroup = group[trial_key]
+            data_group = subgroup['full_spike_times']
+            full_spike_times_dict = defaultdict(dict)
             for pop_name in data_group:
                 for gid_key in data_group[pop_name]:
-                    binned_firing_rates_dict[pop_name][int(gid_key)] = data_group[pop_name][gid_key][:]
-        else:
-            binned_firing_rates_dict = None
+                    full_spike_times_dict[pop_name][int(gid_key)] = data_group[pop_name][gid_key][:]
+            full_spike_times_dict_list.append(full_spike_times_dict)
+            trial_key_list.append(trial_key)
+            if trial_key == example_trial_key:
+                equilibrate = get_h5py_attr(subgroup.attrs, 'equilibrate')
+                if 'subset_full_voltage_recs' in subgroup:
+                    data_group = subgroup['subset_full_voltage_recs']
+                    for pop_name in data_group:
+                        for gid_key in data_group[pop_name]:
+                            subset_full_voltage_rec_dict[pop_name][int(gid_key)] = data_group[pop_name][gid_key][:]
+                else:
+                    subset_full_voltage_rec_dict = None
 
-        if 'subset_full_voltage_recs' in subgroup:
-            data_group = subgroup['subset_full_voltage_recs']
-            for pop_name in data_group:
-                for gid_key in data_group[pop_name]:
-                    subset_full_voltage_rec_dict[pop_name][int(gid_key)] = data_group[pop_name][gid_key][:]
-            full_rec_t = subgroup['full_rec_t'][:]
-            buffered_rec_t = subgroup['buffered_rec_t'][:]
-            rec_t = subgroup['rec_t'][:]
-        else:
-            subset_full_voltage_rec_dict = None
+    buffered_binned_t_edges = \
+        np.arange(-buffer, duration + buffer + fine_binned_dt / 2., fine_binned_dt)
+    buffered_binned_t = buffered_binned_t_edges[:-1] + fine_binned_dt / 2.
+    fine_binned_t_edges = np.arange(0., duration + fine_binned_dt / 2., fine_binned_dt)
+    binned_t = fine_binned_t_edges[:-1] + fine_binned_dt / 2.
+    binned_t_edges = np.arange(0., duration + coarse_binned_dt / 2., coarse_binned_dt)
 
-    if binned_firing_rates_dict is None:
+    firing_rate_matrix_dict_list = []
+    mean_rate_active_cells_dict_list = []
+    pop_fraction_active_dict_list = []
+    fft_power_dict_list = []
+
+    for trial_key, full_spike_times_dict in zip(trial_key_list, full_spike_times_dict_list):
+        current_time = time.time()
+        if trial_key == example_trial_key:
+            this_plot = True
+        else:
+            this_plot = False
         binned_firing_rates_dict = \
-            infer_firing_rates_baks(full_spike_times_dict, binned_t, alpha=baks_alpha, beta=baks_beta,
+            infer_firing_rates_baks(full_spike_times_dict, binned_t_edges, alpha=baks_alpha, beta=baks_beta,
                                     pad_dur=baks_pad_dur, wrap_around=baks_wrap_around)
-    full_binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict, full_binned_t)
+        firing_rate_matrix_dict, gid_order_dict = \
+            get_firing_rate_matrix_dict_from_nested_dict(binned_firing_rates_dict, binned_t_edges)
+        firing_rate_matrix_dict_list.append(firing_rate_matrix_dict)
 
-    binned_dt = binned_t[1] - binned_t[0]
-    full_pop_mean_rate_from_binned_spike_count_dict = \
-        get_pop_mean_rate_from_binned_spike_count(full_binned_spike_count_dict, dt=binned_dt)
-    _ = get_pop_activity_stats(binned_firing_rates_dict, input_t=binned_t, threshold=active_rate_threshold, plot=plot)
-    _ = get_pop_bandpass_filtered_signal_stats(full_pop_mean_rate_from_binned_spike_count_dict, filter_bands,
-                                               input_t=full_binned_t, valid_t=buffered_binned_t, output_t=binned_t,
-                                               plot=plot, verbose=verbose)
-    if plot:
-        plot_inferred_spike_rates(full_spike_times_dict, binned_firing_rates_dict, input_t=binned_t,
-                                  active_rate_threshold=active_rate_threshold)
-        if subset_full_voltage_rec_dict is not None:
-            plot_voltage_traces(subset_full_voltage_rec_dict, full_rec_t, valid_t=rec_t,
-                                spike_times_dict=full_spike_times_dict)
-        plot_weight_matrix(connection_weights_dict, pop_gid_ranges=pop_gid_ranges, tuning_peak_locs=tuning_peak_locs)
-        plot_firing_rate_heatmaps(binned_firing_rates_dict, input_t=binned_t, tuning_peak_locs=tuning_peak_locs)
-        if connectivity_type == 'gaussian':
-            plot_2D_connection_distance(pop_syn_proportions, pop_cell_positions, connectivity_dict)
+        buffered_binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict, buffered_binned_t_edges)
+        buffered_pop_mean_rate_from_binned_spike_count_dict = \
+            get_pop_mean_rate_from_binned_spike_count(buffered_binned_spike_count_dict, dt=fine_binned_dt)
 
-    if return_context:
-        context = Context()
-        context.update(locals())
-        return context
+        mean_min_rate_dict, mean_peak_rate_dict, mean_rate_active_cells_dict, pop_fraction_active_dict = \
+            get_pop_activity_stats(binned_firing_rates_dict, input_t=binned_t_edges, threshold=active_rate_threshold)
+        mean_rate_active_cells_dict_list.append(mean_rate_active_cells_dict)
+        pop_fraction_active_dict_list.append(pop_fraction_active_dict)
+
+        fft_f_dict, fft_power_dict, filter_psd_f_dict, filter_psd_power_dict, filter_envelope_dict, \
+        filter_envelope_ratio_dict, centroid_freq_dict, freq_tuning_index_dict = \
+            get_pop_bandpass_filtered_signal_stats(buffered_pop_mean_rate_from_binned_spike_count_dict,
+                                                   filter_bands, input_t=buffered_binned_t,
+                                                   valid_t=buffered_binned_t, output_t=binned_t, pad=True,
+                                                   plot=this_plot)
+        fft_power_dict_list.append(fft_power_dict)
+
+        if this_plot:
+            plot_inferred_spike_rates(full_spike_times_dict, binned_firing_rates_dict, input_t=binned_t_edges,
+                                      active_rate_threshold=active_rate_threshold)
+            if subset_full_voltage_rec_dict is not None and full_rec_t is not None:
+                rec_t = np.arange(0., duration, dt)
+                plot_voltage_traces(subset_full_voltage_rec_dict, full_rec_t, valid_t=rec_t)
+
+            if connectivity_type == 'gaussian':
+                plot_2D_connection_distance(pop_syn_proportions, pop_cell_positions, connectivity_dict)
+        print('Processed trial: %s from file: %s in %.1f s' % (trial_key, data_file_path, time.time() - current_time))
+
+    trial_averaged_firing_rate_matrix_dict = get_trial_averaged_firing_rate_matrix_dict(firing_rate_matrix_dict_list)
+    centered_firing_rate_mean_dict, centered_firing_rate_sem_dict, sorted_gid_dict = \
+        analyze_selectivity_from_firing_rate_matrix_dict(trial_averaged_firing_rate_matrix_dict, gid_order_dict)
+    sorted_trial_averaged_firing_rate_matrix_dict = \
+        sort_firing_rate_matrix_dict(trial_averaged_firing_rate_matrix_dict, gid_order_dict, sorted_gid_dict)
+    plot_firing_rate_heatmaps_from_matrix(sorted_trial_averaged_firing_rate_matrix_dict, binned_t_edges,
+                                          gids_sorted=True, \
+                                          pop_order=pop_order, label_dict=label_dict, normalize_t=False)
+    plot_average_selectivity(binned_t_edges, centered_firing_rate_mean_dict, centered_firing_rate_sem_dict,
+                             pop_order=pop_order, label_dict=label_dict, color_dict=color_dict)
+
+    mean_rate_active_cells_mean_dict, mean_rate_active_cells_sem_dict, pop_fraction_active_mean_dict, \
+    pop_fraction_active_sem_dict = \
+        get_trial_averaged_pop_activity_stats(mean_rate_active_cells_dict_list, pop_fraction_active_dict_list)
+    plot_pop_activity_stats(binned_t_edges, mean_rate_active_cells_mean_dict, pop_fraction_active_mean_dict, \
+                            mean_rate_active_cells_sem_dict, pop_fraction_active_sem_dict, pop_order=pop_order, \
+                            label_dict=label_dict, color_dict=color_dict)
+
+    fft_f = next(iter(fft_f_dict.values()))
+    fft_power_mean_dict, fft_power_sem_dict = get_trial_averaged_fft_power(fft_f, fft_power_dict_list)
+    plot_rhythmicity(fft_f, fft_power_mean_dict, fft_power_sem_dict, pop_order=pop_order,
+                     label_dict=label_dict, color_dict=color_dict)
+
+    # TODO: use sorted_gid_order to plot the weight_matrix
+    # plot_weight_matrix(connection_weights_dict, pop_gid_ranges=pop_gid_ranges, tuning_peak_locs=tuning_peak_locs)
+
+    return binned_t_edges, sorted_trial_averaged_firing_rate_matrix_dict, sorted_gid_dict, \
+           centered_firing_rate_mean_dict, mean_rate_active_cells_mean_dict, pop_fraction_active_mean_dict, fft_f, \
+           fft_power_mean_dict
 
 
-def analyze_simple_network_replay_data_from_file(data_file_path, data_key=None, trial=None, verbose=False,
+def analyze_simple_network_replay_data_from_file(data_file_path, data_key='0', trial=0, verbose=False,
                                                  return_context=False, plot=True):
     """
 
@@ -2465,8 +2847,8 @@ def analyze_simple_network_replay_data_from_file(data_file_path, data_key=None, 
         buffered_binned_t = subgroup['buffered_binned_t'][:]
         binned_t = subgroup['binned_t'][:]
         data_group = subgroup['filter_bands']
-        for filter in data_group:
-            filter_bands[filter] = data_group[filter][:]
+        for this_filter in data_group:
+            filter_bands[this_filter] = data_group[this_filter][:]
         data_group = subgroup['connection_weights']
         for target_pop_name in data_group:
             connection_weights_dict[target_pop_name] = dict()
@@ -2503,7 +2885,7 @@ def analyze_simple_network_replay_data_from_file(data_file_path, data_key=None, 
             for gid, position in zip(data_group[pop_name]['gids'][:], data_group[pop_name]['positions'][:]):
                 pop_cell_positions[pop_name][gid] = position
 
-        subgroup = get_h5py_group(group, [trial])
+        subgroup = get_h5py_group(group, [str(trial)])
         data_group = subgroup['full_spike_times']
         for pop_name in data_group:
             for gid_key in data_group[pop_name]:
@@ -2617,33 +2999,32 @@ def fit_trajectory_slope(bins, this_trial_pos, plot=False):
     return result.x[0], p
 
 
-def decode_position_from_offline_replay(replay_binned_spike_count_matrix_dict, run_firing_rate_matrix_dict,
-                                        bin_dur=20.):
+def decode_position(binned_spike_count_matrix_dict, template_firing_rate_matrix_dict, bin_dur=20.):
     """
 
-    :param replay_binned_spike_count_matrix_dict: dict of 2d array
-    :param run_firing_rate_matrix_dict: dict of 2d array
+    :param binned_spike_count_matrix_dict: dict of 2d array
+    :param template_firing_rate_matrix_dict: dict of 2d array
     :param bin_dur: float
     :return: dict of 2d array
     """
     import numpy.matlib
     p_pos_dict = dict()
-    for pop_name in replay_binned_spike_count_matrix_dict:
-        if replay_binned_spike_count_matrix_dict[pop_name].shape[0] != run_firing_rate_matrix_dict[pop_name].shape[0]:
+    for pop_name in binned_spike_count_matrix_dict:
+        if binned_spike_count_matrix_dict[pop_name].shape[0] != template_firing_rate_matrix_dict[pop_name].shape[0]:
             raise RuntimeError('decode_position_from_offline_replay: population: %s; mismatched number of cells to'
                                ' decode')
-        binned_spike_count = replay_binned_spike_count_matrix_dict[pop_name]
-        run_firing_rates = run_firing_rate_matrix_dict[pop_name] + 0.1  # small offset to avoid veto by zero rate
+        binned_spike_count = binned_spike_count_matrix_dict[pop_name]
+        template_firing_rates = template_firing_rate_matrix_dict[pop_name] + 0.1  # small offset to avoid veto by zero rate
 
-        p_pos = np.empty((run_firing_rates.shape[1], binned_spike_count.shape[1]))
+        p_pos = np.empty((template_firing_rates.shape[1], binned_spike_count.shape[1]))
         p_pos.fill(np.nan)
 
-        population_spike_count = np.exp(-bin_dur / 1000. * np.sum(run_firing_rates, axis=0, dtype='float128'))
+        population_spike_count = np.exp(-bin_dur / 1000. * np.sum(template_firing_rates, axis=0, dtype='float128'))
         for index in range(binned_spike_count.shape[1]):
             local_spike_count_array = binned_spike_count[:, index].astype('float128')
             if np.sum(local_spike_count_array) > 0.:
-                n = np.matlib.repmat(local_spike_count_array, run_firing_rates.shape[1], 1).T
-                this_p_pos = (run_firing_rates ** n).prod(axis=0) * population_spike_count
+                n = np.matlib.repmat(local_spike_count_array, template_firing_rates.shape[1], 1).T
+                this_p_pos = (template_firing_rates ** n).prod(axis=0) * population_spike_count
                 this_p_sum = np.nansum(this_p_pos)
                 if np.isnan(this_p_sum):
                     p_pos[:, index] = np.nan
