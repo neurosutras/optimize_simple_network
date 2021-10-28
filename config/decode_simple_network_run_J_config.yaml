@@ -1,0 +1,27 @@
+data_file_name_list:
+  - 20210106_115921_simple_network_J_1_heldout_exported_output.hdf5
+  - 20210106_115921_simple_network_J_2_heldout_exported_output.hdf5
+  - 20210106_120035_simple_network_J_3_heldout_exported_output.hdf5
+  - 20210106_120035_simple_network_J_4_heldout_exported_output.hdf5
+  - 20210106_120035_simple_network_J_5_heldout_exported_output.hdf5
+pop_order:
+  - FF
+  - E
+  - I
+color_dict:
+  FF: darkgrey
+  E: r
+  I: b
+filter_order:
+  - Theta
+  - Gamma
+filter_color_dict:
+  Theta: g
+  Gamma: purple
+filter_xlim_dict:
+  Theta:
+    - 500.
+    - 2000
+  Gamma:
+    - 500.
+    - 1000.

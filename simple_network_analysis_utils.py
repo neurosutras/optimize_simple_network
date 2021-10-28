@@ -1,909 +1,10 @@
 from nested.utils import *
-from neuron import h
-from scipy.signal import butter, sosfiltfilt, sosfreqz, hilbert, periodogram, savgol_filter, hann
+from scipy.signal import butter, sosfiltfilt, sosfreqz, hilbert, periodogram, savgol_filter
 from scipy.ndimage import gaussian_filter1d
 from collections import namedtuple, defaultdict
 
 mpl.rcParams['font.size'] = 16.
 mpl.rcParams['font.sans-serif'] = 'Arial'
-
-
-# Based on http://modeldb.yale.edu/39948
-izhi_cell_type_param_names = ['C', 'k', 'vr', 'vt', 'vpeak', 'a', 'b', 'c', 'd', 'celltype']
-izhi_cell_type_params = namedtuple('izhi_cell_type_params', izhi_cell_type_param_names)
-izhi_cell_type_param_dict = {
-    'RS': izhi_cell_type_params(C=1., k=0.7, vr=-65., vt=-50., vpeak=35., a=0.03, b=-2., c=-55., d=100.,
-                                celltype=1),
-    'IB': izhi_cell_type_params(C=1.5, k=1.2, vr=-75., vt=-45., vpeak=50., a=0.01, b=5., c=-56., d=130.,
-                                celltype=2),
-    'CH': izhi_cell_type_params(C=0.5, k=1.5, vr=-60., vt=-40., vpeak=25., a=0.03, b=1., c=-40., d=150.,
-                                celltype=3),
-    'LTS': izhi_cell_type_params(C=1.0, k=1.0, vr=-56., vt=-42., vpeak=40., a=0.03, b=8., c=-53., d=20.,
-                                 celltype=4),
-    'FS': izhi_cell_type_params(C=0.2, k=1., vr=-55., vt=-40., vpeak=25., a=0.2, b=-2., c=-45., d=-55.,
-                                celltype=5),
-    'TC': izhi_cell_type_params(C=2.0, k=1.6, vr=-60., vt=-50., vpeak=35., a=0.01, b=15., c=-60., d=10.,
-                                celltype=6),
-    'RTN': izhi_cell_type_params(C=0.4, k=0.25, vr=-65., vt=-45., vpeak=0., a=0.015, b=10., c=-55., d=50.,
-                                 celltype=7)
-}
-izhi_cell_types = list(izhi_cell_type_param_dict.keys())
-
-
-default_syn_mech_names = \
-    {'E': 'SatExp2Syn',
-     'I': 'SatExp2Syn'
-     }
-
-default_syn_mech_param_rules = \
-    {'SatExp2Syn': {'mech_file': 'sat_exp2syn.mod',
-                    'mech_params': ['sat', 'dur_onset', 'tau_offset', 'e'],
-                    'netcon_params': {'weight': 0, 'g_unit': 1}
-                    },
-     'ExpSyn': {'mech_file': 'expsyn.mod',
-                'mech_params': ['tau', 'e'],
-                'netcon_params': {'weight': 0}
-                }
-     }
-
-default_syn_type_mech_params = \
-    {'E': {'sat': 0.9,
-           'dur_onset': 1.,  # ms
-           'tau_offset': 5.,  # ms
-           'g_unit': 1.,  # uS
-           'e': 0.,  # mV
-           'weight': 1.
-           },
-     'I': {'sat': 0.9,
-           'dur_onset': 1.,  # ms
-           'tau_offset': 10.,  # ms
-           'g_unit': 1.,  # uS
-           'e': -80.,  # mV
-           'weight': 1.
-           }
-     }
-
-
-class SimpleNetwork(object):
-
-    def __init__(self, pc, pop_sizes, pop_gid_ranges, pop_cell_types, pop_syn_counts, pop_syn_proportions,
-                 connection_weights_mean, connection_weights_norm_sigma, syn_mech_params, syn_mech_names=None,
-                 syn_mech_param_rules=None, syn_mech_param_defaults=None, tstop=2250, duration=1000., buffer=500.,
-                 equilibrate=250., dt=0.025, delay=1., v_init=-65., verbose=1, debug=False):
-        """
-
-        :param pc: ParallelContext object
-        :param pop_sizes: dict of int: cell population sizes
-        :param pop_gid_ranges: dict of tuple of int: start and stop indexes; gid range of each cell population
-        :param pop_cell_types: dict of str: cell_type of each cell population
-        :param pop_syn_counts: dict of int: number of synapses onto each cell population
-        :param pop_syn_proportions: nested dict of float:
-                    {target_pop_name (str): {syn_type (str): {source_pop_name (str): proportion of synapses from
-                        source_pop_name population } } }
-        :param connection_weights_mean: nested dict of float: mean strengths of each connection type
-        :param connection_weights_norm_sigma: nested dict of float: variances of connection strengths, normalized to
-                                                mean
-        :param syn_mech_params: nested dict: {target_pop_name (str): {source_pop_name (str): {param_name (str): float}}}
-        :param syn_mech_names: dict: {syn_name (str): name of hoc point process (str)}
-        :param syn_mech_param_rules: nested dict
-        :param syn_mech_param_defaults: nested dict
-        :param tstop: int: full simulation duration, including equilibration period and buffer (ms)
-        :param duration: float: simulation duration (ms)
-        :param buffer: float: duration of simulation buffer at start and end (ms)
-        :param equilibrate: float: duration of simulation equilibration period at start (ms)
-        :param dt: float: simulation timestep (ms)
-        :param delay: float: netcon synaptic delay (ms)
-        :param v_init: float
-        :param verbose: int: level for verbose print statements
-        :param debug: bool: turn on for extra tests
-        """
-        self.pc = pc
-        self.delay = delay
-        self.tstop = int(tstop)
-        self.duration = duration
-        self.buffer = buffer
-        self.equilibrate = equilibrate
-        if dt is None:
-            dt = h.dt
-        self.dt = dt
-        self.v_init = v_init
-        self.verbose = verbose
-        self.debug = debug
-
-        self.pop_sizes = pop_sizes
-        self.total_cells = np.sum(list(self.pop_sizes.values()))
-
-        self.pop_gid_ranges = pop_gid_ranges
-        self.pop_cell_types = pop_cell_types
-        self.pop_syn_counts = pop_syn_counts
-        self.pop_syn_proportions = pop_syn_proportions
-        self.connection_weights_mean = connection_weights_mean
-        self.connection_weights_norm_sigma = connection_weights_norm_sigma
-        self.syn_mech_params = syn_mech_params
-        if syn_mech_names is None:
-            self.syn_mech_names = default_syn_mech_names
-        if syn_mech_param_rules is None:
-            self.syn_mech_param_rules = default_syn_mech_param_rules
-        if syn_mech_param_defaults is None:
-            self.syn_mech_param_defaults = defaultdict(dict)
-            for target_pop_name in self.pop_syn_proportions:
-                for syn_type in self.pop_syn_proportions[target_pop_name]:
-                    if syn_type not in default_syn_type_mech_params:
-                        raise RuntimeError('SimpleNetwork: default synaptic mechanism parameters not found for '
-                                           'target_pop: %s, syn_type: %s' % (target_pop_name, syn_type))
-                    for source_pop_name in self.pop_syn_proportions[target_pop_name][syn_type]:
-                        self.syn_mech_param_defaults[target_pop_name][source_pop_name] = \
-                            default_syn_type_mech_params[syn_type]
-
-        self.spike_times_dict = defaultdict(dict)
-        self.input_pop_t = dict()
-        self.input_pop_firing_rates = defaultdict(dict)
-
-        self.cells = defaultdict(dict)
-        self.mkcells()
-        if self.debug:
-            self.verify_cell_types()
-
-        self.ncdict = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(list))))
-        self.voltage_record()
-        self.spike_record()
-
-    def mkcells(self):
-        rank = int(self.pc.id())
-        nhost = int(self.pc.nhost())
-
-        for pop_name, (gid_start, gid_stop) in viewitems(self.pop_gid_ranges):
-            cell_type = self.pop_cell_types[pop_name]
-            for i, gid in enumerate(range(gid_start, gid_stop)):
-                # round-robin distribution of cells across MPI ranks
-                if i % nhost == rank:
-                    if self.verbose > 1:
-                        print('SimpleNetwork.mkcells: rank: %i got %s gid: %i' % (rank, pop_name, gid))
-                    if cell_type == 'input':
-                        cell = FFCell(pop_name, gid)
-                    elif cell_type == 'minimal':
-                        cell = MinimalCell(pop_name, gid)
-                    elif cell_type in izhi_cell_type_param_dict:
-                        cell = IzhiCell(pop_name, gid, cell_type=cell_type)
-                    else:
-                        raise RuntimeError('SimpleNetwork.mkcells: %s gid: %i; unrecognized cell type: %s' %
-                                           (pop_name, gid, cell_type))
-                    self.cells[pop_name][gid] = cell
-                    self.pc.set_gid2node(gid, rank)
-                    nc = cell.spike_detector
-                    self.pc.cell(gid, nc)
-        sys.stdout.flush()
-        self.pc.barrier()
-
-    def verify_cell_types(self):
-        """
-        Double-checks each created cell has the intended cell type.
-        """
-        for pop_name in self.cells:
-            target_cell_type = self.pop_cell_types[pop_name]
-            for gid in self.cells[pop_name]:
-                this_cell = self.cells[pop_name][gid]
-                if isinstance(this_cell, FFCell):
-                    if target_cell_type != 'input':
-                        found_cell_type = type(this_cell)
-                        raise RuntimeError('SimpleNetwork.verify_cell_types: %s gid: %i should be FFCell, but '
-                                           'is cell_type: %s' % (pop_name, gid, found_cell_type))
-                elif isinstance(this_cell, IzhiCell):
-                    if target_cell_type != this_cell.cell_type:
-                        raise RuntimeError('SimpleNetwork.verify_cell_types: %s gid: %i should be %s, but is '
-                                           'IzhiCell type: %s' % (pop_name, gid, target_cell_type, this_cell.cell_type))
-                    else:
-                        target_izhi_celltype = izhi_cell_type_param_dict[target_cell_type].celltype
-                        if target_izhi_celltype != this_cell.izh.celltype:
-                            raise RuntimeError('SimpleNetwork.verify_cell_types: %s gid: %i; should be '
-                                               'Izhi type %i, but is type %i' %
-                                               (pop_name, gid, target_izhi_celltype, this_cell.izh.celltype))
-                else:
-                    raise RuntimeError('SimpleNetwork.verify_cell_types: %s gid: %i is an unknown type: %s' %
-                                       (pop_name, gid, type(this_cell)))
-
-    def set_input_pattern(self, input_types, input_mean_rates=None, input_min_rates=None, input_max_rates=None,
-                          input_norm_tuning_widths=None, tuning_peak_locs=None, track_wrap_around=False,
-                          spikes_seed=None, tuning_duration=None):
-        """
-
-        :param input_types: dict
-        :param input_mean_rates: dict
-        :param input_min_rates: dict
-        :param input_max_rates: dict
-        :param input_norm_tuning_widths: dict
-        :param tuning_peak_locs: dict
-        :param track_wrap_around: bool
-        :param spikes_seed: list of int: random seed for reproducible input spike trains
-        :param tuning_duration: float
-        """
-        if spikes_seed is None:
-            raise RuntimeError('SimpleNetwork.set_input_pattern: missing spikes_seed required to generate reproducible'
-                               ' spike trains')
-        if self.equilibrate > 0.:
-            equilibrate_len = int(self.equilibrate/self.dt)
-            equilibrate_rate_array = hann(int(self.equilibrate * 2. / self.dt))[:equilibrate_len]
-        for pop_name in (pop_name for pop_name in input_types if pop_name in self.cells):
-            if input_types[pop_name] == 'constant':
-                if input_mean_rates is None or pop_name not in input_mean_rates:
-                    raise RuntimeError('SimpleNetwork.set_input_pattern: missing input_mean_rates required to specify '
-                                       '%s input population: %s' % (input_types[pop_name], pop_name))
-                this_mean_rate = input_mean_rates[pop_name]
-                if self.equilibrate > 0.:
-                    self.input_pop_t[pop_name] = \
-                        np.append(np.arange(0., self.equilibrate, self.dt), [self.equilibrate, self.tstop])
-                else:
-                    self.input_pop_t[pop_name] = [0., self.tstop]
-                for gid in self.cells[pop_name]:
-                    if self.equilibrate > 0.:
-                        self.input_pop_firing_rates[pop_name][gid] = \
-                            np.append(this_mean_rate * equilibrate_rate_array, [this_mean_rate, this_mean_rate])
-                    else:
-                        self.input_pop_firing_rates[pop_name][gid] = [this_mean_rate, this_mean_rate]
-            elif input_types[pop_name] == 'gaussian':
-                if pop_name not in tuning_peak_locs:
-                    raise RuntimeError('SimpleNetwork.set_input_pattern: missing tuning_peak_locs required to specify '
-                                       '%s input population: %s' % (input_types[pop_name], pop_name))
-                try:
-                    this_min_rate = input_min_rates[pop_name]
-                    this_max_rate = input_max_rates[pop_name]
-                    this_norm_tuning_width = input_norm_tuning_widths[pop_name]
-                except Exception:
-                    raise RuntimeError('SimpleNetwork.set_input_pattern: missing kwarg(s) required to specify %s input '
-                                       'population: %s' % (input_types[pop_name], pop_name))
-
-                this_stim_t = np.arange(0., self.tstop + self.dt / 2., self.dt)
-                self.input_pop_t[pop_name] = this_stim_t
-
-                this_tuning_width = tuning_duration * this_norm_tuning_width
-                this_sigma = this_tuning_width / 3. / np.sqrt(2.)
-                for gid in self.cells[pop_name]:
-                    peak_loc = tuning_peak_locs[pop_name][gid]
-                    self.input_pop_firing_rates[pop_name][gid] = \
-                        get_gaussian_rate(duration=tuning_duration, peak_loc=peak_loc, sigma=this_sigma,
-                                          min_rate=this_min_rate, max_rate=this_max_rate, dt=self.dt,
-                                          wrap_around=track_wrap_around, buffer=self.buffer,
-                                          equilibrate=self.equilibrate)
-                    if self.equilibrate > 0.:
-                        self.input_pop_firing_rates[pop_name][gid][:equilibrate_len] *= equilibrate_rate_array
-
-        for pop_name in (pop_name for pop_name in input_types if pop_name in self.cells):
-            for gid in self.cells[pop_name]:
-                local_np_random = np.random.default_rng(seed=spikes_seed + [gid])
-                this_spike_train = \
-                    get_inhom_poisson_spike_times_by_thinning(self.input_pop_firing_rates[pop_name][gid],
-                                                              self.input_pop_t[pop_name], dt=self.dt,
-                                                              generator=local_np_random)
-                cell = self.cells[pop_name][gid]
-                cell.load_vecstim(this_spike_train)
-
-    def set_offline_input_pattern(self, input_offline_min_rates=None, input_offline_max_rates=None,
-                                  input_offline_fraction_active=None, tuning_peak_locs=None, track_wrap_around=False,
-                                  stim_epochs=None, selection_seed=None, spikes_seed=None,
-                                  tuning_duration=None, debug=False):
-        """
-
-        :param input_offline_min_rates: dict
-        :param input_offline_max_rates: dict
-        :param input_offline_fraction_active: dict
-        :param tuning_peak_locs: dict
-        :param track_wrap_around: bool
-        :param stim_epochs: dict of list of tuple of float: {pop_name: [(epoch_start, epoch_duration, epoch_type)]
-        :param selection_seed: list of int: random seed for reproducible input cell selection
-        :param spikes_seed: list of int: random seed for reproducible input spike trains
-        :param tuning_duration: float
-        :param debug: bool
-        """
-        if spikes_seed is None:
-            raise RuntimeError('SimpleNetwork.set_offline_input_pattern: missing spikes_seed required to generate '
-                               'reproducible spike trains')
-        if selection_seed is None:
-            raise RuntimeError('SimpleNetwork.set_offline_input_pattern: missing selection_seed required to select '
-                               'reproducible ensembles of active inputs')
-        if stim_epochs is None or len(stim_epochs) == 0:
-            return
-        else:
-            stim_defined = False
-            for pop_name in stim_epochs:
-                if len(stim_epochs[pop_name]) > 0:
-                    stim_defined = True
-            if not stim_defined:
-                return
-
-        for pop_name in (pop_name for pop_name in stim_epochs if pop_name in self.cells):
-            if input_offline_min_rates is None or pop_name not in input_offline_min_rates:
-                raise RuntimeError('SimpleNetwork.set_input_pattern: missing input_offline_min_rates required to '
-                                   'specify input population: %s' % pop_name)
-            if input_offline_max_rates is None or pop_name not in input_offline_max_rates:
-                raise RuntimeError('SimpleNetwork.set_input_pattern: missing input_offline_max_rates required to '
-                                   'specify input population: %s' % pop_name)
-            if input_offline_fraction_active is None or pop_name not in input_offline_fraction_active:
-                raise RuntimeError('SimpleNetwork.set_input_pattern: missing input_offline_fraction_active '
-                                   'required to specify input population: %s' % pop_name)
-            this_min_rate = input_offline_min_rates[pop_name]
-            this_max_rate = input_offline_max_rates[pop_name]
-            this_fraction_active = input_offline_fraction_active[pop_name]
-
-            stim_t = []
-            stim_rate = []
-            last_epoch_end = 0.
-            for epoch_start, epoch_duration, epoch_type in stim_epochs[pop_name]:
-                if epoch_start != last_epoch_end:
-                    raise RuntimeError('set_offline_input_pattern: input population: %s; invalid start time: %.2f for '
-                                       'stim epoch: %s' % (pop_name, epoch_start, epoch_type))
-                epoch_end = min(epoch_start + epoch_duration, self.tstop)
-                last_epoch_end = epoch_end
-                if epoch_type == 'onset':
-                    epoch_len = int(epoch_duration / self.dt)
-                    epoch_t = np.arange(epoch_start, epoch_end, self.dt)
-                    epoch_rate = \
-                        (this_max_rate - this_min_rate) * hann(int(epoch_duration * 2. / self.dt))[:epoch_len] + \
-                        this_min_rate
-                elif epoch_type == 'offset':
-                    epoch_len = int(epoch_duration / self.dt)
-                    epoch_t = np.arange(epoch_start, epoch_end, self.dt)
-                    epoch_rate = \
-                        (this_max_rate - this_min_rate) * hann(int(epoch_duration * 2. / self.dt))[:epoch_len][::-1] + \
-                        this_min_rate
-                elif epoch_type == 'min':
-                    epoch_t = [epoch_start, epoch_end]
-                    epoch_rate = [this_min_rate, this_min_rate]
-                elif epoch_type == 'max':
-                    epoch_t = [epoch_start, epoch_end]
-                    epoch_rate = [this_max_rate, this_max_rate]
-                stim_t.append(epoch_t)
-                stim_rate.append(epoch_rate)
-            stim_t = np.concatenate(stim_t)
-            stim_rate = np.concatenate(stim_rate)
-            self.input_pop_t[pop_name] = stim_t
-            for gid in self.cells[pop_name]:
-                local_np_random = np.random.default_rng(seed=selection_seed + [gid])
-                if local_np_random.uniform(0., 1.) <= this_fraction_active:
-                    self.input_pop_firing_rates[pop_name][gid] = stim_rate
-                else:
-                    self.input_pop_firing_rates[pop_name][gid] = \
-                        np.ones_like(self.input_pop_t[pop_name]) * this_min_rate
-
-        for pop_name in (pop_name for pop_name in stim_epochs if pop_name in self.cells):
-            for gid in self.cells[pop_name]:
-                local_np_random = np.random.default_rng(seed=spikes_seed + [gid])
-                this_spike_train = \
-                    get_inhom_poisson_spike_times_by_thinning(self.input_pop_firing_rates[pop_name][gid],
-                                                              self.input_pop_t[pop_name], dt=self.dt,
-                                                              generator=local_np_random)
-                cell = self.cells[pop_name][gid]
-                cell.load_vecstim(this_spike_train)
-
-    def get_prob_connection_uniform(self, potential_source_gids):
-        """
-
-        :param potential_source_gids: array of int
-        :return: array of float
-        """
-        prob_connection = np.ones(len(potential_source_gids), dtype='float32')
-        prob_sum = np.sum(prob_connection)
-        if prob_sum == 0.:
-            return None
-        prob_connection /= prob_sum
-        return prob_connection
-
-    def get_prob_connection_gaussian(self, potential_source_gids, target_gid, source_pop_name, target_pop_name,
-                                     pop_cell_positions, pop_axon_extents):
-        """
-
-        :param potential_source_gids: array of int
-        :param target_gid: int
-        :param source_pop_name: str
-        :param target_pop_name: str
-        :param pop_cell_positions: tuple of float
-        :param pop_axon_extents: float
-        :return: array of float
-        """
-        from scipy.spatial.distance import cdist
-        target_cell_position = pop_cell_positions[target_pop_name][target_gid]
-        source_cell_positions = \
-            [pop_cell_positions[source_pop_name][source_gid] for source_gid in potential_source_gids]
-        distances = cdist([target_cell_position], source_cell_positions)[0]
-        sigma = pop_axon_extents[source_pop_name] / 3. / np.sqrt(2.)
-        prob_connection = np.exp(-(distances / sigma) ** 2.)
-        prob_sum = np.sum(prob_connection)
-        if prob_sum == 0.:
-            return None
-        prob_connection /= prob_sum
-        return prob_connection
-
-    def connect_cells(self, connectivity_type='uniform', connection_seed=None, **kwargs):
-        """
-
-        :param connectivity_type: str
-        :param connection_seed: list of int: random seed for reproducible connections
-        """
-        if connection_seed is None:
-            raise RuntimeError('SimpleNetwork.connect_cells: missing connection_seed required to generate reproducible'
-                               ' connections')
-        rank = int(self.pc.id())
-        for target_pop_name in self.pop_syn_proportions:
-            total_syn_count = self.pop_syn_counts[target_pop_name]
-            for target_gid in self.cells[target_pop_name]:
-                local_np_random = np.random.default_rng(seed=connection_seed + [target_gid])
-                target_cell = self.cells[target_pop_name][target_gid]
-                for syn_type in self.pop_syn_proportions[target_pop_name]:
-                    for source_pop_name in self.pop_syn_proportions[target_pop_name][syn_type]:
-                        p_syn_count = self.pop_syn_proportions[target_pop_name][syn_type][source_pop_name]
-                        this_syn_count = local_np_random.binomial(total_syn_count, p_syn_count)
-                        potential_source_gids = np.arange(self.pop_gid_ranges[source_pop_name][0],
-                                                          self.pop_gid_ranges[source_pop_name][1], 1)
-                        # avoid connections to self
-                        p_connection = None
-                        potential_source_gids = potential_source_gids[potential_source_gids != target_gid]
-                        if connectivity_type == 'uniform':
-                            p_connection = self.get_prob_connection_uniform(potential_source_gids)
-                        elif connectivity_type == 'gaussian':
-                            p_connection = \
-                                self.get_prob_connection_gaussian(potential_source_gids, target_gid, source_pop_name,
-                                                                  target_pop_name, **kwargs)
-                        if p_connection is None:
-                            continue
-
-                        this_source_gids = local_np_random.choice(potential_source_gids, size=this_syn_count,
-                                                                       p=p_connection)
-                        for source_gid in this_source_gids:
-                            this_syn, this_nc = append_connection(
-                                target_cell, self.pc, source_pop_name, syn_type, source_gid, delay=self.delay,
-                                syn_mech_names=self.syn_mech_names, syn_mech_param_rules=self.syn_mech_param_rules,
-                                syn_mech_param_defaults=self.syn_mech_param_defaults[target_pop_name][source_pop_name],
-                                **self.syn_mech_params[target_pop_name][source_pop_name])
-                            self.ncdict[target_pop_name][target_gid][source_pop_name][source_gid].append(this_nc)
-                        if self.verbose > 1:
-                            print('SimpleNetwork.connect_cells_%s: rank: %i; target: %s gid: %i; syn_type: %s; '
-                                  'source: %s; syn_count: %i' %
-                                  (connectivity_type, rank, target_pop_name, target_gid, syn_type, source_pop_name,
-                                   this_syn_count))
-        sys.stdout.flush()
-        self.pc.barrier()
-
-    def assign_connection_weights(self, default_weight_distribution_type='normal',
-                                  connection_weight_distribution_types=None, weights_seed=None):
-        """
-
-        :param default_weight_distribution_type: str
-        :param connection_weight_distribution_types: nested dict: {target_pop_name: {source_pop_name: str}}
-        :param weights_seed: list of int: random seed for reproducible connection weights
-        """
-        if weights_seed is None:
-            raise RuntimeError('SimpleNetwork.set_input_pattern: missing weights_seed required to assign reproducible'
-                               ' synaptic weights')
-        rank = int(self.pc.id())
-        for target_pop_name in self.ncdict:
-            for target_gid in self.ncdict[target_pop_name]:
-                local_np_random = np.random.default_rng(seed=weights_seed + [target_gid])
-                target_cell = self.cells[target_pop_name][target_gid]
-                for syn_type in self.pop_syn_proportions[target_pop_name]:
-                    for source_pop_name in self.pop_syn_proportions[target_pop_name][syn_type]:
-                        if source_pop_name not in self.ncdict[target_pop_name][target_gid]:
-                            continue
-                        this_weight_distribution_type = default_weight_distribution_type
-                        if connection_weight_distribution_types is not None:
-                            if target_pop_name in connection_weight_distribution_types and \
-                                    source_pop_name in connection_weight_distribution_types[target_pop_name]:
-                                this_weight_distribution_type = \
-                                    connection_weight_distribution_types[target_pop_name][source_pop_name]
-                        mu = self.connection_weights_mean[target_pop_name][source_pop_name]
-                        norm_sigma = self.connection_weights_norm_sigma[target_pop_name][source_pop_name]
-                        if self.debug and self.verbose > 1:
-                            print('SimpleNetwork.assign_connection_weights: rank: %i, target: %s, source: %s, '
-                                  'dist_type: %s, mu: %.3f, norm_sigma: %.3f' %
-                                  (rank, target_pop_name, source_pop_name, this_weight_distribution_type, mu,
-                                   norm_sigma))
-
-                        for source_gid in self.ncdict[target_pop_name][target_gid][source_pop_name]:
-                            if this_weight_distribution_type == 'normal':
-                                # enforce weights to be greater than 0
-                                this_weight = -1.
-                                while this_weight <= 0.:
-                                    this_weight = mu * local_np_random.normal(1., norm_sigma)
-                            elif this_weight_distribution_type == 'lognormal':
-                                # enforce weights to be less than 5-fold greater than mean
-                                this_weight = 5. * mu
-                                while this_weight >= 5. * mu:
-                                    this_weight = mu * local_np_random.lognormal(0., norm_sigma)
-                            else:
-                                raise RuntimeError('SimpleNetwork.assign_connection_weights: invalid connection '
-                                                   'weight distribution type: %s' % this_weight_distribution_type)
-                            this_syn = target_cell.syns[syn_type][source_pop_name]
-                            # Assign the same weight to all connections from the same source_gid
-                            for this_nc in self.ncdict[target_pop_name][target_gid][source_pop_name][source_gid]:
-                                config_connection(syn_type, syn=this_syn, nc=this_nc,
-                                                  syn_mech_names=self.syn_mech_names,
-                                                  syn_mech_param_rules=self.syn_mech_param_rules,
-                                                  weight=this_weight)
-        sys.stdout.flush()
-        self.pc.barrier()
-
-    def structure_connection_weights(self, structured_weight_params, tuning_peak_locs, wrap_around=True,
-                                     tuning_duration=None):
-        """
-
-        :param structured_weight_params: nested dict
-        :param tuning_peak_locs: nested dict: {'pop_name': {'gid': float} }
-        :param wrap_around: bool
-        :param tuning_duration: float
-        """
-        rank = int(self.pc.id())
-        for target_pop_name in (target_pop_name for target_pop_name in structured_weight_params
-                                if target_pop_name in self.ncdict):
-            if target_pop_name not in tuning_peak_locs:
-                raise RuntimeError('SimpleNetwork.structure_connection_weights: spatial tuning locations not found for '
-                                   'target population: %s' % target_pop_name)
-            this_tuning_type = structured_weight_params[target_pop_name]['tuning_type']
-            this_peak_delta_weight = structured_weight_params[target_pop_name]['peak_delta_weight']
-            this_norm_tuning_width = structured_weight_params[target_pop_name]['norm_tuning_width']
-            this_tuning_width = tuning_duration * this_norm_tuning_width
-            if 'skew' in structured_weight_params[target_pop_name]:
-                from scipy.stats import skewnorm
-                this_sigma = this_tuning_width / 6.
-                this_skew = structured_weight_params[target_pop_name]['skew']
-                skewnorm_scale = structured_weight_params[target_pop_name]['skew_width'] * this_sigma
-                skewnorm_x = np.linspace(skewnorm.ppf(0.01, this_skew, scale=skewnorm_scale),
-                                         skewnorm.ppf(0.99, this_skew, scale=skewnorm_scale), 10000)
-                skewnorm_pdf = skewnorm.pdf(skewnorm_x, this_skew, scale=skewnorm_scale)
-                skewnorm_argmax = np.argmax(skewnorm_pdf)
-                skewnorm_max = skewnorm_pdf[skewnorm_argmax]
-                skewnorm_loc_shift = skewnorm_x[skewnorm_argmax]
-                this_tuning_f = \
-                    lambda delta_loc: this_peak_delta_weight / skewnorm_max * \
-                                      skewnorm.pdf(delta_loc, this_skew, -skewnorm_loc_shift, skewnorm_scale)
-            else:
-                this_sigma = this_tuning_width / 3. / np.sqrt(2.)
-                this_tuning_f = lambda delta_loc: this_peak_delta_weight * np.exp(-(delta_loc / this_sigma) ** 2.)
-            for syn_type in self.pop_syn_proportions[target_pop_name]:
-                for source_pop_name in \
-                        (source_pop_name for source_pop_name in self.pop_syn_proportions[target_pop_name][syn_type]
-                         if source_pop_name in structured_weight_params[target_pop_name]['source_pop_names']):
-                    if source_pop_name not in tuning_peak_locs:
-                        raise RuntimeError('SimpleNetwork.structure_connection_weights: spatial tuning locations not '
-                                           'found for source population: %s' % source_pop_name)
-                    for target_gid in (target_gid for target_gid in self.ncdict[target_pop_name]
-                                       if source_pop_name in self.ncdict[target_pop_name][target_gid]):
-                        target_cell = self.cells[target_pop_name][target_gid]
-                        this_syn = target_cell.syns[syn_type][source_pop_name]
-                        this_target_loc = tuning_peak_locs[target_pop_name][target_gid]
-                        for source_gid in self.ncdict[target_pop_name][target_gid][source_pop_name]:
-                            this_delta_loc = tuning_peak_locs[source_pop_name][source_gid] - this_target_loc
-                            if wrap_around:
-                                if this_delta_loc > tuning_duration / 2.:
-                                    this_delta_loc -= tuning_duration
-                                elif this_delta_loc < - tuning_duration / 2.:
-                                    this_delta_loc += tuning_duration
-                            this_delta_weight = this_tuning_f(this_delta_loc)
-                            for this_nc in self.ncdict[target_pop_name][target_gid][source_pop_name][source_gid]:
-                                initial_weight = get_connection_param(syn_type, 'weight', syn=this_syn, nc=this_nc,
-                                                                      syn_mech_names=self.syn_mech_names,
-                                                                      syn_mech_param_rules=self.syn_mech_param_rules)
-                                if this_tuning_type == 'additive':
-                                    updated_weight = initial_weight + this_delta_weight
-                                elif this_tuning_type == 'multiplicative':
-                                    updated_weight = initial_weight * (1. + this_delta_weight)
-                                if self.debug and self.verbose > 1:
-                                    print('SimpleNetwork.structure_connection_weights; rank: %i, target_pop_name: %s, '
-                                          'target_gid: %i; source_pop_name: %s, source_gid: %i, initial weight: %.3f, '
-                                          'updated weight: %.3f' %
-                                          (rank, target_pop_name, target_gid, source_pop_name, source_gid,
-                                           initial_weight, updated_weight))
-                                config_connection(syn_type, syn=this_syn, nc=this_nc,
-                                                  syn_mech_names=self.syn_mech_names,
-                                                  syn_mech_param_rules=self.syn_mech_param_rules, weight=updated_weight)
-        sys.stdout.flush()
-        self.pc.barrier()
-
-    def get_connectivity_dict(self):
-        connectivity_dict = dict()
-        for target_pop_name in self.pop_syn_proportions:
-            connectivity_dict[target_pop_name] = dict()
-            for target_gid in self.cells[target_pop_name]:
-                connectivity_dict[target_pop_name][target_gid] = dict()
-                for syn_type in self.pop_syn_proportions[target_pop_name]:
-                    for source_pop_name in self.pop_syn_proportions[target_pop_name][syn_type]:
-                        if source_pop_name in self.ncdict[target_pop_name][target_gid] and \
-                                len(self.ncdict[target_pop_name][target_gid][source_pop_name]) > 0:
-                            source_gids = []
-                            for source_gid in self.ncdict[target_pop_name][target_gid][source_pop_name]:
-                                source_gids.extend([source_gid] *
-                                                   len(self.ncdict[target_pop_name][target_gid][source_pop_name][
-                                                           source_gid]))
-                            connectivity_dict[target_pop_name][target_gid][source_pop_name] = source_gids
-        return connectivity_dict
-
-    # Instrumentation - stimulation and recording
-    def spike_record(self):
-        for pop_name in self.cells:
-            for gid, cell in viewitems(self.cells[pop_name]):
-                tvec = h.Vector()
-                nc = cell.spike_detector
-                nc.record(tvec)
-                self.spike_times_dict[pop_name][gid] = tvec
-
-    def voltage_record(self):
-        self.voltage_recvec = defaultdict(dict)
-        for pop_name in self.cells:
-            for gid, cell in viewitems(self.cells[pop_name]):
-                if cell.is_art(): continue
-                rec = h.Vector()
-                rec.record(getattr(cell.sec(.5), '_ref_v'))
-                self.voltage_recvec[pop_name][gid] = rec
-
-    def run(self):
-        h.celsius = 35.  # degrees C
-        self.pc.set_maxstep(10.)
-        h.dt = self.dt
-        h.finitialize(self.v_init)
-        self.pc.psolve(self.tstop)
-
-    def get_spike_times_dict(self):
-        spike_times_dict = dict()
-        for pop_name in self.spike_times_dict:
-            spike_times_dict[pop_name] = dict()
-            for gid, spike_train in viewitems(self.spike_times_dict[pop_name]):
-                if len(spike_train) > 0:
-                    spike_train_array = np.subtract(np.array(spike_train, dtype='float32'),
-                                                    self.buffer + self.equilibrate)
-                else:
-                    spike_train_array = np.array([], dtype='float32')
-                spike_times_dict[pop_name][gid] = spike_train_array
-        return spike_times_dict
-
-    def get_voltage_rec_dict(self):
-        voltage_rec_dict = dict()
-        for pop_name in self.voltage_recvec:
-            voltage_rec_dict[pop_name] = dict()
-            for gid, recvec in viewitems(self.voltage_recvec[pop_name]):
-                voltage_rec_dict[pop_name][gid] = np.array(recvec)
-        return voltage_rec_dict
-
-    def get_connection_weights(self):
-        weights = dict()
-        target_gids = dict()
-        for target_pop_name in self.ncdict:
-            weights[target_pop_name] = dict()
-            target_gids[target_pop_name] = sorted(self.ncdict[target_pop_name].keys())
-            num_cells_target_pop = len(target_gids[target_pop_name])
-            for syn_type in self.pop_syn_proportions[target_pop_name]:
-                for source_pop_name in self.pop_syn_proportions[target_pop_name][syn_type]:
-                    weights[target_pop_name][source_pop_name] = \
-                        np.zeros([num_cells_target_pop, self.pop_sizes[source_pop_name]])
-                    for i, target_gid in enumerate(target_gids[target_pop_name]):
-                        target_cell = self.cells[target_pop_name][target_gid]
-                        if syn_type in target_cell.syns and source_pop_name in target_cell.syns[syn_type]:
-                            this_syn = target_cell.syns[syn_type][source_pop_name]
-                        else:
-                            this_syn = None
-                        start_gid = self.pop_gid_ranges[source_pop_name][0]
-                        stop_gid = self.pop_gid_ranges[source_pop_name][1]
-                        for j, source_gid in enumerate(range(start_gid, stop_gid)):
-                            if source_gid in self.ncdict[target_pop_name][target_gid][source_pop_name]:
-                                this_weight_list = []
-                                for this_nc in self.ncdict[target_pop_name][target_gid][source_pop_name][source_gid]:
-                                    this_weight_list.append(
-                                        get_connection_param(syn_type, 'weight', syn=this_syn, nc=this_nc,
-                                                             syn_mech_names=self.syn_mech_names,
-                                                             syn_mech_param_rules=self.syn_mech_param_rules))
-                                this_weight = np.mean(this_weight_list)
-                                weights[target_pop_name][source_pop_name][i][j] = this_weight
-
-        return target_gids, weights
-
-
-def get_connection_param(syn_type, syn_mech_param, syn=None, nc=None, delay=None, syn_mech_names=None,
-                         syn_mech_param_rules=None):
-    """
-    :param syn_type: str
-    :param syn_mech_param: str
-    :param syn: NEURON point process object
-    :param nc: NEURON netcon object
-    :param delay: float
-    :param syn_mech_names: dict
-    :param syn_mech_param_rules: dict
-    """
-    if syn is None and nc is None:
-        raise RuntimeError('get_connection_param: must provide at least one: synaptic point process or netcon object')
-    if nc is not None and delay is not None:
-        nc.delay = delay
-    if syn_mech_names is None:
-        syn_mech_names = default_syn_mech_names
-    syn_mech_name = syn_mech_names[syn_type]
-    if syn_mech_param_rules is None:
-        syn_mech_param_rules = default_syn_mech_param_rules
-    if syn_mech_param in syn_mech_param_rules[syn_mech_name]['mech_params'] and syn is not None:
-        return getattr(syn, syn_mech_param)
-    elif syn_mech_param in syn_mech_param_rules[syn_mech_name]['netcon_params'] and nc is not None:
-        index = syn_mech_param_rules[syn_mech_name]['netcon_params'][syn_mech_param]
-        return nc.weight[index]
-    else:
-        raise RuntimeError('get_connection_param: invalid syn_mech_param: %s' % syn_mech_param)
-
-
-def config_connection(syn_type, syn=None, nc=None, delay=None, syn_mech_names=None, syn_mech_param_rules=None,
-                      **syn_mech_params):
-    """
-    :param syn_type: str
-    :param syn: NEURON point process object
-    :param nc: NEURON netcon object
-    :param delay: float
-    :param syn_mech_names: dict
-    :param syn_mech_param_rules: dict
-    :param syn_mech_params: dict
-    """
-    if syn is None and nc is None:
-        raise RuntimeError('config_connection: must provide at least one: synaptic point process or netcon object')
-    if nc is not None and delay is not None:
-        nc.delay = delay
-    if syn_mech_names is None:
-        syn_mech_names = default_syn_mech_names
-    syn_mech_name = syn_mech_names[syn_type]
-    if syn_mech_param_rules is None:
-        syn_mech_param_rules = default_syn_mech_param_rules
-    for param_name in syn_mech_params:
-        if param_name in syn_mech_param_rules[syn_mech_name]['mech_params'] and syn is not None:
-            setattr(syn, param_name, syn_mech_params[param_name])
-        elif param_name in syn_mech_param_rules[syn_mech_name]['netcon_params'] and nc is not None:
-            index = syn_mech_param_rules[syn_mech_name]['netcon_params'][param_name]
-            nc.weight[index] = syn_mech_params[param_name]
-
-
-def append_connection(cell, pc, source_pop_name, syn_type, source_gid, delay=None, syn_mech_names=None,
-                      syn_mech_param_rules=None, syn_mech_param_defaults=None, **kwargs):
-    """
-
-    :param cell: e.g. :class:'IzhiCell', :class:'MinimalCell'
-    :param pc: :class:'h.ParallelContext'
-    :param source_pop_name: str
-    :param syn_type: str
-    :param source_gid: int
-    :param delay: float
-    :param syn_mech_names: dict
-    :param syn_mech_param_rules: nested dict
-    :param syn_mech_param_defaults: nested dict
-    :param kwargs: dict
-
-    """
-    if syn_mech_names is None:
-        syn_mech_names = default_syn_mech_names
-    syn_mech_name = syn_mech_names[syn_type]
-    if syn_mech_param_defaults is None:
-        syn_mech_params = dict(default_syn_type_mech_params[syn_type])
-    else:
-        syn_mech_params = dict(syn_mech_param_defaults)
-    syn_mech_params.update(kwargs)
-    if syn_type in cell.syns and source_pop_name in cell.syns[syn_type]:
-        syn = cell.syns[syn_type][source_pop_name]
-    else:
-        syn = getattr(h, syn_mech_name)(cell.sec(0.5))
-        cell.syns[syn_type][source_pop_name] = syn
-
-    nc = pc.gid_connect(source_gid, syn)
-    config_connection(syn_type, syn=syn, nc=nc, delay=delay, syn_mech_names=syn_mech_names,
-                      syn_mech_param_rules=syn_mech_param_rules, **syn_mech_params)
-
-    return syn, nc
-
-
-class IzhiCell(object):
-    # Integrate-and-fire-like neuronal cell models with additional tunable dynamic parameters (e.g. adaptation).
-    # Derived from http://modeldb.yale.edu/39948
-    def __init__(self, pop_name=None, gid=None, cell_type='RS', ):
-        """
-
-        :param pop_name: str
-        :param gid: int
-        :param cell_type: str
-        """
-        self.cell_type = cell_type
-        self.sec = h.Section(cell=self)
-        self.sec.L, self.sec.diam = 10., 10.
-        self.izh = h.Izhi2019(.5, sec=self.sec)
-        self.base_cm = 31.831  # Produces membrane time constant of 8 ms for a RS cell with izh.C = 1. and izi.k = 0.7
-        if pop_name is None:
-            pop_name = self.cell_type
-        self.pop_name = pop_name
-        if gid is None:
-            gid = 0
-        self.gid = gid
-        self.name = '%s%s' % (pop_name, gid)
-
-        if self.cell_type not in izhi_cell_type_param_dict:
-            raise ValueError('IzhiCell: cell_type: %s not recognized' % cell_type)
-
-        for cell_type_param in izhi_cell_type_param_names:
-            setattr(self.izh, cell_type_param, getattr(izhi_cell_type_param_dict[self.cell_type], cell_type_param))
-
-        self.sec.cm = self.base_cm * self.izh.C
-        self.syns = defaultdict(dict)
-        self.spike_detector = self.connect2target()
-
-    def connect2target(self, target=None):
-        nc = h.NetCon(self.sec(1)._ref_v, target, sec=self.sec)
-        nc.threshold = izhi_cell_type_param_dict[self.cell_type].vpeak - 1.
-        return nc
-
-    def is_art(self):
-        return 0
-
-
-class MinimalCell(object):
-    def __init__(self, pop_name, gid):
-        """
-
-        :param pop_name: str
-        :param gid: int
-        """
-        self.pop_name = pop_name
-        self.gid = gid
-        self.name = '%s%s' % (pop_name, gid)
-        self.sec = h.Section(cell=self)
-        self.sec.L, self.sec.diam = 10., 10.
-        self.sec.cm = 31.831
-        self.sec.insert('pas')
-        self.sec(0.5).e_pas = -65.  # mv
-        self.syns = defaultdict(dict)
-        self.spike_detector = self.connect2target()
-
-    def connect2target(self, target=None):
-        nc = h.NetCon(self.sec(1)._ref_v, target, sec=self.sec)
-        # nc.threshold = izhi_cell_type_param_dict[self.cell_type].vpeak
-        return nc
-
-    def is_art(self):
-        return 0
-
-
-class FFCell(object):
-    def __init__(self, pop_name, gid):
-        """
-
-        :param pop_name: str
-        :param gid: int
-        """
-        self.pop_name = pop_name
-        self.gid = gid
-        self.name = '%s%s' % (pop_name, gid)
-        self.vs = h.VecStim()
-        self.spike_detector = self.connect2target()
-        self.spike_train = []
-
-    def connect2target(self, target=None):
-        nc = h.NetCon(self.vs, target)
-        return nc
-
-    def load_vecstim(self, spike_train):
-        self.spike_train = spike_train
-        self.vs.play(h.Vector(spike_train))
-
-    def is_art(self):
-        return 1
-
-
-def check_voltages_exceed_threshold(voltage_rec_dict, input_t, pop_cell_types, valid_t=None):
-    """
-
-    :param voltage_rec_dict: nested dict
-    :param input_t: array
-    :param pop_cell_types: dict of str
-    :param valid_t: array
-    :return: bool
-    """
-    if valid_t is None:
-        valid_indexes = ()
-    else:
-        valid_indexes = np.where((input_t >= valid_t[0]) & (input_t <= valid_t[-1]))[0]
-    for pop_name in voltage_rec_dict:
-        cell_type = pop_cell_types[pop_name]
-        if cell_type not in izhi_cell_types:
-            continue
-        vt = izhi_cell_type_param_dict[cell_type].vt
-        for gid in voltage_rec_dict[pop_name]:
-            if np.mean(voltage_rec_dict[pop_name][gid][valid_indexes]) > vt:
-                return True
-    return False
 
 
 def get_gaussian_rate(duration, peak_loc, sigma, min_rate, max_rate, dt, wrap_around=True, buffer=0., equilibrate=0.):
@@ -1216,17 +317,13 @@ def get_pop_mean_rate_from_binned_spike_count(binned_spike_count_dict, dt):
     return pop_mean_rate_dict
 
 
-def get_pop_activity_stats(firing_rates_dict, input_t, valid_t=None, threshold=2., pop_order=None, label_dict=None,
-                           color_dict=None, plot=False):
+def get_pop_activity_stats(firing_rates_dict, input_t, valid_t=None, threshold=2.):
     """
     Calculate firing rate statistics for each cell population.
     :param firing_rates_dict: nested dict of array
     :param input_t: array
     :param valid_t: array
     :param threshold: firing rate threshold for "active" cells: float (Hz)
-    :param label_dict: dict; {pop_name: label}
-    :param color_dict: dict; {pop_name: str}
-    :param plot: bool
     :return: tuple of dict
     """
     min_rate_dict = defaultdict(dict)
@@ -1269,11 +366,31 @@ def get_pop_activity_stats(firing_rates_dict, input_t, valid_t=None, threshold=2
             mean_min_rate_dict[pop_name] = 0.
             mean_peak_rate_dict[pop_name] = 0.
 
-    if plot:
-        plot_pop_activity_stats(valid_t, mean_rate_active_cells_dict, pop_fraction_active_dict, pop_order=pop_order,
-                                label_dict=label_dict, color_dict=color_dict)
-
     return mean_min_rate_dict, mean_peak_rate_dict, mean_rate_active_cells_dict, pop_fraction_active_dict
+
+
+def analyze_selectivity_across_instances(centered_firing_rate_mean_dict_list):
+    """
+    Given a list of dicts containing data from different network instances, return dicts containing the mean and sem
+    for the peak-centered firing rates of each population.
+    :param centered_firing_rate_mean_dict_list: list of dict of array of float
+    :return: tuple of dict
+    """
+    mean_centered_firing_rate_mean_dict = {}
+    mean_centered_firing_rate_sem_dict = {}
+
+    num_instances = len(centered_firing_rate_mean_dict_list)
+    for centered_firing_rate_mean_dict_instance in centered_firing_rate_mean_dict_list:
+        for pop_name in centered_firing_rate_mean_dict_instance:
+            if pop_name not in mean_centered_firing_rate_mean_dict:
+                mean_centered_firing_rate_mean_dict[pop_name] = []
+            mean_centered_firing_rate_mean_dict[pop_name].append(centered_firing_rate_mean_dict_instance[pop_name])
+    for pop_name in mean_centered_firing_rate_mean_dict:
+        mean_centered_firing_rate_sem_dict[pop_name] = np.std(mean_centered_firing_rate_mean_dict[pop_name],
+                                                              axis=0) / np.sqrt(num_instances)
+        mean_centered_firing_rate_mean_dict[pop_name] = np.mean(mean_centered_firing_rate_mean_dict[pop_name], axis=0)
+
+    return mean_centered_firing_rate_mean_dict, mean_centered_firing_rate_sem_dict
 
 
 def get_trial_averaged_pop_activity_stats(mean_rate_active_cells_dict_list, pop_fraction_active_dict_list):
@@ -1314,12 +431,12 @@ def get_trial_averaged_pop_activity_stats(mean_rate_active_cells_dict_list, pop_
            pop_fraction_active_sem_dict
 
 
-def plot_pop_activity_stats(t, mean_rate_active_cells_mean_dict, pop_fraction_active_mean_dict,
-                            mean_rate_active_cells_sem_dict=None,
-                            pop_fraction_active_sem_dict=None, pop_order=None, label_dict=None, color_dict=None):
+def plot_pop_activity_stats(binned_t_edges, mean_rate_active_cells_mean_dict, pop_fraction_active_mean_dict,
+                            mean_rate_active_cells_sem_dict=None, pop_fraction_active_sem_dict=None, pop_order=None,
+                            label_dict=None, color_dict=None):
     """
     Plot fraction active and mean rate of active cells for each cell population.
-    :param t: array of float
+    :param binned_t_edges: array of float (ms)
     :param mean_rate_active_cells_mean_dict: dict of array of float
     :param pop_fraction_active_mean_dict: dict of array of float
     :param mean_rate_active_cells_sem_dict: dict of array of float
@@ -1331,7 +448,15 @@ def plot_pop_activity_stats(t, mean_rate_active_cells_mean_dict, pop_fraction_ac
     if pop_order is None:
         pop_order = sorted(list(mean_rate_active_cells_mean_dict.keys()))
 
-    fig, axes = plt.subplots(1, 2, figsize=(7., 4.))
+    binned_dt = binned_t_edges[1] - binned_t_edges[0]
+    first_mean_rate = next(iter(mean_rate_active_cells_mean_dict.values()))
+    if len(binned_t_edges) > len(first_mean_rate):
+        binned_t = binned_t_edges[:-1] + binned_dt / 2.
+    else:
+        binned_t = np.copy(binned_t_edges)
+    binned_t /= 1000.
+
+    fig, axes = plt.subplots(1, 2, figsize=(7., 3.5))
     for pop_name in pop_order:
         if label_dict is not None:
             label = label_dict[pop_name]
@@ -1339,31 +464,31 @@ def plot_pop_activity_stats(t, mean_rate_active_cells_mean_dict, pop_fraction_ac
             label = pop_name
         if color_dict is not None:
             color = color_dict[pop_name]
-            axes[0].plot(t / 1000., pop_fraction_active_mean_dict[pop_name], label=label, color=color, linewidth=2.)
+            axes[0].plot(binned_t, pop_fraction_active_mean_dict[pop_name], label=label, color=color, linewidth=2.)
             if pop_fraction_active_sem_dict is not None:
-                axes[0].fill_between(t / 1000.,
+                axes[0].fill_between(binned_t,
                                      pop_fraction_active_mean_dict[pop_name] - pop_fraction_active_sem_dict[pop_name],
                                      pop_fraction_active_mean_dict[pop_name] + pop_fraction_active_sem_dict[pop_name],
                                      color=color,
                                      alpha=0.25, linewidth=0)
-            axes[1].plot(t / 1000., mean_rate_active_cells_mean_dict[pop_name], color=color, linewidth=2.)
+            axes[1].plot(binned_t, mean_rate_active_cells_mean_dict[pop_name], color=color, linewidth=2.)
             if mean_rate_active_cells_sem_dict is not None:
-                axes[1].fill_between(t / 1000.,
+                axes[1].fill_between(binned_t,
                                      mean_rate_active_cells_mean_dict[pop_name] - mean_rate_active_cells_sem_dict[
                                          pop_name],
                                      mean_rate_active_cells_mean_dict[pop_name] + mean_rate_active_cells_sem_dict[
                                          pop_name], color=color,
                                      alpha=0.25, linewidth=0)
         else:
-            axes[0].plot(valid_t / 1000., pop_fraction_active_mean_dict[pop_name], label=label, linewidth=2.)
+            axes[0].plot(binned_t, pop_fraction_active_mean_dict[pop_name], label=label, linewidth=2.)
             if pop_fraction_active_sem_dict is not None:
-                axes[0].fill_between(t / 1000.,
+                axes[0].fill_between(binned_t,
                                      pop_fraction_active_mean_dict[pop_name] - pop_fraction_active_sem_dict[pop_name],
                                      pop_fraction_active_mean_dict[pop_name] + pop_fraction_active_sem_dict[pop_name],
                                      alpha=0.25, linewidth=0)
-            axes[1].plot(valid_t / 1000., mean_rate_active_cells_mean_dict[pop_name], linewidth=2.)
+            axes[1].plot(binned_t, mean_rate_active_cells_mean_dict[pop_name], linewidth=2.)
             if mean_rate_active_cells_sem_dict is not None:
-                axes[1].fill_between(t / 1000.,
+                axes[1].fill_between(binned_t,
                                      mean_rate_active_cells_mean_dict[pop_name] - mean_rate_active_cells_sem_dict[
                                          pop_name],
                                      mean_rate_active_cells_mean_dict[pop_name] + mean_rate_active_cells_sem_dict[
@@ -1374,12 +499,14 @@ def plot_pop_activity_stats(t, mean_rate_active_cells_mean_dict, pop_fraction_ac
     axes[1].set_title('Mean firing rate\nof active cells', fontsize=mpl.rcParams['font.size'])
     axes[0].set_ylim((0., axes[0].get_ylim()[1]))
     axes[1].set_ylim((0., axes[1].get_ylim()[1]))
+    axes[0].set_xlim((binned_t_edges[0] / 1000., binned_t_edges[-1] / 1000.))
+    axes[1].set_xlim((binned_t_edges[0] / 1000., binned_t_edges[-1] / 1000.))
     axes[0].set_ylabel('Fraction')
     axes[1].set_ylabel('Firing rate (Hz)')
     axes[0].set_xlabel('Time (s)')
     axes[1].set_xlabel('Time (s)')
-    axes[0].set_xticks(np.arange(0., axes[0].get_xlim()[1], 1.))
-    axes[1].set_xticks(np.arange(0., axes[1].get_xlim()[1], 1.))
+    axes[0].set_xticks(np.arange(0., axes[0].get_xlim()[1] + binned_dt / 1000. / 2., 1.))
+    axes[1].set_xticks(np.arange(0., axes[1].get_xlim()[1] + binned_dt / 1000. / 2., 1.))
     axes[0].legend(loc='best', frameon=False, framealpha=0.5, fontsize=mpl.rcParams['font.size'], handlelength=1)
     clean_axes(axes)
     fig.tight_layout()
@@ -1590,7 +717,9 @@ def get_bandpass_filtered_signal_stats(signal, input_t, sos, filter_band, output
 
 
 def get_pop_bandpass_filtered_signal_stats(signal_dict, filter_band_dict, input_t, valid_t=None, output_t=None,
-                                           order=15, pad=True, bins=100, plot=False, verbose=False):
+                                           order=15, pad=True, bins=100, filter_order=None, filter_label_dict=None,
+                                           filter_color_dict=None, filter_xlim_dict=None, pop_order=None,
+                                           label_dict=None, color_dict=None, plot=False, verbose=False):
     """
 
     :param signal_dict: array
@@ -1601,6 +730,13 @@ def get_pop_bandpass_filtered_signal_stats(signal_dict, filter_band_dict, input_
     :param order: int
     :param pad: bool
     :param bins: int
+    :param filter_order: list of str
+    :param filter_label_dict: dict
+    :param filter_color_dict: dict
+    :param filter_xlim_dict: dict of tuple of float
+    :param pop_order: list of str
+    :param label_dict: dict
+    :param color_dict: dict
     :param plot: bool
     :param verbose: bool
     :return: tuple of dict
@@ -1678,9 +814,49 @@ def get_pop_bandpass_filtered_signal_stats(signal_dict, filter_band_dict, input_
                                                       buffered_filter_band=buffered_filter_band_dict[filter_label],
                                                       signal_label='Population: %s' % pop_name,
                                                       filter_label=filter_label, axis_label='Firing rate', units='Hz')
+        plot_rhythmicity_traces(output_t, output_signal, filtered_signal, filter_band_dict, filter_order=filter_order,
+                                 filter_label_dict=filter_label_dict, filter_color_dict=filter_color_dict,
+                                 filter_xlim_dict=filter_xlim_dict, pop_order=pop_order, label_dict=label_dict,
+                                 color_dict=color_dict)
 
     return fft_f_dict, fft_power_dict, psd_f_dict, psd_power_dict, envelope_dict, envelope_ratio_dict, \
            centroid_freq_dict, freq_tuning_index_dict
+
+
+def plot_compare_binned_spike_counts(binned_spike_count_dict, t, xlim=None, pop_order=None, label_dict=None,
+                                     color_dict=None):
+    """
+    Superimposed population spike counts from multiple specified populations.
+    :param binned_spike_count_dict: array
+    :param t: array (ms)
+    :param xlim: tuple of float
+    :param pop_order: list of str
+    :param label_dict: dict
+    :param color_dict: dict
+    """
+    if pop_order is None:
+        pop_order = sorted(list(signal_dict.keys()))
+    if label_dict is None:
+        label_dict = {}
+        for pop_name in pop_order:
+            label_dict[pop_name] = pop_name
+
+    fig, axis = plt.subplots(figsize=(4.5, 3.5))
+    for pop_name in pop_order:
+        if color_dict is None or pop_name not in color_dict:
+            color = None
+        else:
+            color = color_dict[pop_name]
+        pop_spike_count = np.sum(list(binned_spike_count_dict[pop_name].values()), axis=0)
+        axis.plot(t, pop_spike_count, color=color, alpha=0.5, label=label_dict[pop_name])
+    if xlim is not None:
+        axis.set_xlim(xlim)
+    axis.set_xlabel('Time (ms)')
+    axis.set_ylabel('Population\nspike count')
+    axis.legend(loc='best', frameon=False, framealpha=0.5, fontsize=mpl.rcParams['font.size'], handlelength=1)
+    clean_axes(axis)
+    fig.tight_layout()
+    fig.show()
 
 
 def plot_bandpass_filtered_signal_summary(t, signal, filtered_signal, filter_band, envelope, psd_f, psd_power,
@@ -1746,6 +922,78 @@ def plot_bandpass_filtered_signal_summary(t, signal, filtered_signal, filter_ban
                  'Frequency tuning index: %.3f' % (signal_label, filter_label, min(filter_band), max(filter_band),
                                                    envelope_ratio, centroid_freq, freq_tuning_index),
                  fontsize=mpl.rcParams['font.size'])
+    fig.tight_layout()
+    fig.subplots_adjust(top=0.75, hspace=0.3)
+    fig.show()
+
+
+def plot_rhythmicity_traces(t, signal_dict, filtered_signal_dict, filter_band_dict, filter_order=None,
+                            filter_label_dict=None, filter_color_dict=None, filter_xlim_dict=None, pop_order=None,
+                            label_dict=None, color_dict=None):
+    """
+
+    :param t: array of float
+    :param signal_dict: nested dict: {filter_label: {pop_name: array of float} }
+    :param filtered_signal_dict: nested dict: {filter_label: {pop_name: array of float} }
+    :param filter_band_dict: dict of tuple of float
+    :param filter_order: list of str
+    :param filter_label_dict: dict
+    :param filter_color_dict: dict
+    :param filter_xlim_dict: dict of tuple of float
+    :param pop_order: list of str
+    :param label_dict: dict
+    :param color_dict: dict
+    """
+    num_filters = len(filter_band_dict)
+    if pop_order is None:
+        pop_order = sorted(list(next(iter(signal_dict.values())).keys()))
+    num_pops = len(pop_order)
+    num_rows = 1 + num_filters
+    if filter_order is None:
+        filter_order = sorted(list(filter_band_dict.keys()))
+
+    fig, axes = plt.subplots(num_rows, num_pops, figsize=(4. * num_pops, 1.7 * num_rows))
+    for i, pop_name in enumerate(pop_order):
+        first_signal = next(iter(signal_dict.values()))[pop_name]
+        axes[0][i].plot(t, np.subtract(first_signal, np.mean(first_signal)), c='grey', alpha=0.5)
+        ylim = list(axes[0][i].get_ylim())
+        if i == 0:
+            axes[0, 0].set_ylabel('Population\naverage\nfiring rate')
+        if label_dict is not None:
+            label = label_dict[pop_name]
+        else:
+            label = pop_name
+        axes[0][i].set_title(label, fontsize=mpl.rcParams['font.size'])
+        axes[0][i].set_xlim((t[0], t[-1]))
+        for j, filter_label in enumerate(filter_order):
+            filter_band = filter_band_dict[filter_label]
+            if filter_xlim_dict is not None:
+                xlim = filter_xlim_dict[filter_label]
+            else:
+                min_band_freq = filter_band[0]
+                bin_dur = 1. / min_band_freq * 1000.
+                xlim = (5. * bin_dur, 10 * bin_dur)
+            axes[1 + j][i].plot(t, np.subtract(signal_dict[filter_label][pop_name],
+                                               np.mean(signal_dict[filter_label][pop_name])), \
+                                c='grey', alpha=0.5)
+            if filter_color_dict is not None:
+                axes[1 + j][i].plot(t, filtered_signal_dict[filter_label][pop_name], c=filter_color_dict[filter_label],
+                                    alpha=0.5)
+            else:
+                axes[1 + j][i].plot(t, filtered_signal_dict[filter_label][pop_name], alpha=0.5)
+            axes[1 + j][i].set_xlim(xlim)
+            ylim[0] = min(ylim[0], axes[1 + j][i].get_ylim()[0])
+            ylim[1] = max(ylim[1], axes[1 + j][i].get_ylim()[1])
+            if i == 0:
+                if filter_label_dict is not None:
+                    label = filter_label_dict[filter_label]
+                else:
+                    label = filter_label
+                axes[1 + j][i].set_ylabel('%s\n(%i - %i Hz)' % (label, min(filter_band), max(filter_band)))
+        for j in range(len(axes)):
+            axes[j][i].set_ylim(ylim)
+
+    clean_axes(axes)
     fig.tight_layout()
     fig.subplots_adjust(top=0.75, hspace=0.3)
     fig.show()
@@ -2047,21 +1295,26 @@ def plot_inferred_spike_rates(spike_times_dict, firing_rates_dict, input_t, vali
             sys.stdout.flush()
 
 
-def plot_voltage_traces(voltage_rec_dict, input_t, valid_t=None, spike_times_dict=None, rows=3, cols=4, pop_names=None):
+def plot_voltage_traces(voltage_rec_dict, input_t, valid_t=None, spike_times_dict=None, rows=3, cols=4, pop_names=None,
+                        xlim=None):
     """
 
     :param voltage_rec_dict: dict of array
     :param input_t: array
     :param valid_t: array
     :param spike_times_dict: nested dict of array
-    :param cells_per_pop: int
+    :param rows: int
+    :param cols: int
     :param pop_names: list of str
+    :param xlim: tuple of float
     """
     if valid_t is None:
         valid_t = input_t
         valid_indexes = ()
     else:
         valid_indexes = np.where((input_t >= valid_t[0]) & (input_t <= valid_t[-1]))[0]
+    if xlim is None:
+        xlim = (max(0., valid_t[0]), min(1500., valid_t[-1]))
     if pop_names is None:
         pop_names = sorted(list(voltage_rec_dict.keys()))
     for pop_name in pop_names:
@@ -2076,17 +1329,83 @@ def plot_voltage_traces(voltage_rec_dict, input_t, valid_t=None, spike_times_dic
             rec = np.interp(valid_t, input_t, voltage_rec_dict[pop_name][gid])
             row = i // cols
             col = i % cols
-            axes[row][col].plot(valid_t, rec, label='Vm', c='grey')
+            axes[row][col].plot(valid_t, rec, label='Vm', c='k', linewidth=0.75)
             if spike_times_dict is not None and pop_name in spike_times_dict and gid in spike_times_dict[pop_name]:
                 binned_spike_indexes = find_nearest(spike_times_dict[pop_name][gid], valid_t)
                 axes[row][col].plot(valid_t[binned_spike_indexes], rec[binned_spike_indexes], 'k.', label='Spikes')
             axes[row][col].set_title('gid: {}'.format(gid), fontsize=mpl.rcParams['font.size'])
+            axes[row][col].set_xlim(xlim)
         axes[0][cols-1].legend(loc='center left', frameon=False, framealpha=0.5, bbox_to_anchor=(1., 0.5),
                                fontsize=mpl.rcParams['font.size'])
         clean_axes(axes)
         fig.suptitle('Voltage recordings: %s population' % pop_name, fontsize=mpl.rcParams['font.size'])
         fig.tight_layout()
         fig.subplots_adjust(top=0.9, right=0.85)
+        fig.show()
+
+
+def plot_connection_weights_heatmaps_from_matrix(connection_weights_matrix_dict, gids_sorted=True, pop_order=None,
+                                                 label_dict=None):
+    """
+
+    :param connection_weights_matrix_dict: nested dict of 2d array of float
+    :param binned_t_edges: array
+    :param gids_sorted: bool; whether to label cell ids as sorted
+    :param pop_order: list of str; order of populations for plot legend
+    :param label_dict: dict; {pop_name: label}
+    :param normalize_t: bool
+    """
+    if pop_order is None:
+        post_pop_order = sorted(list(connection_weights_matrix_dict.keys()))
+        pre_pop_order = set()
+        for post_pop in connection_weights_matrix_dict:
+            for pre_pop in connection_weights_matrix_dict[post_pop]:
+                pre_pop_order.add(pre_pop)
+        pre_pop_order = sorted(list(pre_pop_order))
+    else:
+        post_pop_order = []
+        pre_pop_order = []
+        pre_pop_set = set()
+        for post_pop in pop_order:
+            if post_pop in connection_weights_matrix_dict:
+                post_pop_order.append(post_pop)
+                for pre_pop in connection_weights_matrix_dict[post_pop]:
+                    pre_pop_set.add(pre_pop)
+        for pre_pop in pop_order:
+            if pre_pop in pre_pop_set:
+                pre_pop_order.append(pre_pop)
+
+    if label_dict is None:
+        label_dict = {}
+        for pop_name in post_pop_order + pre_pop_order:
+            label_dict[pop_name] = pop_name
+
+    fig, axes = plt.subplots(len(post_pop_order), len(pre_pop_order),
+                             figsize=(4. * len(pre_pop_order), 3.5 * len(post_pop_order)))
+    for j, post_pop_name in enumerate(post_pop_order):
+        for i, pre_pop_name in enumerate(pre_pop_order):
+            if pre_pop_name not in connection_weights_matrix_dict[post_pop_name]:
+                continue
+            this_connection_weight_matrix = connection_weights_matrix_dict[post_pop_name][pre_pop_name]
+            extent = (-0.5, this_connection_weight_matrix.shape[1] - 0.5,
+                      this_connection_weight_matrix.shape[0] - 0.5, -0.5)
+            plot_heatmap_from_matrix(this_connection_weight_matrix, ax=axes[j,i], aspect='auto',
+                                     cbar_label='Synaptic weight', extent=extent, vmin=0.,
+                                     interpolation='none', cmap='binary')
+            axes[j,i].set_title('%s <- %s' % (label_dict[post_pop_name], label_dict[pre_pop_name]),
+                              fontsize=mpl.rcParams['font.size'])
+            if gids_sorted:
+                axes[j,i].set_xlabel('Sorted Cell ID\nPresynaptic (%s)' % label_dict[pre_pop_name])
+            else:
+                axes[j,i].set_xlabel('Cell ID\nPresynaptic(%s)' % label_dict[pre_pop_name])
+            if i == 0:
+                if gids_sorted:
+                    axes[j,i].set_ylabel('Postsynaptic (%s)\nSorted Cell ID' % label_dict[post_pop_name])
+                else:
+                    axes[j,i].set_ylabel('Postsynaptic (%s)\nCell ID' % label_dict[post_pop_name])
+
+        clean_axes(axes)
+        fig.tight_layout()
         fig.show()
 
 
@@ -2101,15 +1420,14 @@ def plot_weight_matrix(connection_weights_dict, pop_gid_ranges, tuning_peak_locs
     :param tuning_peak_locs: nested dict: {'pop_name': {'gid': float} }
     :param pop_names: list of str
     """
-
     if pop_names is None:
         pop_names = sorted(list(connection_weights_dict.keys()))
     sorted_gid_indexes = dict()
     for target_pop_name in pop_names:
         if target_pop_name not in connection_weights_dict:
             raise RuntimeError('plot_weight_matrix: missing population: %s' % target_pop_name)
-        if target_pop_name not in sorted_gid_indexes and target_pop_name in tuning_peak_locs and \
-                len(tuning_peak_locs[target_pop_name]) > 0:
+        if tuning_peak_locs is not None and target_pop_name not in sorted_gid_indexes and \
+                target_pop_name in tuning_peak_locs and len(tuning_peak_locs[target_pop_name]) > 0:
             this_ordered_peak_locs = \
                 np.array([tuning_peak_locs[target_pop_name][gid] for gid in range(*pop_gid_ranges[target_pop_name])])
             sorted_gid_indexes[target_pop_name] = np.argsort(this_ordered_peak_locs)
@@ -2125,13 +1443,13 @@ def plot_weight_matrix(connection_weights_dict, pop_gid_ranges, tuning_peak_locs
             axes[0].set_ylabel('Target: %s\nCell ID' % target_pop_name)
 
         for col, source_pop_name in enumerate(connection_weights_dict[target_pop_name]):
-            if source_pop_name not in sorted_gid_indexes and source_pop_name in tuning_peak_locs and \
-                    len(tuning_peak_locs[source_pop_name]) > 0:
+            if tuning_peak_locs is not None and source_pop_name not in sorted_gid_indexes and \
+                    source_pop_name in tuning_peak_locs and len(tuning_peak_locs[source_pop_name]) > 0:
                 this_ordered_peak_locs = \
                     np.array([tuning_peak_locs[source_pop_name][gid]
                               for gid in range(*pop_gid_ranges[source_pop_name])])
                 sorted_gid_indexes[source_pop_name] = np.argsort(this_ordered_peak_locs)
-            weight_matrix = connection_weights_dict[target_pop_name][source_pop_name]
+            weight_matrix = np.copy(connection_weights_dict[target_pop_name][source_pop_name])
             if target_pop_name in sorted_gid_indexes:
                 weight_matrix[:] = weight_matrix[sorted_gid_indexes[target_pop_name], :]
             if source_pop_name in sorted_gid_indexes:
@@ -2218,8 +1536,7 @@ def plot_firing_rate_heatmaps(firing_rates_dict, input_t, valid_t=None, pop_name
 
 
 def plot_firing_rate_heatmaps_from_matrix(firing_rates_matrix_dict, binned_t_edges, gids_sorted=True, pop_order=None,
-                                          label_dict=None,
-                                          normalize_t=True):
+                                          label_dict=None, normalize_t=True):
     """
 
     :param firing_rates_matrix_dict: dict of array
@@ -2245,7 +1562,7 @@ def plot_firing_rate_heatmaps_from_matrix(firing_rates_matrix_dict, binned_t_edg
         plot_heatmap_from_matrix(this_firing_rate_matrix, ax=axes[i], aspect='auto', cbar_label='Firing rate (Hz)',
                                  vmin=0., extent=extent)
         if normalize_t:
-            axes[i].set_xlabel('Normalized track length')
+            axes[i].set_xlabel('Normalized position')
         else:
             axes[i].set_xlabel('Time (s)')
         if gids_sorted:
@@ -2266,7 +1583,7 @@ def plot_firing_rate_heatmaps_from_matrix(firing_rates_matrix_dict, binned_t_edg
 def plot_average_selectivity(binned_t_edges, centered_firing_rate_mean_dict, centered_firing_rate_sem_dict=None,
                              pop_order=None, label_dict=None, color_dict=None):
     """
-
+    Plot the average selectivity (firing rates centered around the peak of their activity) for each cell population.
     :param binned_t_edges: array of float
     :param centered_firing_rate_mean_dict: dict of array of float
     :param centered_firing_rate_sem_dict: dict of array of float
@@ -2277,7 +1594,7 @@ def plot_average_selectivity(binned_t_edges, centered_firing_rate_mean_dict, cen
     center_index = len(binned_t_edges) // 2
     offset_binned_t_edges = (binned_t_edges - binned_t_edges[center_index]) / 1000.
 
-    fig, axis = plt.subplots(1, figsize=(4., 3.5))
+    fig, axis = plt.subplots(1, figsize=(3.5, 3.5))
 
     if pop_order is None:
         pop_order = sorted(list(centered_firing_rate_mean_dict.keys()))
@@ -2304,6 +1621,7 @@ def plot_average_selectivity(binned_t_edges, centered_firing_rate_mean_dict, cen
                                   alpha=0.25, linewidth=0)
 
     axis.set_ylim((0., axis.get_ylim()[1]))
+    axis.set_xlim((offset_binned_t_edges[0], offset_binned_t_edges[-1]))
     axis.set_title('Selectivity', fontsize=mpl.rcParams['font.size'])
     axis.set_ylabel('Firing rate (Hz)')
     axis.set_xlabel('Time to peak firing rate (s)')
@@ -2313,58 +1631,41 @@ def plot_average_selectivity(binned_t_edges, centered_firing_rate_mean_dict, cen
     fig.show()
 
 
-def plot_population_spike_rasters(binned_spike_count_dict, input_t, valid_t=None, pop_names=None,
-                                  tuning_peak_locs=None):
+def plot_replay_spike_rasters(spike_times_dict, binned_t_edges, sorted_gid_dict, trial_key=None, pop_order=None,
+                              label_dict=None):
     """
 
-    :param binned_spike_count: dict of array
-    :param input_t: array
-    :param valid_t: array
-    :param pop_names: list of str
+    :param spike_times_dict: nested dict: {pop_name (str): {gid (int): array of float) } }
+    :param binned_t_edges: array of float (ms)
+    :param sorted_gid_dict: dict of array of int
+    :param trial_key: str or int
+    :param pop_order: list of str
+    :param label_dict: dict of str
     """
-    if valid_t is None:
-        valid_t = input_t
-        valid_indexes = ()
-    else:
-        valid_indexes = np.where((input_t >= valid_t[0]) & (input_t <= valid_t[-1]))[0]
-    if pop_names is None:
-        pop_names = sorted(list(binned_spike_count_dict.keys()))
-    for pop_name in pop_names:
-        sort = pop_name in tuning_peak_locs and len(tuning_peak_locs[pop_name]) > 0
-        if sort:
-            sorted_indexes = np.argsort(list(tuning_peak_locs[pop_name].values()))
-            sorted_gids = np.array(list(tuning_peak_locs[pop_name].keys()))[sorted_indexes]
+    if pop_order is None:
+        pop_order = sorted(list(spike_times_dict.keys()))
+
+    fig, axes = plt.subplots(1, len(pop_order), figsize=(2.2 * len(pop_order), 2.4))
+    this_cmap = copy.copy(plt.get_cmap('binary'))
+    this_cmap.set_bad(this_cmap(0.))
+    for col, pop_name in enumerate(pop_order):
+        for i, gid in enumerate(sorted_gid_dict[pop_name]):
+            this_spike_times = spike_times_dict[pop_name][gid]
+            axes[col].scatter(this_spike_times, np.ones_like(this_spike_times) * i + 0.5, c='k', s=0.01,
+                                 rasterized=True)
+        axes[col].set_xlabel('Time (ms)')
+        axes[col].set_ylim((len(sorted_gid_dict[pop_name]), 0))
+        axes[col].set_xlim((binned_t_edges[0], binned_t_edges[-1]))
+        if label_dict is not None:
+            label = label_dict[pop_name]
         else:
-            sorted_gids = sorted(list(binned_spike_count_dict[pop_name].keys()))
-        fig, axes = plt.subplots()
-        spike_count_matrix = np.empty((len(sorted_gids), len(valid_t)), dtype='float32')
-        for i, gid in enumerate(sorted_gids):
-            spike_count_matrix[i][:] = binned_spike_count_dict[pop_name][gid][valid_indexes]
-        spikes_x_mesh, spikes_y_mesh = \
-            np.meshgrid(valid_t, list(range(spike_count_matrix.shape[0])))
-        y_interval = max(2, len(sorted_gids) // 10)
-        yticks = list(range(0, len(sorted_gids), y_interval))
-        ylabels = np.array(sorted_gids)[yticks]
-        dt = valid_t[1] - valid_t[0]
-        x_interval = min(int(1000. / dt), int((valid_t[-1] + dt) / 5.))
-        xticks = list(range(0, len(valid_t), x_interval))
-        xlabels = np.array(valid_t)[xticks].astype('int32')
-        axes.scatter(spikes_x_mesh, spikes_y_mesh, spike_count_matrix, c='k')
-        axes.set_ylim([spike_count_matrix.shape[0] - 1, 0])
-        axes.set_yticks(yticks)
-        axes.set_yticklabels(ylabels)
-        # axes.set_xlim(valid_t[0], valid_t[-1])
-        # axes.set_xticks(xticks)
-        # axes.set_xticklabels(xlabels)
-        axes.set_xlabel('Time (ms)')
-        axes.set_title('Spike times: %s population' % pop_name, fontsize=mpl.rcParams['font.size'])
-        if sort:
-            axes.set_ylabel('Cell ID - (sorted)')
-        else:
-            axes.set_ylabel('Cell ID')
-        clean_axes(axes)
-        fig.tight_layout()
-        fig.show()
+            label = pop_name
+        axes[col].set_title(label, fontsize=mpl.rcParams['font.size'])
+    axes[0].set_ylabel('Sorted Cell ID')
+    if trial_key is not None:
+        fig.suptitle('Trial # %s' % trial_key, y=0.99, fontsize=mpl.rcParams['font.size'])
+    fig.tight_layout()
+    fig.subplots_adjust(wspace=0.5, hspace=0.4, top=0.8)
 
 
 def visualize_connections(pop_gid_ranges, pop_cell_types, pop_syn_proportions, pop_cell_positions, connectivity_dict, n=1,
@@ -2461,7 +1762,9 @@ def get_firing_rate_matrix_dict_from_nested_dict(firing_rates_dict, binned_t_edg
 
 def analyze_selectivity_from_firing_rate_matrix_dict(firing_rate_matrix_dict, gid_order_dict):
     """
-
+    Given a dict of firing rates for each population, center the firing rates of each cell around the peak of its
+    activity. Average across cells within a population. Return the mean and sem traces for each population, as well
+    as a dict with an array of gids in order of peak activity.
     :param firing_rate_matrix_dict: dict of 2d array of float: {pop_name: 2d array with shape (num_cells, num bins)}
     :param gid_order_dict: dict of array of int
     :return: tuple: dict of array of float: {pop_name: array of length (num bins)}; population mean, peak centered,
@@ -2494,12 +1797,10 @@ def sort_firing_rate_matrix_dict(firing_rate_matrix_dict, gid_order_dict, sorted
     """
     Given a dictionary of firing rate matrices organized by population, re-sort the matrices according to the
     specified sorted_gid_dict.
-    cell. Also return a dictionary with the sorted gid order of each matrix.
     :param firing_rate_matrix_dict: dict of 2d array of float: {pop_name: 2d array with shape (num_cells, num bins)}
     :param gid_order_dict: dict of array of int; initial sorting
     :param sorted_gid_dict: dict of array of int; new sorting
-    :return: tuple: dict of 2d array of float: {pop_name: 2d array with shape (num_cells, num bins)},
-                    dict of array of int: {pop_name: array of gids}
+    :return: dict of 2d array of float: {pop_name: 2d array with shape (num_cells, num bins)}
     """
     sorted_firing_rate_matrix_dict = {}
     for pop_name in firing_rate_matrix_dict:
@@ -2512,6 +1813,39 @@ def sort_firing_rate_matrix_dict(firing_rate_matrix_dict, gid_order_dict, sorted
         sorted_firing_rate_matrix_dict[pop_name] = firing_rate_matrix_dict[pop_name][sorted_indexes]
 
     return sorted_firing_rate_matrix_dict
+
+
+def sort_connection_weights_matrix_dict(connection_weights_matrix_dict, gid_order_dict, sorted_gid_dict):
+    """
+    Given a dictionary of connection weight matrices organized by post-synaptic and pre-synaptic populations, re-sort
+    the matrices according to the specified sorted_gid_dict.
+    :param connection_weights_matrix_dict: dict of 2d array of float: {pop_name: 2d array with shape (num_cells, num bins)}
+    :param gid_order_dict: dict of array of int; initial sorting
+    :param sorted_gid_dict: dict of array of int; new sorting
+    :return: nested dict of 2d array of float:
+                {post_pop_name:
+                    {pre_pop_name: 2d array with shape (num cells in post_pop, num cells in pre_pop)
+                    }
+                {
+    """
+    sorted_connection_weights_matrix_dict = {}
+    sorted_indexes_dict = {}
+    for pop_name in gid_order_dict:
+        gid_index_dict = dict(zip(gid_order_dict[pop_name], range(len(gid_order_dict[pop_name]))))
+        sorted_indexes = []
+        for gid in sorted_gid_dict[pop_name]:
+            index = gid_index_dict[gid]
+            sorted_indexes.append(index)
+        sorted_indexes_dict[pop_name] = np.asarray(sorted_indexes)
+    for post_pop_name in connection_weights_matrix_dict:
+        sorted_connection_weights_matrix_dict[post_pop_name] = {}
+        for pre_pop_name in connection_weights_matrix_dict[post_pop_name]:
+            sorted_connection_weights_matrix = \
+                connection_weights_matrix_dict[post_pop_name][pre_pop_name][sorted_indexes_dict[post_pop_name], :]
+            sorted_connection_weights_matrix_dict[post_pop_name][pre_pop_name] = \
+                sorted_connection_weights_matrix[:, sorted_indexes_dict[pre_pop_name]]
+
+    return sorted_connection_weights_matrix_dict
 
 
 def get_trial_averaged_fft_power(fft_f, fft_power_dict_list):
@@ -2537,8 +1871,34 @@ def get_trial_averaged_fft_power(fft_f, fft_power_dict_list):
     return fft_power_mean_dict, fft_power_sem_dict
 
 
-def plot_rhythmicity(fft_f, fft_power_mean_dict, fft_power_sem_dict=None, freq_max=250., pop_order=None,
-                     label_dict=None, color_dict=None):
+def analyze_spatial_modulation_across_instances(modulation_depth_dict_list, delta_peak_locs_dict_list):
+    """
+
+    :param modulation_depth_dict_list: list of dict {'predicted;actual': {pop_name: array}}
+    :param delta_peak_locs_dict_list: dict: {pop_name: array}
+    :return: tuple of dict
+    """
+    modulation_depth_instances_dict = {'predicted': {}, 'actual': {}}
+    delta_peak_locs_instances_dict = {}
+    for modulation_depth_instance in modulation_depth_dict_list:
+        for condition in modulation_depth_instances_dict.keys():
+            for pop_name in modulation_depth_instance[condition]:
+                if pop_name not in modulation_depth_instances_dict[condition]:
+                    modulation_depth_instances_dict[condition][pop_name] = []
+                this_mean_modulation_depth = np.mean(modulation_depth_instance[condition][pop_name])
+                modulation_depth_instances_dict[condition][pop_name].append(this_mean_modulation_depth)
+    for delta_peak_locs_instance in delta_peak_locs_dict_list:
+        for pop_name in delta_peak_locs_instance:
+            if pop_name not in delta_peak_locs_instances_dict:
+                delta_peak_locs_instances_dict[pop_name] = []
+            this_mean_delta_peak_locs = np.mean(delta_peak_locs_instance[pop_name])
+            delta_peak_locs_instances_dict[pop_name].append(this_mean_delta_peak_locs)
+
+    return modulation_depth_instances_dict, delta_peak_locs_instances_dict
+
+
+def plot_rhythmicity_psd(fft_f, fft_power_mean_dict, fft_power_sem_dict=None, freq_max=250., pop_order=None,
+                         label_dict=None, color_dict=None, compressed_plot_format=False, title='Rhythmicity'):
     """
 
     :param fft_f: array of float
@@ -2548,8 +1908,12 @@ def plot_rhythmicity(fft_f, fft_power_mean_dict, fft_power_sem_dict=None, freq_m
     :param pop_order: list of str; order of populations for plot legend
     :param label_dict: dict; {pop_name: label}
     :param color_dict: dict; {pop_name: str}
+    :param compressed_plot_format: bool
     """
-    fig, axes = plt.subplots(1, figsize=(4., 3.5))
+    if compressed_plot_format:
+        fig, axes = plt.subplots(1, figsize=(3.7, 3.05))
+    else:
+        fig, axes = plt.subplots(1, figsize=(4., 3.5))
     freq_max_index = np.where(fft_f >= freq_max)[0][0]
 
     if pop_order is None:
@@ -2579,8 +1943,10 @@ def plot_rhythmicity(fft_f, fft_power_mean_dict, fft_power_sem_dict=None, freq_m
                                   fft_power_mean_dict[pop_name][1:freq_max_index] -
                                   fft_power_sem_dict[pop_name][1:freq_max_index], alpha=0.25, linewidth=0)
     axes.set_xlabel('Frequency (Hz)')
-    axes.set_ylabel('Power spectral density\n(units$^{2}$/Hz) (Log scale)')
+    axes.set_ylabel('Power spectral density\n(Hz$^{2}$/Hz) (Log scale)')
+    axes.set_xlim((0., fft_f[freq_max_index]))
     axes.legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
+    axes.set_title(title, fontsize=mpl.rcParams['font.size'])
     clean_axes(axes)
     fig.tight_layout()
     fig.show()
@@ -2602,9 +1968,163 @@ def get_trial_averaged_firing_rate_matrix_dict(firing_rate_matrix_dict_list):
     return mean_firing_rate_matrix_dict
 
 
+def get_pop_bandpass_envelope_fft(filter_envelope_dict, dt):
+    """
+    Given the envelope of a bandpass-filtered signal, determine the frequency modulation. Return a power spectral
+    density.
+    :param filter_envelope_dict: dict {'pop_name': array}
+    :param dt: float
+    :return: tuple of dict {'pop_name': array}
+    """
+    sampling_rate = 1000. / dt
+    fft_f_dict, fft_power_dict = {}, {}
+    for pop_name in filter_envelope_dict:
+        fft_f_dict[pop_name], fft_power_dict[pop_name] = periodogram(filter_envelope_dict[pop_name], fs=sampling_rate)
+
+    return fft_f_dict, fft_power_dict
+
+
+def get_modulation_depth(signal):
+    ceil_indexes = np.where(signal >= np.percentile(signal, 90))
+    ceil = np.nanmean(signal[ceil_indexes])
+    mean_signal = np.nanmean(signal)
+    return ceil / mean_signal
+
+
+def analyze_selectivity_input_output(binned_t_edges, firing_rate_matrix_dict, pop_gid_ranges, input_populations,
+                                     output_populations, connectivity_dict, connection_weights_dict):
+    """
+
+    :param binned_t_edges:
+    :param firing_rate_matrix_dict:
+    :param pop_gid_ranges:
+    :param input_populations:
+    :param output_populations:
+    :param connectivity_dict:
+    :param connection_weights_dict:
+    :return:
+    """
+    track_length = binned_t_edges[-1]
+    peak_locs = defaultdict(lambda: defaultdict(list))
+    delta_peak_locs = {}
+    modulation_depth = {'actual': {}, 'predicted': {}}
+    mean_delta_peak_locs = {}
+    mean_modulation_depth = {'actual': {}, 'predicted': {}}
+    for post_pop in output_populations:
+        modulation_depth['actual'][post_pop] = []
+        modulation_depth['predicted'][post_pop] = []
+        delta_peak_locs[post_pop] = []
+        post_start_gid = pop_gid_ranges[post_pop][0]
+        for post_gid in range(*pop_gid_ranges[post_pop]):
+            predicted = np.zeros_like(binned_t_edges)
+            for pre_pop in input_populations:
+                pre_start_gid = pop_gid_ranges[pre_pop][0]
+                for pre_gid in connectivity_dict[post_pop][post_gid][pre_pop]:
+                    this_rate = firing_rate_matrix_dict[pre_pop][pre_gid - pre_start_gid]
+                    this_weight = \
+                        connection_weights_dict[post_pop][pre_pop][post_gid - post_start_gid][pre_gid - pre_start_gid]
+                    predicted += this_rate * this_weight
+            predicted_peak_index = np.argmax(predicted)
+            peak_locs['predicted'][post_pop].append(binned_t_edges[predicted_peak_index])
+            modulation_depth['predicted'][post_pop].append(get_modulation_depth(predicted))
+            actual_rate = firing_rate_matrix_dict[post_pop][post_gid - post_start_gid]
+            actual_peak_index = np.argmax(actual_rate)
+            peak_locs['actual'][post_pop].append(binned_t_edges[actual_peak_index])
+            this_modulation_depth = get_modulation_depth(actual_rate)
+            if not np.isnan(this_modulation_depth):
+                modulation_depth['actual'][post_pop].append(this_modulation_depth)
+            this_delta_peak_loc = np.abs(binned_t_edges[actual_peak_index] - binned_t_edges[predicted_peak_index])
+            this_delta_peak_loc /= track_length
+            if this_delta_peak_loc > 0.5:
+                this_delta_peak_loc = 1. - this_delta_peak_loc
+            delta_peak_locs[post_pop].append(this_delta_peak_loc)
+        mean_delta_peak_locs[post_pop] = np.mean(delta_peak_locs[post_pop])
+        mean_modulation_depth['predicted'][post_pop] = np.mean(modulation_depth['predicted'][post_pop])
+        mean_modulation_depth['actual'][post_pop] = np.mean(modulation_depth['actual'][post_pop])
+
+    return modulation_depth, delta_peak_locs
+
+
+def plot_selectivity_input_output(modulation_depth_dict, delta_peak_locs_dict, pop_order=None, color_dict=None,
+                                  label_dict=None):
+    """
+
+    :param modulation_depth_dict:
+    :param delta_peak_locs_dict:
+    :param pop_order:
+    :param color_dict:
+    :param label_dict:
+    """
+    from matplotlib.lines import Line2D
+
+    if pop_order is None:
+        pop_order = sorted(list(delta_peak_locs_dict.keys()))
+    if label_dict is None:
+        label_dict = {}
+        for pop_name in pop_order:
+            label_dict[pop_name] = pop_name
+    if color_dict is None:
+        color_dict = {}
+        for pop_name in pop_order:
+            color_dict[pop_name] = None
+
+    fig, axes = plt.subplots(1, 2, figsize=(8., 3.5))
+    mod_depth_plot_labels = []
+    lines = []
+    handles = []
+    pos_start = 0
+    for pop_name in pop_order:
+        lines.append(Line2D([0], [0], color=color_dict[pop_name]))
+        handles.append(label_dict[pop_name])
+        mod_depth_plot_items = []
+        for key, label in zip(['predicted', 'actual'], ['Expected', 'Actual']):
+            mod_depth_plot_items.append(modulation_depth_dict[key][pop_name])
+            mod_depth_plot_labels.append(label)
+        bp = axes[0].boxplot(mod_depth_plot_items, positions=[pos_start, pos_start + 1], patch_artist=True,
+                             showfliers=False)
+        if color_dict[pop_name] is not None:
+            for element in ['boxes', 'whiskers', 'fliers', 'medians', 'caps']:
+                plt.setp(bp[element], color=color_dict[pop_name])
+        for patch in bp['boxes']:
+            patch.set(facecolor='white')
+        pos_start += 2
+
+    axes[0].set_xticks(range(len(pop_order) * 2))
+    axes[0].set_xticklabels(mod_depth_plot_labels, fontsize=mpl.rcParams['font.size'] - 4)
+    axes[0].set_ylabel('Spatial modulation')
+    axes[0].set_ylim((min(axes[0].get_ylim()[0], 1.), axes[0].get_ylim()[1]))
+    axes[0].legend(lines, handles, loc='best', frameon=False, framealpha=0.5, fontsize=mpl.rcParams['font.size'],
+                   handlelength=1)
+
+    delta_peak_plot_labels = []
+    pos_start = 0
+    for pop_name in pop_order:
+        for key, label in zip(['predicted', 'actual'], ['Expected', 'Actual']):
+            mod_depth_plot_items.append(modulation_depth_dict[key][pop_name])
+            mod_depth_plot_labels.append(label)
+        delta_peak_plot_labels.append(label_dict[pop_name])
+        bp = axes[1].boxplot([delta_peak_locs_dict[pop_name]], positions=[pos_start], patch_artist=True,
+                             showfliers=False)
+        if color_dict[pop_name] is not None:
+            for element in ['boxes', 'whiskers', 'fliers', 'medians', 'caps']:
+                plt.setp(bp[element], color=color_dict[pop_name])
+        for patch in bp['boxes']:
+            patch.set(facecolor='white')
+        pos_start += 1
+
+    axes[1].set_xticks(range(len(pop_order)))
+    axes[1].set_xticklabels(delta_peak_plot_labels)
+    axes[1].set_ylabel('Difference in\npeak locations\n|Actual - Expected|')
+    axes[1].set_ylim((min(axes[1].get_ylim()[0], 0.), max(axes[1].get_ylim()[1], 0.1)))
+    clean_axes(axes)
+    fig.tight_layout()
+    fig.show()
+
+
 def analyze_simple_network_run_data_from_file(data_file_path, data_key='0', example_trial=0, fine_binned_dt=1.,
-                                              coarse_binned_dt=20., verbose=False, pop_order=None, label_dict=None,
-                                              color_dict=None, plot=True):
+                                              coarse_binned_dt=20., filter_order=None, filter_label_dict=None,
+                                              filter_color_dict=None, filter_xlim_dict=None, pop_order=None,
+                                              label_dict=None, color_dict=None, plot=True, verbose=False):
     """
     Given an hdf5 file containing multiple trials from one network instance, import data, process data, plot example
     traces from the specified trial, and plot trial averages for sparsity, selectivity, and rhythmicity.
@@ -2613,21 +2133,24 @@ def analyze_simple_network_run_data_from_file(data_file_path, data_key='0', exam
     :param example_trial: int
     :param fine_binned_dt: float
     :param coarse_binned_dt: float
-    :param verbose: bool
+    :param filter_order: list of str
+    :param filter_label_dict: dict
+    :param filter_color_dict: dict
+    :param filter_xlim_dict: dict of tuple of float
     :param pop_order: list of str; order of populations for plot legend
     :param label_dict: dict; {pop_name: label}
     :param color_dict: dict; {pop_name: str}
     :param plot: bool
+    :param verbose: bool
     """
     if not os.path.isfile(data_file_path):
         raise IOError('analyze_simple_network_run_data_from_file: invalid data file path: %s' % data_file_path)
 
     trial_key_list = []
     full_spike_times_dict_list = []
-    binned_firing_rates_dict = defaultdict(dict)
     filter_bands = dict()
     subset_full_voltage_rec_dict = defaultdict(dict)
-    connection_weights_dict = dict()
+    connection_weights_matrix_dict = dict()
     tuning_peak_locs = dict()
     connectivity_dict = dict()
     pop_syn_proportions = dict()
@@ -2664,9 +2187,9 @@ def analyze_simple_network_run_data_from_file(data_file_path, data_key='0', exam
             filter_bands[this_filter] = data_group[this_filter][:]
         data_group = subgroup['connection_weights']
         for target_pop_name in data_group:
-            connection_weights_dict[target_pop_name] = dict()
+            connection_weights_matrix_dict[target_pop_name] = dict()
             for source_pop_name in data_group[target_pop_name]:
-                connection_weights_dict[target_pop_name][source_pop_name] = \
+                connection_weights_matrix_dict[target_pop_name][source_pop_name] = \
                     data_group[target_pop_name][source_pop_name][:]
         if 'tuning_peak_locs' in subgroup and len(subgroup['tuning_peak_locs']) > 0:
             data_group = subgroup['tuning_peak_locs']
@@ -2708,7 +2231,7 @@ def analyze_simple_network_run_data_from_file(data_file_path, data_key='0', exam
                     full_spike_times_dict[pop_name][int(gid_key)] = data_group[pop_name][gid_key][:]
             full_spike_times_dict_list.append(full_spike_times_dict)
             trial_key_list.append(trial_key)
-            if trial_key == example_trial_key:
+            if example_trial is not None and trial_key == example_trial_key:
                 equilibrate = get_h5py_attr(subgroup.attrs, 'equilibrate')
                 if 'subset_full_voltage_recs' in subgroup:
                     data_group = subgroup['subset_full_voltage_recs']
@@ -2722,18 +2245,20 @@ def analyze_simple_network_run_data_from_file(data_file_path, data_key='0', exam
         np.arange(-buffer, duration + buffer + fine_binned_dt / 2., fine_binned_dt)
     buffered_binned_t = buffered_binned_t_edges[:-1] + fine_binned_dt / 2.
     fine_binned_t_edges = np.arange(0., duration + fine_binned_dt / 2., fine_binned_dt)
-    binned_t = fine_binned_t_edges[:-1] + fine_binned_dt / 2.
+    fine_binned_t = fine_binned_t_edges[:-1] + fine_binned_dt / 2.
     binned_t_edges = np.arange(0., duration + coarse_binned_dt / 2., coarse_binned_dt)
+    binned_t = binned_t_edges[:-1] + coarse_binned_dt / 2.
 
     firing_rate_matrix_dict_list = []
     mean_rate_active_cells_dict_list = []
     pop_fraction_active_dict_list = []
     fft_power_dict_list = []
+    fft_power_nested_gamma_dict_list = []
 
     for trial_key, full_spike_times_dict in zip(trial_key_list, full_spike_times_dict_list):
         current_time = time.time()
-        if trial_key == example_trial_key:
-            this_plot = True
+        if example_trial is not None and trial_key == example_trial_key:
+            this_plot = plot
         else:
             this_plot = False
         binned_firing_rates_dict = \
@@ -2747,8 +2272,15 @@ def analyze_simple_network_run_data_from_file(data_file_path, data_key='0', exam
         buffered_pop_mean_rate_from_binned_spike_count_dict = \
             get_pop_mean_rate_from_binned_spike_count(buffered_binned_spike_count_dict, dt=fine_binned_dt)
 
+        binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict, binned_t_edges)
+        firing_rates_from_binned_spike_count_dict = \
+            get_firing_rates_from_binned_spike_count_dict(binned_spike_count_dict, bin_dur=coarse_binned_dt,
+                                                          smooth=150., wrap=True)
+
         mean_min_rate_dict, mean_peak_rate_dict, mean_rate_active_cells_dict, pop_fraction_active_dict = \
-            get_pop_activity_stats(binned_firing_rates_dict, input_t=binned_t_edges, threshold=active_rate_threshold)
+            get_pop_activity_stats(firing_rates_from_binned_spike_count_dict, input_t=binned_t,
+                                   threshold=active_rate_threshold)
+
         mean_rate_active_cells_dict_list.append(mean_rate_active_cells_dict)
         pop_fraction_active_dict_list.append(pop_fraction_active_dict)
 
@@ -2756,11 +2288,21 @@ def analyze_simple_network_run_data_from_file(data_file_path, data_key='0', exam
         filter_envelope_ratio_dict, centroid_freq_dict, freq_tuning_index_dict = \
             get_pop_bandpass_filtered_signal_stats(buffered_pop_mean_rate_from_binned_spike_count_dict,
                                                    filter_bands, input_t=buffered_binned_t,
-                                                   valid_t=buffered_binned_t, output_t=binned_t, pad=True,
-                                                   plot=this_plot)
+                                                   valid_t=buffered_binned_t, output_t=fine_binned_t, pad=True,
+                                                   filter_order=filter_order, filter_label_dict=filter_label_dict,
+                                                   filter_color_dict=filter_color_dict,
+                                                   filter_xlim_dict=filter_xlim_dict, pop_order=pop_order,
+                                                   label_dict=label_dict, color_dict=color_dict, plot=this_plot)
         fft_power_dict_list.append(fft_power_dict)
 
+        if 'Gamma' in filter_envelope_dict:
+            fft_f_nested_gamma_dict, fft_power_nested_gamma_dict = \
+                get_pop_bandpass_envelope_fft(filter_envelope_dict['Gamma'], dt=fine_binned_dt)
+            fft_power_nested_gamma_dict_list.append(fft_power_nested_gamma_dict)
+
         if this_plot:
+            plot_compare_binned_spike_counts(buffered_binned_spike_count_dict, buffered_binned_t, xlim=(0., 1000.),
+                                             pop_order=['FF', 'E'], color_dict={'FF': 'grey', 'E': 'r'})
             plot_inferred_spike_rates(full_spike_times_dict, binned_firing_rates_dict, input_t=binned_t_edges,
                                       active_rate_threshold=active_rate_threshold)
             if subset_full_voltage_rec_dict is not None and full_rec_t is not None:
@@ -2769,60 +2311,95 @@ def analyze_simple_network_run_data_from_file(data_file_path, data_key='0', exam
 
             if connectivity_type == 'gaussian':
                 plot_2D_connection_distance(pop_syn_proportions, pop_cell_positions, connectivity_dict)
-        print('Processed trial: %s from file: %s in %.1f s' % (trial_key, data_file_path, time.time() - current_time))
+        print('Processed trial: %s, network_instance: %i, network_id: %i from file: %s in %.1f s' %
+              (trial_key, network_instance, network_id, data_file_path, time.time() - current_time))
 
     trial_averaged_firing_rate_matrix_dict = get_trial_averaged_firing_rate_matrix_dict(firing_rate_matrix_dict_list)
     centered_firing_rate_mean_dict, centered_firing_rate_sem_dict, sorted_gid_dict = \
         analyze_selectivity_from_firing_rate_matrix_dict(trial_averaged_firing_rate_matrix_dict, gid_order_dict)
     sorted_trial_averaged_firing_rate_matrix_dict = \
         sort_firing_rate_matrix_dict(trial_averaged_firing_rate_matrix_dict, gid_order_dict, sorted_gid_dict)
-    plot_firing_rate_heatmaps_from_matrix(sorted_trial_averaged_firing_rate_matrix_dict, binned_t_edges,
-                                          gids_sorted=True, \
-                                          pop_order=pop_order, label_dict=label_dict, normalize_t=False)
-    plot_average_selectivity(binned_t_edges, centered_firing_rate_mean_dict, centered_firing_rate_sem_dict,
-                             pop_order=pop_order, label_dict=label_dict, color_dict=color_dict)
+
+    sorted_connection_weights_matrix_dict = \
+        sort_connection_weights_matrix_dict(connection_weights_matrix_dict, gid_order_dict, sorted_gid_dict)
+
+    modulation_depth_dict, delta_peak_locs_dict = \
+        analyze_selectivity_input_output(binned_t_edges, trial_averaged_firing_rate_matrix_dict, pop_gid_ranges,
+                                         ['E', 'FF'], ['E', 'I'], connectivity_dict, connection_weights_matrix_dict)
 
     mean_rate_active_cells_mean_dict, mean_rate_active_cells_sem_dict, pop_fraction_active_mean_dict, \
     pop_fraction_active_sem_dict = \
         get_trial_averaged_pop_activity_stats(mean_rate_active_cells_dict_list, pop_fraction_active_dict_list)
-    plot_pop_activity_stats(binned_t_edges, mean_rate_active_cells_mean_dict, pop_fraction_active_mean_dict, \
-                            mean_rate_active_cells_sem_dict, pop_fraction_active_sem_dict, pop_order=pop_order, \
-                            label_dict=label_dict, color_dict=color_dict)
 
     fft_f = next(iter(fft_f_dict.values()))
     fft_power_mean_dict, fft_power_sem_dict = get_trial_averaged_fft_power(fft_f, fft_power_dict_list)
-    plot_rhythmicity(fft_f, fft_power_mean_dict, fft_power_sem_dict, pop_order=pop_order,
-                     label_dict=label_dict, color_dict=color_dict)
 
-    # TODO: use sorted_gid_order to plot the weight_matrix
-    # plot_weight_matrix(connection_weights_dict, pop_gid_ranges=pop_gid_ranges, tuning_peak_locs=tuning_peak_locs)
+    if 'Gamma' in filter_envelope_dict:
+        fft_f_nested_gamma = next(iter(fft_f_nested_gamma_dict.values()))
+        fft_power_nested_gamma_mean_dict, fft_power_nested_gamma_sem_dict = \
+            get_trial_averaged_fft_power(fft_f_nested_gamma, fft_power_nested_gamma_dict_list)
+    else:
+        fft_f_nested_gamma = None
+        fft_power_nested_gamma_mean_dict = None
+
+    if plot:
+        plot_firing_rate_heatmaps_from_matrix(sorted_trial_averaged_firing_rate_matrix_dict, binned_t_edges,
+                                              gids_sorted=True, pop_order=pop_order, label_dict=label_dict,
+                                              normalize_t=False)
+        plot_average_selectivity(binned_t_edges, centered_firing_rate_mean_dict, centered_firing_rate_sem_dict,
+                                 pop_order=pop_order, label_dict=label_dict, color_dict=color_dict)
+        plot_selectivity_input_output(modulation_depth_dict, delta_peak_locs_dict, pop_order=['E', 'I'],
+                                      label_dict=label_dict, color_dict=color_dict)
+        plot_connection_weights_heatmaps_from_matrix(sorted_connection_weights_matrix_dict, gids_sorted=True,
+                                                     pop_order=pop_order, label_dict=label_dict)
+        plot_pop_activity_stats(binned_t_edges, mean_rate_active_cells_mean_dict, pop_fraction_active_mean_dict, \
+                                mean_rate_active_cells_sem_dict, pop_fraction_active_sem_dict, pop_order=pop_order, \
+                                label_dict=label_dict, color_dict=color_dict)
+        plot_rhythmicity_psd(fft_f, fft_power_mean_dict, fft_power_sem_dict, pop_order=pop_order, label_dict=label_dict,
+                             color_dict=color_dict)
+        if 'Gamma' in filter_envelope_dict:
+            plot_rhythmicity_psd(fft_f_nested_gamma, fft_power_nested_gamma_mean_dict,
+                                 fft_power_nested_gamma_sem_dict, pop_order=pop_order, label_dict=label_dict,
+                                 color_dict=color_dict)
+
+    sys.stdout.flush()
 
     return binned_t_edges, sorted_trial_averaged_firing_rate_matrix_dict, sorted_gid_dict, \
            centered_firing_rate_mean_dict, mean_rate_active_cells_mean_dict, pop_fraction_active_mean_dict, fft_f, \
-           fft_power_mean_dict
+           fft_power_mean_dict, fft_f_nested_gamma, fft_power_nested_gamma_mean_dict, modulation_depth_dict, \
+           delta_peak_locs_dict
 
 
-def analyze_simple_network_replay_data_from_file(data_file_path, data_key='0', trial=0, verbose=False,
-                                                 return_context=False, plot=True):
+def analyze_simple_network_replay_data_from_file(data_file_path, data_key='0', trial=0, fine_binned_dt=1.,
+                                                 coarse_binned_dt=20., filter_order=None, filter_label_dict=None,
+                                                 filter_color_dict=None, filter_xlim_dict=None, pop_order=None,
+                                                 label_dict=None, color_dict=None, plot=True, verbose=False):
     """
-
+    Given an hdf5 file containing multiple trials from one network instance, import data, process data, and plot example
+    traces from the specified trial.
     :param data_file_path: str (path)
     :param data_key: int or str
     :param trial: int
-    :param verbose: bool
-    :param return_context: bool
+    :param fine_binned_dt: float
+    :param coarse_binned_dt: float
+    :param filter_order: list of str
+    :param filter_label_dict: dict
+    :param filter_color_dict: dict
+    :param filter_xlim_dict: dict of tuple of float
+    :param pop_order: list of str; order of populations for plot legend
+    :param label_dict: dict; {pop_name: label}
+    :param color_dict: dict; {pop_name: str}
     :param plot: bool
+    :param verbose: bool
     """
     if not os.path.isfile(data_file_path):
         raise IOError('analyze_simple_network_replay_data_from_file: invalid data file path: %s' % data_file_path)
 
     full_spike_times_dict = defaultdict(dict)
-    buffered_firing_rates_dict = defaultdict(dict)
     filter_bands = dict()
+    connection_weights_matrix_dict = dict()
     subset_full_voltage_rec_dict = defaultdict(dict)
-    connection_weights_dict = dict()
     tuning_peak_locs = dict()
-    connectivity_dict = dict()
     pop_syn_proportions = dict()
     pop_cell_positions = dict()
 
@@ -2834,26 +2411,28 @@ def analyze_simple_network_replay_data_from_file(data_file_path, data_key='0', t
         connectivity_type = get_h5py_attr(subgroup.attrs, 'connectivity_type')
         active_rate_threshold = subgroup.attrs['active_rate_threshold']
         duration = get_h5py_attr(subgroup.attrs, 'duration')
+        buffer = get_h5py_attr(subgroup.attrs, 'buffer')
         network_id = get_h5py_attr(subgroup.attrs, 'network_id')
         network_instance = get_h5py_attr(subgroup.attrs, 'network_instance')
-        baks_alpha = get_h5py_attr(subgroup.attrs, 'baks_alpha')
-        baks_beta = get_h5py_attr(subgroup.attrs, 'baks_beta')
-        baks_pad_dur = get_h5py_attr(subgroup.attrs, 'baks_pad_dur')
-        baks_wrap_around = get_h5py_attr(subgroup.attrs, 'baks_wrap_around')
-        full_binned_t = subgroup['full_binned_t'][:]
+
+        if 'full_rec_t' in subgroup:
+            full_rec_t = subgroup['full_rec_t'][:]
+            dt = full_rec_t[1] - full_rec_t[0]
+        else:
+            full_rec_t = None
+            dt = None
+
         pop_gid_ranges = dict()
         for pop_name in subgroup['pop_gid_ranges']:
             pop_gid_ranges[pop_name] = tuple(subgroup['pop_gid_ranges'][pop_name][:])
-        buffered_binned_t = subgroup['buffered_binned_t'][:]
-        binned_t = subgroup['binned_t'][:]
         data_group = subgroup['filter_bands']
         for this_filter in data_group:
             filter_bands[this_filter] = data_group[this_filter][:]
         data_group = subgroup['connection_weights']
         for target_pop_name in data_group:
-            connection_weights_dict[target_pop_name] = dict()
+            connection_weights_matrix_dict[target_pop_name] = dict()
             for source_pop_name in data_group[target_pop_name]:
-                connection_weights_dict[target_pop_name][source_pop_name] = \
+                connection_weights_matrix_dict[target_pop_name][source_pop_name] = \
                     data_group[target_pop_name][source_pop_name][:]
         if 'tuning_peak_locs' in subgroup and len(subgroup['tuning_peak_locs']) > 0:
             data_group = subgroup['tuning_peak_locs']
@@ -2861,15 +2440,6 @@ def analyze_simple_network_replay_data_from_file(data_file_path, data_key='0', t
                 tuning_peak_locs[pop_name] = dict()
                 for target_gid, peak_loc in zip(data_group[pop_name]['target_gids'], data_group[pop_name]['peak_locs']):
                     tuning_peak_locs[pop_name][target_gid] = peak_loc
-        data_group = subgroup['connectivity']
-        for target_pop_name in data_group:
-            connectivity_dict[target_pop_name] = dict()
-            for target_gid_key in data_group[target_pop_name]:
-                target_gid = int(target_gid_key)
-                connectivity_dict[target_pop_name][target_gid] = dict()
-                for source_pop_name in data_group[target_pop_name][target_gid_key]:
-                    connectivity_dict[target_pop_name][target_gid][source_pop_name] = \
-                        data_group[target_pop_name][target_gid_key][source_pop_name][:]
         data_group = subgroup['pop_syn_proportions']
         for target_pop_name in data_group:
             pop_syn_proportions[target_pop_name] = dict()
@@ -2885,87 +2455,87 @@ def analyze_simple_network_replay_data_from_file(data_file_path, data_key='0', t
             for gid, position in zip(data_group[pop_name]['gids'][:], data_group[pop_name]['positions'][:]):
                 pop_cell_positions[pop_name][gid] = position
 
-        subgroup = get_h5py_group(group, [str(trial)])
+        trial_key = str(trial)
+        if trial_key not in group:
+            raise RuntimeError('analyze_simple_network_replay_data_from_file: data for trial: %i not found in data '
+                               'file path: %s' % (trial, data_file_path))
+        subgroup = get_h5py_group(group, [trial_key])
         data_group = subgroup['full_spike_times']
         for pop_name in data_group:
             for gid_key in data_group[pop_name]:
                 full_spike_times_dict[pop_name][int(gid_key)] = data_group[pop_name][gid_key][:]
-
-        if 'buffered_firing_rates' in subgroup:
-            data_group = subgroup['buffered_firing_rates']
-            for pop_name in data_group:
-                for gid_key in data_group[pop_name]:
-                    buffered_firing_rates_dict[pop_name][int(gid_key)] = data_group[pop_name][gid_key][:]
-        else:
-            buffered_firing_rates_dict = None
-
         if 'subset_full_voltage_recs' in subgroup:
             data_group = subgroup['subset_full_voltage_recs']
             for pop_name in data_group:
                 for gid_key in data_group[pop_name]:
                     subset_full_voltage_rec_dict[pop_name][int(gid_key)] = data_group[pop_name][gid_key][:]
-            full_rec_t = subgroup['full_rec_t'][:]
-            buffered_rec_t = subgroup['buffered_rec_t'][:]
-            rec_t = subgroup['rec_t'][:]
         else:
             subset_full_voltage_rec_dict = None
 
-    if buffered_firing_rates_dict is None:
-        buffered_firing_rates_dict = \
-            infer_firing_rates_baks(full_spike_times_dict, buffered_binned_t, alpha=baks_alpha, beta=baks_beta,
-                                    pad_dur=baks_pad_dur, wrap_around=baks_wrap_around)
-    full_binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict, full_binned_t)
+    fine_buffered_binned_t_edges = \
+        np.arange(-buffer, duration + buffer + fine_binned_dt / 2., fine_binned_dt)
+    fine_buffered_binned_t = fine_buffered_binned_t_edges[:-1] + fine_binned_dt / 2.
+    fine_binned_t_edges = np.arange(0., duration + fine_binned_dt / 2., fine_binned_dt)
+    fine_binned_t = fine_binned_t_edges[:-1] + fine_binned_dt / 2.
 
-    binned_dt = binned_t[1] - binned_t[0]
-    full_pop_mean_rate_from_binned_spike_count_dict = \
-        get_pop_mean_rate_from_binned_spike_count(full_binned_spike_count_dict, dt=binned_dt)
-    _ = get_pop_activity_stats(buffered_firing_rates_dict, input_t=buffered_binned_t, valid_t=binned_t,
-                               threshold=active_rate_threshold, plot=plot)
-    _ = get_pop_bandpass_filtered_signal_stats(full_pop_mean_rate_from_binned_spike_count_dict, filter_bands,
-                                               input_t=full_binned_t, valid_t=binned_t, output_t=binned_t,
-                                               plot=plot, verbose=verbose)
+    buffered_binned_t_edges = \
+        np.arange(-buffer, duration + buffer + coarse_binned_dt / 2., coarse_binned_dt)
+    buffered_binned_t = buffered_binned_t_edges[:-1] + coarse_binned_dt / 2.
+    binned_t_edges = np.arange(0., duration + coarse_binned_dt / 2., coarse_binned_dt)
+    binned_t = binned_t_edges[:-1] + coarse_binned_dt / 2.
+
+    fine_buffered_binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict,
+                                                                        fine_buffered_binned_t_edges)
+    fine_buffered_pop_mean_rate_from_binned_spike_count_dict = \
+        get_pop_mean_rate_from_binned_spike_count(fine_buffered_binned_spike_count_dict, dt=fine_binned_dt)
+
+    buffered_binned_spike_count_dict = get_binned_spike_count_dict(full_spike_times_dict, buffered_binned_t_edges)
+    buffered_firing_rates_from_binned_spike_count_dict = \
+        get_firing_rates_from_binned_spike_count_dict(buffered_binned_spike_count_dict, bin_dur=coarse_binned_dt,
+                                                      smooth=None, wrap=False)
+
+    buffered_firing_rate_matrix_dict, gid_order_dict = \
+        get_firing_rate_matrix_dict_from_nested_dict(buffered_firing_rates_from_binned_spike_count_dict, buffered_binned_t)
+    sorted_gid_dict = get_sorted_gid_dict_from_tuning_peak_locs(gid_order_dict, tuning_peak_locs)
+    sorted_buffered_firing_rate_matrix_dict = sort_firing_rate_matrix_dict(buffered_firing_rate_matrix_dict,
+                                                                           gid_order_dict, sorted_gid_dict)
+
+    mean_min_rate_dict, mean_peak_rate_dict, mean_rate_active_cells_dict, pop_fraction_active_dict = \
+        get_pop_activity_stats(buffered_firing_rates_from_binned_spike_count_dict, input_t=buffered_binned_t,
+                               threshold=active_rate_threshold)
+
+    fft_f_dict, fft_power_dict, filter_psd_f_dict, filter_psd_power_dict, filter_envelope_dict, \
+    filter_envelope_ratio_dict, centroid_freq_dict, freq_tuning_index_dict = \
+        get_pop_bandpass_filtered_signal_stats(fine_buffered_pop_mean_rate_from_binned_spike_count_dict,
+                                               filter_bands, input_t=fine_buffered_binned_t,
+                                               valid_t=fine_buffered_binned_t, output_t=fine_binned_t, pad=False,
+                                               filter_order=filter_order, filter_label_dict=filter_label_dict,
+                                               filter_color_dict=filter_color_dict,
+                                               filter_xlim_dict=filter_xlim_dict, pop_order=pop_order,
+                                               label_dict=label_dict, color_dict=color_dict, plot=plot)
+    fft_f = next(iter(fft_f_dict.values()))
+    sorted_connection_weights_matrix_dict = \
+        sort_connection_weights_matrix_dict(connection_weights_matrix_dict, gid_order_dict, sorted_gid_dict)
+
     if plot:
-        plot_firing_rate_heatmaps(buffered_firing_rates_dict, input_t=buffered_binned_t,
-                                  valid_t=binned_t, tuning_peak_locs=tuning_peak_locs)
-        plot_population_spike_rasters(full_binned_spike_count_dict, input_t=full_binned_t, valid_t=buffered_binned_t,
-                                      tuning_peak_locs=tuning_peak_locs)
+        if subset_full_voltage_rec_dict is not None and full_rec_t is not None:
+            rec_t = np.arange(0., duration, dt)
+            plot_voltage_traces(subset_full_voltage_rec_dict, full_rec_t, valid_t=rec_t)
+        plot_firing_rate_heatmaps_from_matrix(sorted_buffered_firing_rate_matrix_dict, buffered_binned_t,
+                                              gids_sorted=True, pop_order=pop_order, label_dict=label_dict,
+                                              normalize_t=False)
+        plot_connection_weights_heatmaps_from_matrix(sorted_connection_weights_matrix_dict, gids_sorted=True,
+                                                     pop_order=pop_order, label_dict=label_dict)
+        plot_pop_activity_stats(buffered_binned_t_edges, mean_rate_active_cells_dict, pop_fraction_active_dict, \
+                                pop_order=pop_order, \
+                                label_dict=label_dict, color_dict=color_dict)
 
-    if return_context:
-        context = Context()
-        context.update(locals())
-        return context
+        plot_rhythmicity_psd(fft_f, fft_power_dict, pop_order=pop_order, label_dict=label_dict,
+                             color_dict=color_dict)
+        plot_replay_spike_rasters(full_spike_times_dict, binned_t_edges, sorted_gid_dict, trial_key=trial_key, \
+                                      pop_order=pop_order, label_dict=label_dict)
 
-
-def get_replay_data_from_file(replay_data_file_path, replay_binned_t, sorted_gid_dict, replay_data_key='0'):
-    """
-
-    :param replay_data_file_path: str (path)
-    :param replay_binned_t: array
-    :param sorted_gid_dict: dict {str: list of int}
-    :param replay_data_key: str
-    :return: tuple ()
-    """
-    if not os.path.isfile(replay_data_file_path):
-        raise IOError('get_replay_data_from_file: invalid data file path: %s' % replay_data_file_path)
-
-    replay_full_spike_times_dict = defaultdict(dict)
-    replay_binned_spike_count_matrix_dict = dict()
-    replay_data_group_key = 'simple_network_exported_data'
-    with h5py.File(replay_data_file_path, 'r') as f:
-        group = get_h5py_group(f, [replay_data_key, replay_data_group_key, 'full_spike_times'])
-        for pop_name in group:
-            for gid_key in group[pop_name]:
-                replay_full_spike_times_dict[pop_name][int(gid_key)] = group[pop_name][gid_key][:]
-    replay_full_binned_spike_count_dict = \
-        get_binned_spike_count_dict(replay_full_spike_times_dict, replay_binned_t)
-
-    for pop_name in replay_full_binned_spike_count_dict:
-        replay_binned_spike_count = np.empty((len(replay_full_binned_spike_count_dict[pop_name]), len(replay_binned_t)))
-        for i, gid in enumerate(sorted_gid_dict[pop_name]):
-            replay_binned_spike_count[i, :] = replay_full_binned_spike_count_dict[pop_name][gid]
-        replay_binned_spike_count_matrix_dict[pop_name] = replay_binned_spike_count
-
-    return replay_binned_spike_count_matrix_dict
+    return fft_f, fft_power_dict
 
 
 def circular_linear_fit_error(p, x, y, end=1.):
@@ -3160,3 +2730,442 @@ def merge_connection_weights_dicts(target_gid_dict_list, weights_dict_list):
                 connection_weights_dict[target_pop_name][source_pop_name][sorted_target_gid_indexes, :]
 
     return connection_weights_dict
+
+
+def analyze_decoded_trajectory_run_data(decoded_pos_matrix_dict, actual_position, decode_duration):
+    """
+
+    :param decoded_pos_matrix_dict: dict of array of float (num_trials, num_position_bins)
+    :param actual_position: array of float (num_bins)
+    :param decode_duration: float
+    :return: tuple of dict of array of float
+    """
+    decoded_pos_error_mean_dict = {}
+    decoded_pos_error_sem_dict = {}
+    sequence_len_mean_dict = {}
+    sequence_len_sem_dict = {}
+
+    for pop_name in decoded_pos_matrix_dict:
+        if pop_name not in decoded_pos_error_mean_dict:
+            decoded_pos_error_mean_dict[pop_name] = []
+            sequence_len_mean_dict[pop_name] = []
+        this_decoded_pos_matrix = decoded_pos_matrix_dict[pop_name][:, :] / decode_duration
+        num_trials = this_decoded_pos_matrix.shape[0]
+        for trial in range(num_trials):
+            this_trial_pos = this_decoded_pos_matrix[trial, :]
+            this_trial_error = np.subtract(actual_position / decode_duration, this_trial_pos)
+            if np.all(np.isnan(this_trial_error)):
+                continue
+            for i in range(len(this_trial_error)):
+                if np.isnan(this_trial_error[i]):
+                    if i == 0:
+                        j = np.where(~np.isnan(this_trial_error))[0][0]
+                    else:
+                        j = np.where(~np.isnan(this_trial_error[:i]))[0][-1]
+                    this_trial_error[i] = this_trial_error[j]
+            this_trial_error[np.where(this_trial_error < -0.5)] += 1.
+            this_trial_error[np.where(this_trial_error > 0.5)] -= 1.
+            analytic_signal = hilbert(this_trial_error)
+            amplitude_envelope = np.abs(analytic_signal)
+
+            decoded_pos_error_mean_dict[pop_name].append(np.abs(this_trial_error))
+            sequence_len_mean_dict[pop_name].append(2. * amplitude_envelope)
+        decoded_pos_error_sem_dict[pop_name] = np.std(decoded_pos_error_mean_dict[pop_name], axis=0) / \
+                                               np.sqrt(num_trials)
+        decoded_pos_error_mean_dict[pop_name] = np.mean(decoded_pos_error_mean_dict[pop_name], axis=0)
+        sequence_len_sem_dict[pop_name] = np.std(sequence_len_mean_dict[pop_name], axis=0) / np.sqrt(num_trials)
+        sequence_len_mean_dict[pop_name] = np.mean(sequence_len_mean_dict[pop_name], axis=0)
+
+    return decoded_pos_error_mean_dict, decoded_pos_error_sem_dict, sequence_len_mean_dict, sequence_len_sem_dict
+
+
+def plot_decoded_trajectory_run_data(decoded_pos_error_mean_dict, sequence_len_mean_dict, actual_position,
+                                     decode_duration, decoded_pos_error_sem_dict=None, sequence_len_sem_dict=None,
+                                     decoded_pos_error_ymax=None, sequence_len_ymax=None, pop_order=None,
+                                     label_dict=None, color_dict=None):
+    """
+
+    :param decoded_pos_error_mean_dict: dict of array of float (num_position_bins)
+    :param sequence_len_mean_dict: dict of array of float (num_position_bins)
+    :param actual_position: array of float (num_position_bins)
+    :param decode_duration: float
+    :param decoded_pos_error_sem_dict: dict of array of float (num_position_bins)
+    :param sequence_len_sem_dict: dict of array of float (num_position_bins)
+    :param decoded_pos_error_ymax: float
+    :param sequence_len_ymax: float
+    :param pop_order: list of str; order of populations for plot legend
+    :param label_dict: dict; {pop_name: label}
+    :param color_dict: dict; {pop_name: str}
+    """
+    normalized_position = actual_position / decode_duration
+    if pop_order is None:
+        pop_order = sorted(list(decoded_pos_error_mean_dict.keys()))
+
+    fig, axes = plt.subplots(2, figsize=(4., 7.))
+
+    ymin0 = 0.
+    ymin1 = 0.
+    for pop_name in pop_order:
+        if label_dict is not None:
+            label = label_dict[pop_name]
+        else:
+            label = pop_name
+        if color_dict is not None:
+            color = color_dict[pop_name]
+            axes[0].plot(normalized_position, decoded_pos_error_mean_dict[pop_name], label=label, color=color)
+            if decoded_pos_error_sem_dict is not None:
+                axes[0].fill_between(normalized_position,
+                                     decoded_pos_error_mean_dict[pop_name] - decoded_pos_error_sem_dict[pop_name],
+                                     decoded_pos_error_mean_dict[pop_name] + decoded_pos_error_sem_dict[pop_name],
+                                     alpha=0.25, linewidth=0, color=color)
+                ymin0 = min(0., np.min(decoded_pos_error_mean_dict[pop_name] - decoded_pos_error_sem_dict[pop_name]))
+            else:
+                ymin0 = min(0., np.min(decoded_pos_error_mean_dict[pop_name]))
+            axes[1].plot(normalized_position, sequence_len_mean_dict[pop_name], label=label, color=color)
+            if sequence_len_sem_dict is not None:
+                axes[1].fill_between(normalized_position,
+                                     sequence_len_mean_dict[pop_name] - sequence_len_sem_dict[pop_name],
+                                     sequence_len_mean_dict[pop_name] + sequence_len_sem_dict[pop_name],
+                                     alpha=0.25, linewidth=0, color=color)
+                ymin1 = min(0., np.min(sequence_len_mean_dict[pop_name] - sequence_len_sem_dict[pop_name]))
+            else:
+                ymin1 = min(0., np.min(sequence_len_mean_dict[pop_name]))
+        else:
+            axes[0].plot(normalized_position, decoded_pos_error_mean_dict[pop_name], label=label)
+            if decoded_pos_error_sem_dict is not None:
+                axes[0].fill_between(normalized_position,
+                                     decoded_pos_error_mean_dict[pop_name] - decoded_pos_error_sem_dict[pop_name],
+                                     decoded_pos_error_mean_dict[pop_name] + decoded_pos_error_sem_dict[pop_name],
+                                     alpha=0.25, linewidth=0)
+                ymin0 = min(0., np.min(decoded_pos_error_mean_dict[pop_name] - decoded_pos_error_sem_dict[pop_name]))
+            else:
+                ymin0 = min(0., np.min(decoded_pos_error_mean_dict[pop_name]))
+            axes[1].plot(normalized_position, sequence_len_mean_dict[pop_name], label=label)
+            if sequence_len_sem_dict is not None:
+                axes[1].fill_between(normalized_position,
+                                     sequence_len_mean_dict[pop_name] - sequence_len_sem_dict[pop_name],
+                                     sequence_len_mean_dict[pop_name] + sequence_len_sem_dict[pop_name],
+                                     alpha=0.25, linewidth=0)
+                ymin1 = min(0., np.min(sequence_len_mean_dict[pop_name] - sequence_len_sem_dict[pop_name]))
+            else:
+                ymin1 = min(0., np.min(sequence_len_mean_dict[pop_name]))
+    axes[0].set_title('Decoded position error', fontsize=mpl.rcParams['font.size'])
+    axes[0].set_ylabel('Fraction of track length')
+    axes[0].set_xlabel('Normalized position')
+    axes[0].legend(loc='best', frameon=False, fontsize=mpl.rcParams['font.size'], handlelength=1)
+    axes[0].set_xlim((0., 1.))
+    if decoded_pos_error_ymax is None:
+        axes[0].set_ylim((ymin0, axes[0].get_ylim()[1]))
+    else:
+        axes[0].set_ylim((ymin0, decoded_pos_error_ymax))
+    axes[1].set_title('Theta sequence length', fontsize=mpl.rcParams['font.size'])
+    axes[1].set_ylabel('Fraction of track length')
+    axes[1].set_xlabel('Normalized position')
+    if sequence_len_ymax is None:
+        axes[1].set_ylim((ymin1, axes[1].get_ylim()[1]))
+    else:
+        axes[1].set_ylim((ymin1, sequence_len_ymax))
+    axes[1].set_xlim((0., 1.))
+    clean_axes(axes)
+    fig.tight_layout()
+    fig.show()
+
+
+def analyze_decoded_trajectory_run_data_across_instances(decoded_pos_error_mean_dict_list, sequence_len_mean_dict_list):
+    """
+    Given lists of dicts containing data from different network instances, return dicts containing the mean and sem
+    for decoded position error and sequence length.
+    :param decoded_pos_error_mean_dict_list: list of dict of array of float
+    :param sequence_len_mean_dict_list: list of dict of array of float
+    :return: tuple of dict of array of float
+    """
+    decoded_pos_error_mean_dict = {}
+    decoded_pos_error_sem_dict = {}
+    sequence_len_mean_dict = {}
+    sequence_len_sem_dict = {}
+
+    num_instances = len(decoded_pos_error_mean_dict_list)
+    for i, decoded_pos_error_mean_dict_instance in enumerate(decoded_pos_error_mean_dict_list):
+        sequence_len_mean_dict_instance = sequence_len_mean_dict_list[i]
+        for pop_name in decoded_pos_error_mean_dict_instance:
+            if pop_name not in decoded_pos_error_mean_dict:
+                decoded_pos_error_mean_dict[pop_name] = []
+                sequence_len_mean_dict[pop_name] = []
+            decoded_pos_error_mean_dict[pop_name].append(decoded_pos_error_mean_dict_instance[pop_name])
+            sequence_len_mean_dict[pop_name].append(sequence_len_mean_dict_instance[pop_name])
+    for pop_name in decoded_pos_error_mean_dict:
+        decoded_pos_error_sem_dict[pop_name] = np.std(decoded_pos_error_mean_dict[pop_name], axis=0) / \
+                                               np.sqrt(num_instances)
+        decoded_pos_error_mean_dict[pop_name] = np.mean(decoded_pos_error_mean_dict[pop_name], axis=0)
+        sequence_len_sem_dict[pop_name] = np.std(sequence_len_mean_dict[pop_name], axis=0) / \
+                                          np.sqrt(num_instances)
+        sequence_len_mean_dict[pop_name] = np.mean(sequence_len_mean_dict[pop_name], axis=0)
+
+    return decoded_pos_error_mean_dict, decoded_pos_error_sem_dict, sequence_len_mean_dict, sequence_len_sem_dict
+
+
+def load_decoded_data(decode_data_file_path, export_data_key):
+    """
+
+    :param decode_data_file_path: str (path)
+    :param export_data_key: str
+    :return: dict: {pop_name: 2D array}
+    """
+    group_key = 'simple_network_processed_data'
+    shared_context_key = 'shared_context'
+    decoded_pos_matrix_dict = dict()
+    with h5py.File(decode_data_file_path, 'a') as f:
+        group = get_h5py_group(f, [export_data_key, group_key, shared_context_key])
+        subgroup = get_h5py_group(group, ['decoded_pos_matrix'])
+        for pop_name in subgroup:
+            decoded_pos_matrix_dict[pop_name] = subgroup[pop_name][:,:]
+
+    return decoded_pos_matrix_dict
+
+
+def plot_decoded_trajectory_replay_data(decoded_pos_matrix_dict, bin_dur, template_duration, pop_order=None,
+                                        label_dict=None, color_dict=None):
+    """
+
+    :param decoded_pos_matrix_dict: dict or list of dict: {pop_name: 2d array of float}
+    :param bin_dur: float
+    :param template_duration: float
+    :param pop_order: list of str; order of populations for plot legend
+    :param label_dict: dict; {pop_name: label}
+    :param color_dict: dict; {pop_name: str}
+    """
+    if not isinstance(decoded_pos_matrix_dict, list):
+        decoded_pos_matrix_dict_instances_list = [decoded_pos_matrix_dict]
+    else:
+        decoded_pos_matrix_dict_instances_list = decoded_pos_matrix_dict
+
+    all_decoded_pos_instances_list_dict = defaultdict(list)
+    decoded_velocity_var_instances_list_dict = defaultdict(list)
+    decoded_path_len_instances_list_dict = defaultdict(list)
+    decoded_velocity_mean_instances_list_dict = defaultdict(list)
+
+    for decoded_pos_matrix_dict in decoded_pos_matrix_dict_instances_list:
+        all_decoded_pos_dict = dict()
+        decoded_path_len_dict = defaultdict(list)
+        decoded_velocity_var_dict = defaultdict(list)
+        decoded_velocity_mean_dict = defaultdict(list)
+        for pop_name in decoded_pos_matrix_dict:
+            this_decoded_pos_matrix = decoded_pos_matrix_dict[pop_name][:, :] / template_duration
+            clean_indexes = ~np.isnan(this_decoded_pos_matrix)
+            all_decoded_pos_dict[pop_name] = this_decoded_pos_matrix[clean_indexes]
+            for trial in range(this_decoded_pos_matrix.shape[0]):
+                this_trial_pos = this_decoded_pos_matrix[trial, :]
+                clean_indexes = ~np.isnan(this_trial_pos)
+                if len(clean_indexes) > 0:
+                    this_trial_diff = np.diff(this_trial_pos[clean_indexes])
+                    this_trial_diff[np.where(this_trial_diff < -0.5)] += 1.
+                    this_trial_diff[np.where(this_trial_diff > 0.5)] -= 1.
+                    this_path_len = np.sum(np.abs(this_trial_diff))
+                    decoded_path_len_dict[pop_name].append(this_path_len)
+                    this_trial_velocity = this_trial_diff / (bin_dur / 1000.)
+                    this_trial_velocity_mean = np.mean(this_trial_velocity)
+                    decoded_velocity_mean_dict[pop_name].append(this_trial_velocity_mean)
+                    if len(clean_indexes) > 1:
+                        this_trial_velocity_var = np.var(this_trial_velocity)
+                        decoded_velocity_var_dict[pop_name].append(this_trial_velocity_var)
+            all_decoded_pos_instances_list_dict[pop_name].append(all_decoded_pos_dict[pop_name])
+            decoded_path_len_instances_list_dict[pop_name].append(decoded_path_len_dict[pop_name])
+            decoded_velocity_var_instances_list_dict[pop_name].append(decoded_velocity_var_dict[pop_name])
+            decoded_velocity_mean_instances_list_dict[pop_name].append(decoded_velocity_mean_dict[pop_name])
+
+    if pop_order is None:
+        pop_order = sorted(list(all_decoded_pos_instances_list_dict.keys()))
+
+    fig, axes = plt.subplots(1, 4, figsize=(3.2 * 4., 3.9))  # , constrained_layout=True)
+
+    max_vel_var = np.max(list(decoded_velocity_var_instances_list_dict.values()))
+    max_path_len = np.max(list(decoded_path_len_instances_list_dict.values()))
+    max_vel_mean = np.max(list(decoded_velocity_mean_instances_list_dict.values()))
+    min_vel_mean = np.min(list(decoded_velocity_mean_instances_list_dict.values()))
+
+    num_instances = len(decoded_pos_matrix_dict_instances_list)
+    for pop_name in pop_order:
+        if label_dict is not None:
+            label = label_dict[pop_name]
+        else:
+            label = pop_name
+        if color_dict is not None:
+            color = color_dict[pop_name]
+            hist_list = []
+            for all_decoded_pos in all_decoded_pos_instances_list_dict[pop_name]:
+                hist, edges = np.histogram(all_decoded_pos, bins=np.linspace(0., 1., 21), density=True)
+                bin_width = (edges[1] - edges[0])
+                hist *= bin_width
+                hist_list.append(hist)
+            if num_instances == 1:
+                axes[0].plot(edges[1:] - bin_width / 2., hist_list[0], label=label, color=color)
+            else:
+                mean_hist = np.mean(hist_list, axis=0)
+                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
+                axes[0].plot(edges[1:] - bin_width / 2., mean_hist, label=label, color=color)
+                axes[0].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                                        alpha=0.25, linewidth=0, color=color)
+
+            hist_list = []
+            for decoded_velocity_var in decoded_velocity_var_instances_list_dict[pop_name]:
+                hist, edges = np.histogram(decoded_velocity_var, bins=np.linspace(0., max_vel_var, 21),
+                                           density=True)
+                bin_width = (edges[1] - edges[0])
+                hist *= bin_width
+                hist_list.append(hist)
+            if num_instances == 1:
+                axes[3].plot(edges[1:] - bin_width / 2., hist_list[0], label=label, color=color)
+            else:
+                mean_hist = np.mean(hist_list, axis=0)
+                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
+                axes[3].plot(edges[1:] - bin_width / 2., mean_hist, label=label, color=color)
+                axes[3].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                                        alpha=0.25, linewidth=0, color=color)
+
+            hist_list = []
+            for decoded_path_len in decoded_path_len_instances_list_dict[pop_name]:
+                hist, edges = np.histogram(decoded_path_len, bins=np.linspace(0., max_path_len, 21),
+                                           density=True)
+                bin_width = (edges[1] - edges[0])
+                hist *= bin_width
+                hist_list.append(hist)
+            if num_instances == 1:
+                axes[1].plot(edges[1:] - bin_width / 2., hist_list[0], label=label, color=color)
+            else:
+                mean_hist = np.mean(hist_list, axis=0)
+                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
+                axes[1].plot(edges[1:] - bin_width / 2., mean_hist, label=label, color=color)
+                axes[1].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                                        alpha=0.25, linewidth=0, color=color)
+
+            hist_list = []
+            for decoded_velocity_mean in decoded_velocity_mean_instances_list_dict[pop_name]:
+                hist, edges = np.histogram(decoded_velocity_mean, bins=np.linspace(min_vel_mean, max_vel_mean, 21),
+                                           density=True)
+                bin_width = (edges[1] - edges[0])
+                hist *= bin_width
+                hist_list.append(hist)
+            if num_instances == 1:
+                axes[2].plot(edges[1:] - bin_width / 2., hist_list[0], label=label, color=color)
+            else:
+                mean_hist = np.mean(hist_list, axis=0)
+                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
+                axes[2].plot(edges[1:] - bin_width / 2., mean_hist, label=label, color=color)
+                axes[2].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                                        alpha=0.25, linewidth=0, color=color)
+        else:
+            hist_list = []
+            for all_decoded_pos in all_decoded_pos_instances_list_dict[pop_name]:
+                hist, edges = np.histogram(all_decoded_pos, bins=np.linspace(0., 1., 21), density=True)
+                bin_width = (edges[1] - edges[0])
+                hist *= bin_width
+                hist_list.append(hist)
+            if num_instances == 1:
+                axes[0][0].plot(edges[1:] - bin_width / 2., hist_list[0], label=label)
+            else:
+                mean_hist = np.mean(hist_list, axis=0)
+                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
+                axes[0][0].plot(edges[1:] - bin_width / 2., mean_hist, label=label)
+                axes[0][0].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                                        alpha=0.25, linewidth=0)
+
+            hist_list = []
+            for decoded_velocity_var in decoded_velocity_var_instances_list_dict[pop_name]:
+                hist, edges = np.histogram(decoded_velocity_var, bins=np.linspace(0., max_vel_var, 21),
+                                           density=True)
+                bin_width = (edges[1] - edges[0])
+                hist *= bin_width
+                hist_list.append(hist)
+            if num_instances == 1:
+                axes[3].plot(edges[1:] - bin_width / 2., hist_list[0], label=label)
+            else:
+                mean_hist = np.mean(hist_list, axis=0)
+                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
+                axes[3].plot(edges[1:] - bin_width / 2., mean_hist, label=label)
+                axes[3].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                                        alpha=0.25, linewidth=0)
+
+            hist_list = []
+            for decoded_path_len in decoded_path_len_instances_list_dict[pop_name]:
+                hist, edges = np.histogram(decoded_path_len, bins=np.linspace(0., max_path_len, 21),
+                                           density=True)
+                bin_width = (edges[1] - edges[0])
+                hist *= bin_width
+                hist_list.append(hist)
+            if num_instances == 1:
+                axes[1].plot(edges[1:] - bin_width / 2., hist_list[0], label=label)
+            else:
+                mean_hist = np.mean(hist_list, axis=0)
+                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
+                axes[1].plot(edges[1:] - bin_width / 2., mean_hist, label=label)
+                axes[1].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                                        alpha=0.25, linewidth=0)
+
+            hist_list = []
+            for decoded_velocity_mean in decoded_velocity_mean_instances_list_dict[pop_name]:
+                hist, edges = np.histogram(decoded_velocity_mean, bins=np.linspace(min_vel_mean, max_vel_mean, 21),
+                                           density=True)
+                bin_width = (edges[1] - edges[0])
+                hist *= bin_width
+                hist_list.append(hist)
+            if num_instances == 1:
+                axes[2].plot(edges[1:] - bin_width / 2., hist_list[0], label=label)
+            else:
+                mean_hist = np.mean(hist_list, axis=0)
+                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
+                axes[2].plot(edges[1:] - bin_width / 2., mean_hist, label=label)
+                axes[2].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                                        alpha=0.25, linewidth=0)
+
+    axes[1].set_xlim((0., max_path_len))
+    axes[1].set_ylim((0., axes[1].get_ylim()[1]))
+    axes[1].set_xlabel('Fraction of track length')
+    axes[1].set_ylabel('Probability')
+    axes[1].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
+    axes[1].set_title('Offline sequence length', y=1.05, fontsize=mpl.rcParams['font.size'])
+
+    axes[3].set_xlim((0., max_vel_var))
+    axes[3].set_ylim((0., axes[3].get_ylim()[1]))
+    axes[3].set_xlabel('Variance\n((Fraction of\ntrack length/s)^2)')
+    axes[3].set_ylabel('Probability')
+    axes[3].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
+    axes[3].set_title('Variance of offline\nsequence velocity', y=1.05, fontsize=mpl.rcParams['font.size'])
+
+    axes[0].set_xlim((0., 1.))
+    axes[0].set_ylim((0., max(axes[0].get_ylim()[1], 0.2)))
+    axes[0].set_xlabel('Normalized position')
+    axes[0].set_ylabel('Probability')
+    axes[0].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
+    axes[0].set_title('Decoded positions', y=1.05, fontsize=mpl.rcParams['font.size'])
+
+    axes[2].set_xlim((min_vel_mean, max_vel_mean))
+    axes[2].set_ylim((0., axes[2].get_ylim()[1]))
+    axes[2].set_xlabel('Velocity\n(Fraction of track length/s)')
+    axes[2].set_ylabel('Probability')
+    axes[2].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
+    axes[2].set_title('Offline sequence velocity', y=1.05, fontsize=mpl.rcParams['font.size'])
+
+    clean_axes(axes)
+    fig.tight_layout(w_pad=0.2)
+    # fig.set_constrained_layout_pads(hspace=0.15, wspace=0.1)
+    fig.show()
+
+
+def get_sorted_gid_dict_from_tuning_peak_locs(gid_order_dict, tuning_peak_locs):
+    """
+
+    :param gid_order_dict: dict of array of int
+    :param tuning_peak_locs: nested dict: {pop_name (str): {gid (int): float}}
+    :return: dict of array of int
+    """
+    sorted_gid_dict = dict()
+    for pop_name in gid_order_dict:
+        if pop_name in tuning_peak_locs:
+            this_target_gids = np.array(list(tuning_peak_locs[pop_name].keys()))
+            this_peak_locs = np.array(list(tuning_peak_locs[pop_name].values()))
+            indexes = np.argsort(this_peak_locs)
+            sorted_gid_dict[pop_name] = this_target_gids[indexes]
+        else:
+            sorted_gid_dict[pop_name] = np.copy(gid_order_dict[pop_name])
+
+    return sorted_gid_dict

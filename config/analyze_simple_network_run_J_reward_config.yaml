@@ -1,0 +1,27 @@
+data_file_name_list:
+  - 20201021_123218_simple_network_J_reward_1_exported_output.hdf5
+  - 20201021_130515_simple_network_J_reward_2_exported_output.hdf5
+  - 20201021_130731_simple_network_J_reward_3_exported_output.hdf5
+  - 20201021_130948_simple_network_J_reward_4_exported_output.hdf5
+  - 20201021_131311_simple_network_J_reward_5_exported_output.hdf5
+pop_order:
+  - FF
+  - E
+  - I
+color_dict:
+  FF: darkgrey
+  E: r
+  I: b
+filter_order:
+  - Theta
+  - Gamma
+filter_color_dict:
+  Theta: g
+  Gamma: purple
+filter_xlim_dict:
+  Theta:
+    - 500.
+    - 2000
+  Gamma:
+    - 500.
+    - 1000.

@@ -1,6 +1,6 @@
 from nested.parallel import *
 from nested.optimize_utils import *
-from simple_network_utils import *
+from simple_network_sim_utils import *
 import click
 
 context = Context()
@@ -478,7 +478,7 @@ def analyze_network_output(network, trial=None, export=False, plot=False):
             get_pop_mean_rate_from_binned_spike_count(buffered_binned_spike_count_dict, dt=context.binned_dt)
         mean_min_rate_dict, mean_peak_rate_dict, mean_rate_active_cells_dict, pop_fraction_active_dict = \
             get_pop_activity_stats(binned_firing_rates_dict, input_t=binned_t_edges,
-                                   threshold=context.active_rate_threshold, plot=plot)
+                                   threshold=context.active_rate_threshold)
 
         fft_f_dict, fft_power_dict, filter_psd_f_dict, filter_psd_power_dict, filter_envelope_dict, \
         filter_envelope_ratio_dict, centroid_freq_dict, freq_tuning_index_dict = \
@@ -499,6 +499,7 @@ def analyze_network_output(network, trial=None, export=False, plot=False):
                                 # spike_times_dict=full_spike_times_dict)
             plot_weight_matrix(connection_weights_dict, pop_gid_ranges=context.pop_gid_ranges,
                                tuning_peak_locs=context.tuning_peak_locs)
+            plot_pop_activity_stats(binned_t_edges, mean_rate_active_cells_dict, pop_fraction_active_dict)
             plot_firing_rate_heatmaps(binned_firing_rates_dict, input_t=binned_t_edges,
                                       tuning_peak_locs=context.tuning_peak_locs)
             if context.connectivity_type == 'gaussian':

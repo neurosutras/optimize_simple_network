@@ -20,6 +20,7 @@ J_reward:
 L: # E cells are type RS
  - simulate instances:
     network_id [11, 1100, 1101, 1102, 1103], trial_id = range(5)
+ - replay examples:
 
 M: # no rhythmicity objectives
  - simulate instances:

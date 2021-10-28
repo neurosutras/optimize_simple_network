@@ -1,6 +1,6 @@
 from nested.parallel import *
 from nested.optimize_utils import *
-from simple_network_utils import *
+from simple_network_sim_utils import *
 import click
 
 context = Context()

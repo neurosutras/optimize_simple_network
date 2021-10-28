@@ -1,6 +1,6 @@
 from nested.parallel import *
 from nested.optimize_utils import *
-from simple_network_utils import *
+from simple_network_analysis_utils import *
 import click
 
 context = Context()
@@ -13,6 +13,9 @@ context = Context()
 @click.option("--decode-group-key", type=str, default='simple_network_exported_replay_data')
 @click.option("--export-data-key", type=int, default=0)
 @click.option("--plot-n-trials", type=int, default=10)
+@click.option("--plot-trials", '-pt', type=int, multiple=True)
+@click.option("--config-file-path", type=click.Path(exists=True, file_okay=True, dir_okay=False), required=False,
+              default=None)
 @click.option("--template-window-dur", type=float, default=20.)
 @click.option("--decode-window-dur", type=float, default=20.)
 @click.option("--step-dur", type=float, default=20.)
@@ -21,11 +24,12 @@ context = Context()
 @click.option("--verbose", type=int, default=2)
 @click.option("--export", is_flag=True)
 @click.option("--plot", is_flag=True)
+@click.option("--compressed-plot-format", is_flag=True)
 @click.option("--debug", is_flag=True)
 @click.pass_context
 def main(cli, template_data_file_path, decode_data_file_path, template_group_key, decode_group_key, export_data_key,
-         plot_n_trials, template_window_dur, decode_window_dur, step_dur, output_dir, interactive, verbose, export,
-         plot, debug):
+         plot_n_trials, plot_trials, config_file_path, template_window_dur, decode_window_dur, step_dur, output_dir,
+         interactive, verbose, export, plot, compressed_plot_format, debug):
     """
 
     :param cli: contains unrecognized args as list of str
@@ -35,6 +39,8 @@ def main(cli, template_data_file_path, decode_data_file_path, template_group_key
     :param decode_group_key: str
     :param export_data_key: str
     :param plot_n_trials: int
+    :param plot_trials: list of int
+    :param config_file_path: str (path); contains plot settings
     :param template_window_dur: float
     :param decode_window_dur: float
     :param step_dur: float
@@ -43,6 +49,7 @@ def main(cli, template_data_file_path, decode_data_file_path, template_group_key
     :param verbose: int
     :param export: bool
     :param plot: bool
+    :param compressed_plot_format: bool
     :param debug: bool
     """
     # requires a global variable context: :class:'Context'
@@ -54,30 +61,40 @@ def main(cli, template_data_file_path, decode_data_file_path, template_group_key
     context.interface.start(disp=context.disp)
     context.interface.ensure_controller()
 
-    config_parallel_interface(__file__, disp=context.disp, interface=context.interface, output_dir=output_dir,
-                              verbose=verbose, plot=plot, debug=debug, export_data_key=export_data_key, export=export,
+    config_parallel_interface(__file__, config_file_path=config_file_path, disp=context.disp,
+                              interface=context.interface, output_dir=output_dir, verbose=verbose, plot=plot,
+                              debug=debug, export_data_key=export_data_key, export=export,
                               template_group_key=template_group_key, decode_group_key=decode_group_key, **kwargs)
 
-    context.interface.update_worker_contexts(template_duration=context.template_duration,
-                                             template_window_dur=context.template_window_dur,
-                                             decode_duration=context.decode_duration,
-                                             decode_window_dur=context.decode_window_dur)
+    if 'pop_order' not in context():
+        context.pop_order = None
+    if 'label_dict' not in context():
+        context.label_dict = None
+    if 'color_dict' not in context():
+        context.color_dict = None
 
     start_time = time.time()
 
     if not context.template_data_is_processed:
-        context.sorted_gid_dict, context.template_firing_rate_matrix_dict = \
+        gid_order_dict, context.template_firing_rate_matrix_dict = \
             process_template_data(context.template_data_file_path, context.template_trial_keys,
                                   context.template_group_key, context.export_data_key, context.template_window_dur,
                                   export=context.export, disp=context.disp)
     else:
-        context.sorted_gid_dict, context.template_firing_rate_matrix_dict = \
+        gid_order_dict, context.template_firing_rate_matrix_dict = \
             load_processed_template_data(context.template_data_file_path, context.export_data_key)
+    _, _, context.sorted_gid_dict = \
+        analyze_selectivity_from_firing_rate_matrix_dict(context.template_firing_rate_matrix_dict,
+                                                         gid_order_dict)
+    context.template_firing_rate_matrix_dict = \
+        sort_firing_rate_matrix_dict(context.template_firing_rate_matrix_dict, gid_order_dict,
+                                     context.sorted_gid_dict)
 
     if context.plot:
-        plot_firing_rate_heatmaps_from_matrix(context.template_firing_rate_matrix_dict, context.template_binned_t_edges,
-                                              duration=context.template_duration, sorted_gids=context.sorted_gid_dict)
-
+        plot_firing_rate_heatmaps_from_matrix(context.template_firing_rate_matrix_dict,
+                                              context.template_binned_t_edges, gids_sorted=True,
+                                              pop_order=context.pop_order, label_dict=context.label_dict,
+                                              normalize_t=False)
 
     context.interface.update_worker_contexts(sorted_gid_dict=context.sorted_gid_dict,
                                              template_firing_rate_matrix_dict=context.template_firing_rate_matrix_dict)
@@ -89,20 +106,23 @@ def main(cli, template_data_file_path, decode_data_file_path, template_group_key
     current_time = time.time()
 
     if not context.decode_data_is_processed:
-        # return dicts to analyze
         decoded_pos_matrix_dict = \
             decode_data(context.decode_data_file_path, context.decode_trial_keys, context.decode_group_key,
                         context.export_data_key, context.decode_window_dur, context.decode_duration,
                         context.template_window_dur, context.template_duration, export=context.export,
-                        disp=context.disp, plot=context.plot, plot_trial_keys=context.plot_decode_trial_keys)
+                        pop_order=context.pop_order, label_dict=context.label_dict, disp=context.disp,
+                        plot=context.plot, plot_trial_keys=context.plot_decode_trial_keys,
+                        compressed_plot_format=compressed_plot_format)
     else:
         decoded_pos_matrix_dict = load_decoded_data(context.decode_data_file_path, context.export_data_key)
         if plot and context.plot_n_trials > 0:
             discard = decode_data(context.decode_data_file_path, context.plot_decode_trial_keys,
                                   context.decode_group_key, context.export_data_key, context.decode_window_dur,
                                   context.decode_duration, context.template_window_dur, context.template_duration,
-                                  export=False, temp_export=False, disp=context.disp, plot=True,
-                                  plot_trial_keys=context.plot_decode_trial_keys)
+                                  export=False, temp_export=False, pop_order=context.pop_order,
+                                  label_dict=context.label_dict, disp=context.disp, plot=True,
+                                  plot_trial_keys=context.plot_decode_trial_keys,
+                                  compressed_plot_format=compressed_plot_format)
 
     if context.disp:
         print('decode_simple_network_replay: decoding data for %i trials took %.1f s' %
@@ -110,9 +130,11 @@ def main(cli, template_data_file_path, decode_data_file_path, template_group_key
         sys.stdout.flush()
 
     if context.plot:
-        analyze_decoded_trajectory_data(decoded_pos_matrix_dict, context.decode_window_dur, context.template_duration,
-                                        plot=True)
+        plot_decoded_trajectory_replay_data(decoded_pos_matrix_dict, context.decode_window_dur,
+                                            context.template_duration, pop_order=context.pop_order,
+                                            label_dict=context.label_dict, color_dict=context.color_dict)
         context.interface.apply(plt.show)
+        plt.show()
 
     if not interactive:
         context.interface.stop()
@@ -157,8 +179,15 @@ def config_controller():
         decode_binned_t = decode_binned_t_edges[:-1] + context.decode_window_dur / 2.
         decode_trial_keys = [key for key in group if key != shared_context_key]
         context.plot_n_trials = min(int(context.plot_n_trials), len(decode_trial_keys))
-        plot_decode_trial_keys = \
-            list(np.random.choice(decode_trial_keys, context.plot_n_trials, replace=False))
+        plot_decode_trial_keys = []
+        for plot_trial in context.plot_trials:
+            plot_trial_key = str(plot_trial)
+            if plot_trial_key not in decode_trial_keys:
+                raise RuntimeError('decode_simple_network_replay: trial: %s not found in decode_data_file_path: %s' %
+                                   (plot_trial_key, context.decode_data_file_path))
+            plot_decode_trial_keys.append(plot_trial_key)
+        plot_decode_trial_keys.extend(list(
+            np.random.choice(decode_trial_keys, context.plot_n_trials - len(plot_decode_trial_keys), replace=False)))
 
         group = get_h5py_group(f, [context.export_data_key])
         if processed_group_key in group and shared_context_key in group[processed_group_key] and \
@@ -348,48 +377,9 @@ def load_processed_template_data(template_data_file_path, export_data_key, plot=
     return sorted_gid_dict, template_firing_rate_matrix_dict
 
 
-def plot_firing_rate_heatmaps_from_matrix(firing_rate_matrix_dict, binned_t_edges, duration, sorted_gids):
-    """
-
-    :param firing_rate_matrix_dict: dict: {pop_name (str): 2d array of float}
-    :param binned_t_edges: array
-    :param duration: float
-    :param sorted_gids: dict: {pop_name (str): array of int}
-    """
-    ordered_pop_names = ['FF', 'E', 'I']
-    for pop_name in ordered_pop_names:
-        if pop_name not in firing_rate_matrix_dict:
-            ordered_pop_names.remove(pop_name)
-    for pop_name in firing_rate_matrix_dict:
-        if pop_name not in ordered_pop_names:
-            ordered_pop_names.append(pop_name)
-    fig, axes = plt.subplots(1, len(ordered_pop_names), figsize=(4.5 * len(ordered_pop_names) + 0.5, 4.25))
-    this_cmap = plt.get_cmap()
-    this_cmap.set_bad(this_cmap(0.))
-    for col, pop_name in enumerate(ordered_pop_names):
-        min_gid = np.min(sorted_gids[pop_name])
-        this_sorted_gids = np.add(min_gid, list(range(len(sorted_gids[pop_name]) + 1)))
-        decoded_x_mesh, decoded_y_mesh = \
-            np.meshgrid(binned_t_edges / duration, this_sorted_gids)
-        this_rate_matrix = firing_rate_matrix_dict[pop_name]
-        pcm = axes[col].pcolormesh(decoded_x_mesh, decoded_y_mesh, this_rate_matrix, vmin=0., edgecolors='face')
-        cbar = axes[col].figure.colorbar(pcm, ax=axes[col])
-        cbar.ax.set_ylabel('Firing rate (Hz)', rotation=-90, va="bottom")
-        axes[col].set_xlabel('Normalized position')
-        axes[col].set_ylim((len(sorted_gids[pop_name]) + min_gid, min_gid))
-        axes[col].set_xlim((0., 1.))
-        axes[col].set_xticks(np.linspace(0., 1., 5))
-        axes[col].set_ylabel('Sorted cells')
-        axes[col].set_title('Population: %s' % pop_name)
-
-    fig.suptitle('Average spatial firing rates during run', y=0.97)
-    fig.tight_layout()
-    fig.subplots_adjust(wspace=0.55, hspace=0.4, top=0.80)
-
-
 def decode_single_trial_helper(decode_data_file_path, trial_key, decode_group_key, export_data_key, decode_bin_dur,
-                               decode_duration, template_bin_dur, template_duration, export=False, disp=True,
-                               plot=False):
+                               decode_duration, template_bin_dur, template_duration, export=False, pop_order=None,
+                               label_dict=None, disp=True, plot=False, compressed_plot_format=False):
     """
 
     :param decode_data_file_path: str (path)
@@ -401,8 +391,11 @@ def decode_single_trial_helper(decode_data_file_path, trial_key, decode_group_ke
     :param template_bin_dur: float (ms)
     :param template_duration: float (ms)
     :param export: bool
+    :param pop_order: list of str; order of populations for plot legend
+    :param label_dict: dict; {pop_name: label}
     :param disp: bool
     :param plot: bool
+    :param compressed_plot_format: bool
     """
     decode_full_spike_times_dict = dict()
     with h5py.File(decode_data_file_path, 'r') as f:
@@ -415,9 +408,10 @@ def decode_single_trial_helper(decode_data_file_path, trial_key, decode_group_ke
                 decode_full_spike_times_dict[pop_name][int(gid_key)] = subgroup[pop_name][gid_key][:]
 
     decoded_pos_dict = \
-        decode_single_trial(decode_full_spike_times_dict, trial_key, decode_bin_dur, decode_duration,
-                                    template_bin_dur, template_duration, context.sorted_gid_dict,
-                                    context.template_firing_rate_matrix_dict, disp=disp, plot=plot)
+        decode_single_trial(decode_full_spike_times_dict, trial_key, decode_bin_dur, decode_duration, template_bin_dur,
+                            template_duration, context.sorted_gid_dict, context.template_firing_rate_matrix_dict,
+                            pop_order=pop_order, label_dict=label_dict, disp=disp, plot=plot,
+                            compressed_plot_format=compressed_plot_format)
 
     if export:
         group_key = 'simple_network_processed_data'
@@ -434,7 +428,8 @@ def decode_single_trial_helper(decode_data_file_path, trial_key, decode_group_ke
 
 
 def decode_single_trial(decode_spike_times_dict, trial_key, decode_bin_dur, decode_duration, template_bin_dur,
-                                template_duration, sorted_gid_dict, template_firing_rate_matrix_dict, disp=False, plot=False):
+                        template_duration, sorted_gid_dict, template_firing_rate_matrix_dict, pop_order=None,
+                        label_dict=None, disp=False, plot=False, compressed_plot_format=False):
     """
 
     :param decode_spike_times_dict: dict {pop_name: {gid: array}}
@@ -445,8 +440,11 @@ def decode_single_trial(decode_spike_times_dict, trial_key, decode_bin_dur, deco
     :param template_duration: float (ms)
     :param sorted_gid_dict: dict of array of int
     :param template_firing_rate_matrix_dict: dict of array of float
+    :param pop_order: list of str; order of populations for plot legend
+    :param label_dict: dict; {pop_name: label}
     :param disp: bool
     :param plot: bool
+    :param compressed_plot_format: bool
     """
     start_time = time.time()
     decode_binned_t_edges = np.arange(0., decode_duration + decode_bin_dur / 2., decode_bin_dur)
@@ -487,45 +485,68 @@ def decode_single_trial(decode_spike_times_dict, trial_key, decode_bin_dur, deco
         sys.stdout.flush()
 
     if plot:
-        ordered_pop_names = ['FF', 'E', 'I']
-        for pop_name in ordered_pop_names:
-            if pop_name not in p_pos_dict:
-                ordered_pop_names.remove(pop_name)
-        for pop_name in p_pos_dict:
-            if pop_name not in ordered_pop_names:
-                ordered_pop_names.append(pop_name)
-        fig, axes = plt.subplots(2, len(ordered_pop_names), figsize=(3.8 * len(ordered_pop_names) + 0.5, 7.5))
+        if pop_order is None:
+            pop_order = sorted(list(p_pos_dict.keys()))
+
+        if compressed_plot_format:
+            fig, axes = plt.subplots(2, len(pop_order), figsize=(2.2 * len(pop_order), 4.5))
+        else:
+            fig, axes = plt.subplots(2, len(pop_order), figsize=(4. * len(pop_order), 7.))
+        if decode_duration > 1000.:
+            this_binned_t_edges = decode_binned_t_edges / 1000.
+        else:
+            this_binned_t_edges = decode_binned_t_edges
         decoded_x_mesh, decoded_y_mesh = \
-            np.meshgrid(decode_binned_t_edges, template_binned_t_edges / template_duration)
-        this_cmap = plt.get_cmap()
+            np.meshgrid(this_binned_t_edges, template_binned_t_edges / template_duration)
+        this_cmap = copy.copy(plt.get_cmap('binary'))
         this_cmap.set_bad(this_cmap(0.))
-        for col, pop_name in enumerate(ordered_pop_names):
+        for col, pop_name in enumerate(pop_order):
             p_pos = p_pos_dict[pop_name]
-            axes[1][col].pcolormesh(decoded_x_mesh, decoded_y_mesh, p_pos, vmin=0., edgecolors='face')
-            axes[1][col].set_xlabel('Time (ms)')
+            axes[1][col].pcolormesh(decoded_x_mesh, decoded_y_mesh, p_pos, vmin=0., edgecolors='face', cmap=this_cmap,
+                                    rasterized=True, antialiased=True)
+            if decode_duration > 1000.:
+                axes[1][col].set_xlabel('Time (s)')
+            else:
+                axes[1][col].set_xlabel('Time (ms)')
             axes[1][col].set_ylim((1., 0.))
-            axes[1][col].set_xlim((decode_binned_t_edges[0], decode_binned_t_edges[-1]))
-            axes[1][col].set_ylabel('Decoded position')
-            axes[1][col].set_title('Population: %s' % pop_name)
+            axes[1][col].set_xlim((this_binned_t_edges[0], this_binned_t_edges[-1]))
+            if not compressed_plot_format:
+                axes[1][col].set_ylabel('Decoded position')
 
             for i, gid in enumerate(sorted_gid_dict[pop_name]):
                 this_spike_times = decode_spike_times_dict[pop_name][gid]
-                axes[0][col].scatter(this_spike_times, np.ones_like(this_spike_times) * i + 0.5, c='k', s=1.)
-            axes[0][col].set_xlabel('Time (ms)')
+                if decode_duration > 1000.:
+                    axes[0][col].scatter(this_spike_times / 1000., np.ones_like(this_spike_times) * i + 0.5, c='k',
+                                         s=0.01, rasterized=True)
+                else:
+                    axes[0][col].scatter(this_spike_times, np.ones_like(this_spike_times) * i + 0.5, c='k',
+                                         s=0.01, rasterized=True)
+            # axes[0][col].set_xlabel('Time (s)')
             axes[0][col].set_ylim((len(sorted_gid_dict[pop_name]), 0))
-            axes[0][col].set_xlim((decode_binned_t_edges[0], decode_binned_t_edges[-1]))
-            axes[0][col].set_ylabel('Sorted cells')
-            axes[0][col].set_title('Population: %s' % pop_name)
-        fig.suptitle('Trial # %s' % trial_key, y=0.99)
+            axes[0][col].set_xlim((this_binned_t_edges[0], this_binned_t_edges[-1]))
+            if not compressed_plot_format:
+                axes[0][col].set_ylabel('Sorted Cell ID')
+            if label_dict is not None:
+                label = label_dict[pop_name]
+            else:
+                label = pop_name
+            axes[0][col].set_title(label, fontsize=mpl.rcParams['font.size'])
+        if compressed_plot_format:
+            axes[0][0].set_ylabel('Sorted Cell ID')
+            axes[1][0].set_ylabel('Decoded position')
+        fig.suptitle('Trial # %s' % trial_key, y=0.99, fontsize=mpl.rcParams['font.size'])
         fig.tight_layout()
-        fig.subplots_adjust(wspace=0.4, hspace=0.4, top=0.9)
+        if compressed_plot_format:
+            fig.subplots_adjust(wspace=0.5, hspace=0.45, top=0.87)
+        else:
+            fig.subplots_adjust(wspace=0.4, hspace=0.4, top=0.9)
 
     return decoded_pos_dict
 
 
 def decode_data(decode_data_file_path, decode_trial_keys, decode_group_key, export_data_key, decode_bin_dur,
-                decode_duration, template_bin_dur, template_duration, export=False, temp_export=True, disp=True,
-                plot=False, plot_trial_keys=None):
+                decode_duration, template_bin_dur, template_duration, export=False, temp_export=True, pop_order=None,
+                label_dict=None, disp=True, plot=False, plot_trial_keys=None, compressed_plot_format=False):
     """
 
     :param decode_data_file_path: str (path)
@@ -538,9 +559,12 @@ def decode_data(decode_data_file_path, decode_trial_keys, decode_group_key, expo
     :param template_duration: float (ms)
     :param export: bool
     :param temp_export: bool
+    :param pop_order: list of str; order of populations for plot legend
+    :param label_dict: dict; {pop_name: label}
     :param disp: bool
     :param plot: bool
     :param plot_trial_keys: list of str
+    :param compressed_plot_format: bool
     :return: dict: {pop_name: 2D array}
     """
     num_trials = len(decode_trial_keys)
@@ -556,7 +580,8 @@ def decode_data(decode_data_file_path, decode_trial_keys, decode_group_key, expo
     sequences = [[decode_data_file_path] * num_trials, decode_trial_keys, [decode_group_key] * num_trials,
                  [export_data_key] * num_trials, [decode_bin_dur] * num_trials, [decode_duration] * num_trials,
                  [template_bin_dur] * num_trials, [template_duration] * num_trials, [temp_export] * num_trials,
-                 [disp] * num_trials, plot_list]
+                 [pop_order] * num_trials, [label_dict] * num_trials, [disp] * num_trials, plot_list,
+                 [compressed_plot_format] * num_trials]
     context.interface.map(decode_single_trial_helper, *sequences)
 
     decoded_pos_array_list_dict = dict()
@@ -603,212 +628,6 @@ def decode_data(decode_data_file_path, decode_trial_keys, decode_group_key, expo
             os.remove(temp_output_path)
 
     return decoded_pos_matrix_dict
-
-
-def load_decoded_data(decode_data_file_path, export_data_key):
-    """
-
-    :param decode_data_file_path: str (path)
-    :param export_data_key: str
-    :return: dict: {pop_name: 2D array}
-    """
-    group_key = 'simple_network_processed_data'
-    shared_context_key = 'shared_context'
-    decoded_pos_matrix_dict = dict()
-    with h5py.File(decode_data_file_path, 'a') as f:
-        group = get_h5py_group(f, [export_data_key, group_key, shared_context_key])
-        subgroup = get_h5py_group(group, ['decoded_pos_matrix'])
-        for pop_name in subgroup:
-            decoded_pos_matrix_dict[pop_name] = subgroup[pop_name][:,:]
-
-    return decoded_pos_matrix_dict
-
-
-def analyze_decoded_trajectory_data(decoded_pos_matrix_dict, bin_dur, template_duration, plot=True):
-    """
-
-    :param decoded_pos_matrix_dict: dict or list of dict: {pop_name: 2d array of float}
-    :param bin_dur: float
-    :param template_duration: float
-    :param plot: bool
-    :return:
-    """
-    if not isinstance(decoded_pos_matrix_dict, list):
-        decoded_pos_matrix_dict_instances_list = [decoded_pos_matrix_dict]
-    else:
-        decoded_pos_matrix_dict_instances_list = decoded_pos_matrix_dict
-
-    all_decoded_pos_instances_list_dict = defaultdict(list)
-    decoded_velocity_var_instances_list_dict = defaultdict(list)
-    decoded_path_len_instances_list_dict = defaultdict(list)
-    decoded_velocity_mean_instances_list_dict = defaultdict(list)
-
-    for decoded_pos_matrix_dict in decoded_pos_matrix_dict_instances_list:
-        all_decoded_pos_dict = dict()
-        decoded_path_len_dict = defaultdict(list)
-        decoded_velocity_var_dict = defaultdict(list)
-        decoded_velocity_mean_dict = defaultdict(list)
-        for pop_name in decoded_pos_matrix_dict:
-            this_decoded_pos_matrix = decoded_pos_matrix_dict[pop_name][:, :] / template_duration
-            clean_indexes = ~np.isnan(this_decoded_pos_matrix)
-            all_decoded_pos_dict[pop_name] = this_decoded_pos_matrix[clean_indexes]
-            for trial in range(this_decoded_pos_matrix.shape[0]):
-                this_trial_pos = this_decoded_pos_matrix[trial, :]
-                clean_indexes = ~np.isnan(this_trial_pos)
-                if len(clean_indexes) > 0:
-                    this_trial_diff = np.diff(this_trial_pos[clean_indexes])
-                    this_trial_diff[np.where(this_trial_diff < -0.5)] += 1.
-                    this_trial_diff[np.where(this_trial_diff > 0.5)] -= 1.
-                    this_path_len = np.sum(np.abs(this_trial_diff))
-                    decoded_path_len_dict[pop_name].append(this_path_len)
-                    this_trial_velocity = this_trial_diff / (bin_dur / 1000.)
-                    this_trial_velocity_mean = np.mean(this_trial_velocity)
-                    decoded_velocity_mean_dict[pop_name].append(this_trial_velocity_mean)
-                    if len(clean_indexes) > 1:
-                        this_trial_velocity_var = np.var(this_trial_velocity)
-                        decoded_velocity_var_dict[pop_name].append(this_trial_velocity_var)
-            all_decoded_pos_instances_list_dict[pop_name].append(all_decoded_pos_dict[pop_name])
-            decoded_path_len_instances_list_dict[pop_name].append(decoded_path_len_dict[pop_name])
-            decoded_velocity_var_instances_list_dict[pop_name].append(decoded_velocity_var_dict[pop_name])
-            decoded_velocity_mean_instances_list_dict[pop_name].append(decoded_velocity_mean_dict[pop_name])
-
-    ordered_pop_names = ['FF', 'E', 'I']
-    for pop_name in ordered_pop_names:
-        if pop_name not in all_decoded_pos_instances_list_dict:
-            ordered_pop_names.remove(pop_name)
-    for pop_name in all_decoded_pos_instances_list_dict:
-        if pop_name not in ordered_pop_names:
-            ordered_pop_names.append(pop_name)
-    fig, axes = plt.subplots(2, 2, figsize=(8.5, 6.5), constrained_layout=True)
-
-    max_vel_var = np.max(list(decoded_velocity_var_instances_list_dict.values()))
-    max_path_len = np.max(list(decoded_path_len_instances_list_dict.values()))
-    max_vel_mean = np.max(list(decoded_velocity_mean_instances_list_dict.values()))
-    min_vel_mean = np.min(list(decoded_velocity_mean_instances_list_dict.values()))
-
-    num_instances = len(decoded_pos_matrix_dict_instances_list)
-    for pop_name in ordered_pop_names:
-        hist_list = []
-        for all_decoded_pos in all_decoded_pos_instances_list_dict[pop_name]:
-            hist, edges = np.histogram(all_decoded_pos, bins=np.linspace(0., 1., 21), density=True)
-            bin_width = (edges[1] - edges[0])
-            hist *= bin_width
-            hist_list.append(hist)
-        if num_instances == 1:
-            axes[0][0].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
-        else:
-            mean_hist = np.mean(hist_list, axis=0)
-            mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-            axes[0][0].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
-            axes[0][0].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
-                                    alpha=0.25, linewidth=0)
-
-        hist_list = []
-        for decoded_velocity_var in decoded_velocity_var_instances_list_dict[pop_name]:
-            hist, edges = np.histogram(decoded_velocity_var, bins=np.linspace(0., max_vel_var, 21),
-                                       density=True)
-            bin_width = (edges[1] - edges[0])
-            hist *= bin_width
-            hist_list.append(hist)
-        if num_instances == 1:
-            axes[1][1].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
-        else:
-            mean_hist = np.mean(hist_list, axis=0)
-            mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-            axes[1][1].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
-            axes[1][1].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
-                                    alpha=0.25, linewidth=0)
-
-        hist_list = []
-        for decoded_path_len in decoded_path_len_instances_list_dict[pop_name]:
-            hist, edges = np.histogram(decoded_path_len, bins=np.linspace(0., max_path_len, 21),
-                                       density=True)
-            bin_width = (edges[1] - edges[0])
-            hist *= bin_width
-            hist_list.append(hist)
-        if num_instances == 1:
-            axes[0][1].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
-        else:
-            mean_hist = np.mean(hist_list, axis=0)
-            mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-            axes[0][1].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
-            axes[0][1].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
-                                    alpha=0.25, linewidth=0)
-
-        hist_list = []
-        for decoded_velocity_mean in decoded_velocity_mean_instances_list_dict[pop_name]:
-            hist, edges = np.histogram(decoded_velocity_mean, bins=np.linspace(min_vel_mean, max_vel_mean, 21),
-                                       density=True)
-            bin_width = (edges[1] - edges[0])
-            hist *= bin_width
-            hist_list.append(hist)
-        if num_instances == 1:
-            axes[1][0].plot(edges[1:] - bin_width / 2., hist_list[0], label=pop_name)
-        else:
-            mean_hist = np.mean(hist_list, axis=0)
-            mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-            axes[1][0].plot(edges[1:] - bin_width / 2., mean_hist, label=pop_name)
-            axes[1][0].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
-                                    alpha=0.25, linewidth=0)
-
-    axes[0][1].set_xlim((0., max_path_len))
-    axes[0][1].set_ylim((0., axes[0][1].get_ylim()[1]))
-    axes[0][1].set_xlabel('Normalized path length')
-    axes[0][1].set_ylabel('Probability')
-    axes[0][1].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
-    axes[0][1].set_title('Decoded path length', y=1.05, fontsize=mpl.rcParams['font.size'])
-
-    axes[1][1].set_xlim((0., max_vel_var))
-    axes[1][1].set_ylim((0., axes[1][1].get_ylim()[1]))
-    axes[1][1].set_xlabel('Velocity variance (/s^2)')
-    axes[1][1].set_ylabel('Probability')
-    axes[1][1].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
-    axes[1][1].set_title('Decoded velocity variance', y=1.05, fontsize=mpl.rcParams['font.size'])
-    
-    axes[0][0].set_xlim((0., 1.))
-    axes[0][0].set_ylim((0., max(axes[0][0].get_ylim()[1], 0.2)))
-    axes[0][0].set_xlabel('Normalized position')
-    axes[0][0].set_ylabel('Probability')
-    axes[0][0].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
-    axes[0][0].set_title('Decoded positions', y=1.05, fontsize=mpl.rcParams['font.size'])
-
-    axes[1][0].set_xlim((min_vel_mean, max_vel_mean))
-    axes[1][0].set_ylim((0., axes[1][0].get_ylim()[1]))
-    axes[1][0].set_xlabel('Mean velocity (/s)')
-    axes[1][0].set_ylabel('Probability')
-    axes[1][0].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
-    axes[1][0].set_title('Mean decoded velocity', y=1.05, fontsize=mpl.rcParams['font.size'])
-
-    clean_axes(axes)
-    fig.set_constrained_layout_pads(hspace=0.15, wspace=0.1)
-    fig.show()
-
-
-def batch_analyze_decoded_trajectory_data(decode_data_file_path_list, export_data_key_list=None, bin_dur=20.,
-                                          template_duration=None, plot=True):
-    """
-
-    :param decode_data_file_path_list: list of str (path)
-    :param export_data_key_list: list of str, or single str to be applied to all files
-    :param bin_dur: float
-    :param template_duration: float
-    :param plot: bool
-    """
-    if template_duration is None:
-        if 'template_duration' not in context():
-            raise RuntimeError('batch_analyze_decoded_trajectory_data: missing required parameter: template_duration')
-        else:
-            template_duration = context.template_duration
-    if export_data_key_list is None:
-        export_data_key_list = [context.export_data_key] * len(decode_data_file_path_list)
-    elif not isinstance(export_data_key_list, list):
-        export_data_key_list = [export_data_key_list] * len(decode_data_file_path_list)
-    decoded_pos_matrix_dict_list = []
-    for decode_data_file_path, export_data_key in zip(decode_data_file_path_list, export_data_key_list):
-        decoded_pos_matrix_dict = load_decoded_data(decode_data_file_path, export_data_key)
-        decoded_pos_matrix_dict_list.append(decoded_pos_matrix_dict)
-    analyze_decoded_trajectory_data(decoded_pos_matrix_dict_list, bin_dur=bin_dur, template_duration=template_duration,
-                                    plot=plot)
 
 
 if __name__ == '__main__':

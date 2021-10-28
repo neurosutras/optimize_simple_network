@@ -1,6 +1,6 @@
 from nested.parallel import *
 from nested.optimize_utils import *
-from simple_network_utils import *
+from simple_network_sim_utils import *
 import click
 
 context = Context()
@@ -466,7 +466,7 @@ def analyze_network_output_run(network, model_id=None, export=False, plot=False)
             get_pop_mean_rate_from_binned_spike_count(buffered_binned_spike_count_dict, dt=context.fine_binned_dt)
         mean_min_rate_dict, mean_peak_rate_dict, mean_rate_active_cells_dict, pop_fraction_active_dict = \
             get_pop_activity_stats(binned_firing_rates_dict, input_t=binned_t_edges,
-                                   threshold=context.active_rate_threshold, plot=plot)
+                                   threshold=context.active_rate_threshold)
 
         fft_f_dict, fft_power_dict, filter_psd_f_dict, filter_psd_power_dict, filter_envelope_dict, \
         filter_envelope_ratio_dict, centroid_freq_dict, freq_tuning_index_dict = \
@@ -487,6 +487,7 @@ def analyze_network_output_run(network, model_id=None, export=False, plot=False)
                                 # spike_times_dict=full_spike_times_dict)
             plot_weight_matrix(connection_weights_dict, pop_gid_ranges=context.pop_gid_ranges,
                                tuning_peak_locs=context.tuning_peak_locs)
+            plot_pop_activity_stats(binned_t_edges, mean_rate_active_cells_dict, pop_fraction_active_dict)
             plot_firing_rate_heatmaps(binned_firing_rates_dict, input_t=binned_t_edges,
                                       tuning_peak_locs=context.tuning_peak_locs)
             if context.connectivity_type == 'gaussian':
@@ -757,8 +758,7 @@ def analyze_network_output_replay(network, ensemble_id=None, trial=None, model_i
         buffered_pop_mean_rate_from_binned_spike_count_dict = \
             get_pop_mean_rate_from_binned_spike_count(buffered_fine_binned_spike_count_dict, dt=context.fine_binned_dt)
         mean_min_rate_dict, mean_peak_rate_dict, mean_rate_active_cells_dict, pop_fraction_active_dict = \
-            get_pop_activity_stats(firing_rates_dict, input_t=coarse_binned_t, threshold=context.active_rate_threshold,
-                                   plot=plot)
+            get_pop_activity_stats(firing_rates_dict, input_t=coarse_binned_t, threshold=context.active_rate_threshold)
         fft_f_dict, fft_power_dict, filter_psd_f_dict, filter_psd_power_dict, filter_envelope_dict, \
         filter_envelope_ratio_dict, centroid_freq_dict, freq_tuning_index_dict = \
             get_pop_bandpass_filtered_signal_stats(buffered_pop_mean_rate_from_binned_spike_count_dict,
@@ -773,10 +773,14 @@ def analyze_network_output_replay(network, ensemble_id=None, trial=None, model_i
             sys.stdout.flush()
 
         if plot:
+            plot_pop_activity_stats(coarse_binned_t, mean_rate_active_cells_dict, pop_fraction_active_dict)
             plot_firing_rate_heatmaps(firing_rates_dict, input_t=coarse_binned_t,
                                       tuning_peak_locs=context.tuning_peak_locs)
-            plot_population_spike_rasters(buffered_fine_binned_spike_count_dict, input_t=buffered_fine_binned_t,
-                                          tuning_peak_locs=context.tuning_peak_locs)
+            gid_order_dict = {}
+            for pop_name in firing_rates_dict:
+                gid_order_dict[pop_name] = np.array(sorted(list(firing_rates_dict[pop_name].keys())))
+            sorted_gid_dict = get_sorted_gid_dict_from_tuning_peak_locs(gid_order_dict, context.tuning_peak_locs)
+            plot_replay_spike_rasters(full_spike_times_dict, fine_binned_t_edges, sorted_gid_dict, trial_key=trial)
 
         if export:
             current_time = time.time()
