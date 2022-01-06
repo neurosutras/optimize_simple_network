@@ -1,0 +1,16 @@
+network_id, opt_rand_seed log, and network_instance log
+
+J: both E_FF and E_E weights are structured
+ 8, not stored: Original optimization, intermediates lost
+  - best: instances 1-5
+ 8, not stored: Re-ran optimization for degeneracy analysis
+
+K: only E_FF weights are structured
+ 9, not stored: Original optimization, intermediates lost
+  - best: instances 1-5
+ 9, 1009: Re-ran optimization for degeneracy analysis
+
+L: both E_FF and E_E weights are structured, E cells are RS
+ 11, not stored: Original optimization, intermediates lost
+  - best: instances 1-5
+ 11, 1011: Re-ran optimization for degeneracy analysis
