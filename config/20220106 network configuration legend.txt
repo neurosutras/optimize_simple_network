@@ -4,6 +4,11 @@ J: both E_FF and E_E weights are structured
  8, not stored: Original optimization, intermediates lost
   - best: instances 1-5
  8, not stored: Re-ran optimization for degeneracy analysis
+ 108, 1108: no_E_sel
+ 208, 1208: no_E_sparse
+ 308, 1308: no_E_ryth
+ 408, 1408: no_I_ryth
+
 
 K: only E_FF weights are structured
  9, not stored: Original optimization, intermediates lost
