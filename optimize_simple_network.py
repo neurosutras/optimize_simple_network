@@ -89,7 +89,7 @@ def run_tests():
                             objectives=[objectives], export_file_path=context.export_file_path,
                             verbose=context.verbose > 1)
     sys.stdout.flush()
-    print('model_id: %i; model_labels: %s' % (model_id, model_label))
+    print('model_id: %s; model_labels: %s' % (model_id, model_label))
     print('params:')
     pprint.pprint(context.x0_dict)
     print('features:')
@@ -1030,7 +1030,7 @@ def compute_features_run(x, model_id=None, export=False):
 
     context.network.run()
     if context.comm.rank == 0 and context.verbose > 0:
-        print('optimize_simple_network: pid: %i; model_id: %i; network simulation (run) took %.2f s' %
+        print('optimize_simple_network: pid: %i; model_id: %s; network simulation (run) took %.2f s' %
               (os.getpid(), model_id, time.time() - current_time))
         sys.stdout.flush()
     current_time = time.time()
@@ -1038,7 +1038,7 @@ def compute_features_run(x, model_id=None, export=False):
     results = analyze_network_output_run(context.network, model_id=model_id, export=export, plot=context.plot)
     if context.comm.rank == 0:
         if context.verbose > 0:
-            print('optimize_simple_network: pid: %i; model_id: %i; analysis of network simulation results (run) '
+            print('optimize_simple_network: pid: %i; model_id: %s; analysis of network simulation results (run) '
                   'took %.2f s' % (os.getpid(), model_id, time.time() - current_time))
             sys.stdout.flush()
         if results is None:
@@ -1128,7 +1128,7 @@ def compute_features_replay(x, ensemble_id=None, trial=None, model_id=None, expo
 
     context.network.run()
     if context.comm.rank == 0 and context.verbose > 0:
-        print('optimize_simple_network: pid: %i; model_id: %i; trial: %i; network simulation (replay) took %.2f s' %
+        print('optimize_simple_network: pid: %i; model_id: %s; trial: %i; network simulation (replay) took %.2f s' %
               (os.getpid(), model_id, trial, time.time() - current_time))
         sys.stdout.flush()
     current_time = time.time()
@@ -1137,7 +1137,7 @@ def compute_features_replay(x, ensemble_id=None, trial=None, model_id=None, expo
                                             export=export, plot=context.plot)
     if context.comm.rank == 0:
         if context.verbose > 0:
-            print('optimize_simple_network: pid: %i; model_id: %i; trial: %i; analysis of network simulation results '
+            print('optimize_simple_network: pid: %i; model_id: %s; trial: %i; analysis of network simulation results '
                   '(replay) took %.2f s' % (os.getpid(), model_id, trial, time.time() - current_time))
             sys.stdout.flush()
         if results is None:
