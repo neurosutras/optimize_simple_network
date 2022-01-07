@@ -3,6 +3,7 @@ export DATE=$(date +%Y%m%d_%H%M%S)
 export LABEL="$2"
 export JOB_NAME=optimize_simple_network_alt_"$LABEL"_"$DATE"
 export CONFIG_FILE_PATH="$1"
+export OPT_RAND_SEED="$3"
 sbatch <<EOT
 #!/bin/bash -l
 #SBATCH -J $JOB_NAME
@@ -17,9 +18,9 @@ sbatch <<EOT
 
 set -x
 
-cd $WORK/optimize_simple_network
+cd $WORK2/optimize_simple_network
 
 ibrun -n 2240 python3 -m nested.optimize --config-file-path=$CONFIG_FILE_PATH \
   --output-dir=$SCRATCH/data/optimize_simple_network --pop_size=200 --max_iter=1 --path_length=1 --disp \
-  --procs_per_worker=112
+  --procs_per_worker=112 --label=$LABEL --opt_rand_seed=$OPT_RAND_SEED
 EOT
