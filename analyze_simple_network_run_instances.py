@@ -144,10 +144,6 @@ def main(cli, config_file_path, data_dir, export_data_file_path, example_trial, 
                                            context.color_dict, plot, verbose)
 
     results = context.interface.map(analyze_simple_network_run_data_from_file, *sequences)
-    print('analyze_simple_network_run_instances took %.1f s to load data from %i network instances from file' %
-          (time.time() - current_time, len(context.data_file_name_list)))
-    sys.stdout.flush()
-    current_time = time.time()
 
     binned_t_edges_list, sorted_trial_averaged_firing_rate_matrix_dict_list, sorted_gid_dict_list, \
     centered_firing_rate_mean_dict_list, mean_rate_active_cells_mean_dict_list, pop_fraction_active_mean_dict_list, \
@@ -174,29 +170,10 @@ def main(cli, config_file_path, data_dir, export_data_file_path, example_trial, 
     modulation_depth_instances_dict, delta_peak_locs_instances_dict = \
         analyze_spatial_modulation_across_instances(modulation_depth_dict_list, delta_peak_locs_dict_list)
 
-    print('analyze_simple_network_run_instances took %.1f s to process data from %i network instances' %
+    print('analyze_simple_network_run_instances took %.1f s to analyze data from %i network instances from file' %
           (time.time() - current_time, len(context.data_file_name_list)))
     sys.stdout.flush()
-
-    if plot:
-        context.interface.apply(plt.show)
-        plot_average_selectivity(binned_t_edges, centered_firing_rate_mean_dict, centered_firing_rate_sem_dict,
-                                 pop_order=context.pop_order, label_dict=context.label_dict,
-                                 color_dict=context.color_dict)
-        plot_selectivity_input_output(modulation_depth_instances_dict, delta_peak_locs_instances_dict,
-                                      pop_order=['E', 'I'], label_dict=context.label_dict,
-                                      color_dict=context.color_dict)
-        plot_pop_activity_stats(binned_t_edges, mean_rate_active_cells_mean_dict, pop_fraction_active_mean_dict, \
-                                mean_rate_active_cells_sem_dict, pop_fraction_active_sem_dict,
-                                pop_order=context.pop_order, label_dict=context.label_dict,
-                                color_dict=context.color_dict)
-        plot_rhythmicity_psd(fft_f, fft_power_mean_dict, fft_power_sem_dict, pop_order=context.pop_order,
-                         label_dict=context.label_dict, color_dict=context.color_dict)
-        if fft_f_nested_gamma is not None:
-            plot_rhythmicity_psd(fft_f_nested_gamma, fft_power_nested_gamma_mean_dict, fft_power_sem_dict,
-                                 pop_order=context.pop_order, label_dict=context.label_dict,
-                                 color_dict=context.color_dict)
-        plt.show()
+    current_time = time.time()
 
     if export:
         if export_data_file_path is None:
@@ -240,7 +217,30 @@ def main(cli, config_file_path, data_dir, export_data_file_path, example_trial, 
             subgroup = group.create_group('delta_peak_locs')
             for pop_name in delta_peak_locs_instances_dict:
                 subgroup.create_dataset(pop_name, data=delta_peak_locs_instances_dict[pop_name])
+        print('analyze_simple_network_run_instances took %.1f s to export data from %i network instances (model: %s) to '
+              'file: %s' % (time.time() - current_time, len(context.data_file_name_list), model_key,
+                            export_data_file_path))
+        sys.stdout.flush()
 
+    if plot:
+        context.interface.apply(plt.show)
+        plot_average_selectivity(binned_t_edges, centered_firing_rate_mean_dict, centered_firing_rate_sem_dict,
+                                 pop_order=context.pop_order, label_dict=context.label_dict,
+                                 color_dict=context.color_dict)
+        plot_selectivity_input_output(modulation_depth_instances_dict, delta_peak_locs_instances_dict,
+                                      pop_order=['E', 'I'], label_dict=context.label_dict,
+                                      color_dict=context.color_dict)
+        plot_pop_activity_stats(binned_t_edges, mean_rate_active_cells_mean_dict, pop_fraction_active_mean_dict, \
+                                mean_rate_active_cells_sem_dict, pop_fraction_active_sem_dict,
+                                pop_order=context.pop_order, label_dict=context.label_dict,
+                                color_dict=context.color_dict)
+        plot_rhythmicity_psd(fft_f, fft_power_mean_dict, fft_power_sem_dict, pop_order=context.pop_order,
+                         label_dict=context.label_dict, color_dict=context.color_dict)
+        if fft_f_nested_gamma is not None:
+            plot_rhythmicity_psd(fft_f_nested_gamma, fft_power_nested_gamma_mean_dict, fft_power_sem_dict,
+                                 pop_order=context.pop_order, label_dict=context.label_dict,
+                                 color_dict=context.color_dict)
+        plt.show()
 
     if not interactive:
         context.interface.stop()

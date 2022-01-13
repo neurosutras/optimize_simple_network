@@ -2311,8 +2311,8 @@ def analyze_simple_network_run_data_from_file(data_file_path, data_key='0', exam
 
             if connectivity_type == 'gaussian':
                 plot_2D_connection_distance(pop_syn_proportions, pop_cell_positions, connectivity_dict)
-        print('Processed trial: %s, network_instance: %i, network_id: %i from file: %s in %.1f s' %
-              (trial_key, network_instance, network_id, data_file_path, time.time() - current_time))
+        print('pid: %i; Processed trial: %s, network_instance: %i, network_id: %i from file: %s in %.1f s' %
+              (os.getpid(), trial_key, network_instance, network_id, data_file_path, time.time() - current_time))
 
     trial_averaged_firing_rate_matrix_dict = get_trial_averaged_firing_rate_matrix_dict(firing_rate_matrix_dict_list)
     centered_firing_rate_mean_dict, centered_firing_rate_sem_dict, sorted_gid_dict = \
