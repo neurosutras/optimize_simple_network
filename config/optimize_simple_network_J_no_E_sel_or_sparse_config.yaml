@@ -195,7 +195,7 @@ objective_names:
 - E_mean_active_rate_replay
 # - E_ripple_envelope_score
 # - I_ripple_envelope_score
-optimization_title: simple_network_J_no_E_sparse
+optimization_title: simple_network_J_no_E_sel_or_sparse
 param_gen: PopulationAnnealing
 param_names:
 - E_FF_mean_weight

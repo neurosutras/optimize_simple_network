@@ -28,6 +28,15 @@ J: both E_FF and E_E weights are structured
  20220112_leave_one_out_best_params.yaml
  - J_no_I_rhyth: 1-5
 
+ 508, 1508: no_E_sel_or_sparse
+ - J_no_E_sel_or_sparse: 1-5
+
+ 608, 1608: no_theta
+ - J_no_theta: 1-5
+
+ 708, 1708: no_gamma
+ - J_no_gamma: 1-5
+
 K: only E_FF weights are structured
  9, not stored: Original optimization, intermediates lost
  20201113_best_params.yaml
