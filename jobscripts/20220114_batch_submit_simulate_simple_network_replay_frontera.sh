@@ -1,0 +1,25 @@
+#!/bin/bash -l
+sh batch_submit_simulate_simple_network_replay_frontera.sh config/simulate_simple_network_replay_J_config.yaml \
+  J_25866 8 6 config/20220111_J_marder_group_params.yaml 25866
+sh batch_submit_simulate_simple_network_replay_frontera.sh config/simulate_simple_network_replay_J_config.yaml \
+  J_26467 8 11 config/20220111_J_marder_group_params.yaml 26467
+sh batch_submit_simulate_simple_network_replay_frontera.sh config/simulate_simple_network_replay_J_config.yaml \
+  J_29427 8 16 config/20220111_J_marder_group_params.yaml 29427
+sh batch_submit_simulate_simple_network_replay_frontera.sh config/simulate_simple_network_replay_J_config.yaml \
+  J_29623 8 21 config/20220111_J_marder_group_params.yaml 29623
+sh batch_submit_simulate_simple_network_replay_frontera.sh config/simulate_simple_network_replay_K_config.yaml \
+  K_9626 9 6 config/20220111_K_marder_group_params.yaml 9626
+sh batch_submit_simulate_simple_network_replay_frontera.sh config/simulate_simple_network_replay_K_config.yaml \
+  K_12596 9 11 config/20220111_K_marder_group_params.yaml 12596
+sh batch_submit_simulate_simple_network_replay_frontera.sh config/simulate_simple_network_replay_K_config.yaml \
+  K_16954 9 16 config/20220111_K_marder_group_params.yaml 16954
+sh batch_submit_simulate_simple_network_replay_frontera.sh config/simulate_simple_network_replay_K_config.yaml \
+  K_27171 9 21 config/20220111_K_marder_group_params.yaml 27171
+sh batch_submit_simulate_simple_network_replay_frontera.sh config/simulate_simple_network_replay_L_config.yaml \
+  L_7820 11 6 config/20220111_L_marder_group_params.yaml 7820
+sh batch_submit_simulate_simple_network_replay_frontera.sh config/simulate_simple_network_replay_L_config.yaml \
+  L_13211 11 11 config/20220111_L_marder_group_params.yaml 13211
+sh batch_submit_simulate_simple_network_replay_frontera.sh config/simulate_simple_network_replay_L_config.yaml \
+  L_22102 11 16 config/20220111_L_marder_group_params.yaml 22102
+sh batch_submit_simulate_simple_network_replay_frontera.sh config/simulate_simple_network_replay_L_config.yaml \
+  L_23903 11 21 config/20220111_L_marder_group_params.yaml 23903

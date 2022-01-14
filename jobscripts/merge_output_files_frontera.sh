@@ -16,7 +16,7 @@ sbatch <<EOT
 
 set -x
 
-cd $WORK/optimize_simple_network
+cd $WORK2/optimize_simple_network
 
 ibrun -n 1 python3 merge_output_files.py --merge-file-path=$MERGE_FILE_PATH --verbose \
   --output-dir=$SCRATCH/data/optimize_simple_network
