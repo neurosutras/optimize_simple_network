@@ -23,3 +23,5 @@ sh batch_submit_simulate_simple_network_replay_frontera.sh config/simulate_simpl
   L_22102 11 16 config/20220111_L_marder_group_params.yaml 22102
 sh batch_submit_simulate_simple_network_replay_frontera.sh config/simulate_simple_network_replay_L_config.yaml \
   L_23903 11 21 config/20220111_L_marder_group_params.yaml 23903
+sh batch_submit_simulate_simple_network_replay_frontera.sh config/simulate_simple_network_replay_L_config.yaml \
+  L_27537 11 21 config/20220111_L_marder_group_params.yaml 27537
