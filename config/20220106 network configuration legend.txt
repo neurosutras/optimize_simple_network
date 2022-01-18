@@ -12,9 +12,13 @@ J: both E_FF and E_E weights are structured
   - 29427: 16-20
   - 29623: 21-25
 
- 108, 1108: no_E_sel (20220108_150132_simple_network_J_no_E_sel_J_no_E_sel_53483246695705138760200279473292968798_PopulationAnnealing_optimization_history.hdf5)
+ 108, 1108: no_E_sel
+ (20220108_150132_simple_network_J_no_E_sel_J_no_E_sel_53483246695705138760200279473292968798_PopulationAnnealing_optimization_history.hdf5)
  20220112_leave_one_out_best_params.yaml
  - J_no_E_sel: 1-5
+ (20220114_191502_simple_network_J_no_E_sel_J_no_E_sel_192008570555643072404764094849912407335_PopulationAnnealing_optimization_history.hdf5)
+ 20220112_leave_one_out_best_params.yaml
+ - J_no_E_sel_2: 1-5
 
  208, 1208: no_E_sparse (20220108_181226_simple_network_J_no_E_sparse_J_no_E_sparse_280873296941342435230840858938203377839_PopulationAnnealing_optimization_history.hdf5)
  20220112_leave_one_out_best_params.yaml
@@ -28,13 +32,14 @@ J: both E_FF and E_E weights are structured
  20220112_leave_one_out_best_params.yaml
  - J_no_I_rhyth: 1-5
 
- 508, 1508: no_E_sel_or_sparse
+ 508, 1508: no_E_sel_or_sparse (20220114_191502_simple_network_J_no_E_sel_or_sparse_J_no_E_sel_or_sparse_192015472913161315113726610334509046936_PopulationAnnealing_optimization_history.hdf5)
  - J_no_E_sel_or_sparse: 1-5
 
- 608, 1608: no_theta
+ 608, 1608: no_theta (20220114_191440_simple_network_J_no_theta_J_no_theta_174955639505357216345643239247415406036_PopulationAnnealing_optimization_history.hdf5)
+ 20220112_leave_one_out_best_params.yaml
  - J_no_theta: 1-5
 
- 708, 1708: no_gamma
+ 708, 1708: no_gamma (20220114_191502_simple_network_J_no_gamma_J_no_gamma_192014854141212078709939618449197930138_PopulationAnnealing_optimization_history.hdf5)
  - J_no_gamma: 1-5
 
 K: only E_FF weights are structured
@@ -58,3 +63,4 @@ L: both E_FF and E_E weights are structured, E cells are RS
  - 13211: 11-15
  - 22102: 16-20
  - 23903: 21-25
+ - 27537: 26-30

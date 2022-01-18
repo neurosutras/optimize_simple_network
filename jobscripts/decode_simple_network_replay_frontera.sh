@@ -18,7 +18,7 @@ sbatch <<EOT
 
 set -x
 
-cd $WORK/optimize_simple_network
+cd $WORK2/optimize_simple_network
 
 ibrun -n 112 python3 decode_simple_network_replay.py --template-data-file-path=$RUN_DATA_FILE_PATH \
     --decode-data-file-path=$REPLAY_DATA_FILE_PATH --output-dir=$SCRATCH/data/optimize_simple_network --export
