@@ -15,6 +15,14 @@ sh batch_submit_simulate_simple_network_frontera.sh config/simulate_simple_netwo
   no_E_rhyth 308 1 config/20220112_leave_one_out_best_params.yaml J_no_E_rhyth
 sh batch_submit_simulate_simple_network_frontera.sh config/simulate_simple_network_J_config.yaml \
   no_I_rhyth 408 1 config/20220112_leave_one_out_best_params.yaml J_no_I_rhyth
+
+sh batch_submit_simulate_simple_network_frontera.sh config/simulate_simple_network_J_config.yaml \
+  J_no_theta 608 1 config/20220112_leave_one_out_best_params.yaml J_no_theta
+sh batch_submit_simulate_simple_network_frontera.sh config/simulate_simple_network_J_config.yaml \
+  J_no_gamma 708 1 config/20220112_leave_one_out_best_params.yaml J_no_gamma
+sh batch_submit_simulate_simple_network_frontera.sh config/simulate_simple_network_J_config.yaml \
+  J_no_E_sel_or_sparse 508 1 config/20220112_leave_one_out_best_params.yaml J_no_E_sel_or_sparse
+
 sh batch_submit_simulate_simple_network_frontera.sh config/simulate_simple_network_K_config.yaml \
   9626 9 6 config/20220111_K_marder_group_params.yaml 9626
 sh batch_submit_simulate_simple_network_frontera.sh config/simulate_simple_network_K_config.yaml \

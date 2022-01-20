@@ -7,6 +7,14 @@ sh batch_submit_simulate_simple_network_replay_frontera.sh config/simulate_simpl
   J_29427 8 16 config/20220111_J_marder_group_params.yaml 29427
 sh batch_submit_simulate_simple_network_replay_frontera.sh config/simulate_simple_network_replay_J_config.yaml \
   J_29623 8 21 config/20220111_J_marder_group_params.yaml 29623
+
+sh batch_submit_simulate_simple_network_replay_frontera.sh config/simulate_simple_network_replay_J_config.yaml \
+  J_no_theta 608 1 config/20220112_leave_one_out_best_params.yaml J_no_theta
+sh batch_submit_simulate_simple_network_replay_frontera.sh config/simulate_simple_network_replay_J_config.yaml \
+  J_no_gamma 708 1 config/20220112_leave_one_out_best_params.yaml J_no_gamma
+sh batch_submit_simulate_simple_network_replay_frontera.sh config/simulate_simple_network_replay_J_config.yaml \
+  J_no_E_sel_or_sparse 508 1 config/20220112_leave_one_out_best_params.yaml J_no_E_sel_or_sparse
+
 sh batch_submit_simulate_simple_network_replay_frontera.sh config/simulate_simple_network_replay_K_config.yaml \
   K_9626 9 6 config/20220111_K_marder_group_params.yaml 9626
 sh batch_submit_simulate_simple_network_replay_frontera.sh config/simulate_simple_network_replay_K_config.yaml \
@@ -24,4 +32,4 @@ sh batch_submit_simulate_simple_network_replay_frontera.sh config/simulate_simpl
 sh batch_submit_simulate_simple_network_replay_frontera.sh config/simulate_simple_network_replay_L_config.yaml \
   L_23903 11 21 config/20220111_L_marder_group_params.yaml 23903
 sh batch_submit_simulate_simple_network_replay_frontera.sh config/simulate_simple_network_replay_L_config.yaml \
-  L_27537 11 21 config/20220111_L_marder_group_params.yaml 27537
+  L_27537 11 26 config/20220111_L_marder_group_params.yaml 27537
