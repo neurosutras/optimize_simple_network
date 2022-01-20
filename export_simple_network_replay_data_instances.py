@@ -111,7 +111,7 @@ def main(config_file_path, data_dir, export_data_file_path, export_data_key, mod
 
     if export:
         if export_data_file_path is None or not os.path.isfile(export_data_file_path):
-            raise IOError('export_simple_network_decoded_run_instances: invalid export_data_file_path: %s' %
+            raise IOError('export_simple_network_replay_data_instances: invalid export_data_file_path: %s' %
                           export_data_file_path)
         with h5py.File(export_data_file_path, 'a') as f:
             group = get_h5py_group(f, ['shared_context'], create=True)

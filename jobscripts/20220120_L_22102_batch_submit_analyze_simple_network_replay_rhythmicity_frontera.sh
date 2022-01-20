@@ -1,0 +1,14 @@
+#!/bin/bash -l
+export DATA_DIR=$SCRATCH/data/optimize_simple_network
+export label=L_22102
+declare -a replay_paths=(20220114_211146_simple_network_replay_L_22102_11_16_296649315462235215972199784258883789682_exported_output.hdf5
+  20220114_211146_simple_network_replay_L_22102_11_17_296653293508275057184559112378215259241_exported_output.hdf5
+  20220114_211146_simple_network_replay_L_22102_11_18_296654583342760789405748105257991991557_exported_output.hdf5
+  20220114_211511_simple_network_replay_L_22102_11_19_119450779003090903492019379834329038355_exported_output.hdf5
+  20220114_211511_simple_network_replay_L_22102_11_20_119456283775822394580107157309817024384_exported_output.hdf5)
+arraylength=${#run_paths[@]}
+
+for ((i=0; i<${arraylength}; i++))
+do
+  sh analyze_simple_network_replay_rhythmicity_frontera.sh $DATA_DIR/${replay_paths[$i]} $label
+done
