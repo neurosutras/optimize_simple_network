@@ -6,7 +6,7 @@ declare -a replay_paths=(20220114_210615_simple_network_replay_L_13211_11_11_343
   20220114_210435_simple_network_replay_L_13211_11_13_296056667098110780893091982022019865894_exported_output.hdf5
   20220114_210615_simple_network_replay_L_13211_11_14_34477575322499237569478107207291310284_exported_output.hdf5
   20220114_211146_simple_network_replay_L_13211_11_15_296657942616851394213538222531733560832_exported_output.hdf5)
-arraylength=${#run_paths[@]}
+arraylength=${#replay_paths[@]}
 
 for ((i=0; i<${arraylength}; i++))
 do
