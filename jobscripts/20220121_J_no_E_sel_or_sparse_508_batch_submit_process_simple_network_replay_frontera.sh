@@ -1,0 +1,22 @@
+#!/bin/bash -l
+export DATA_DIR=$SCRATCH/data/optimize_simple_network
+export label=J_no_E_sel_or_sparse_508
+export network_instance_start=1
+declare -a run_paths=(20220118_182008_simple_network_J_no_E_sel_or_sparse_508_1_190388238009334659584413263530021615663_exported_output.hdf5
+  20220118_182008_simple_network_J_no_E_sel_or_sparse_508_2_190393320495959949643681309558009818546_exported_output.hdf5
+  20220118_182008_simple_network_J_no_E_sel_or_sparse_508_3_190388760915207253729996144041096048810_exported_output.hdf5
+  20220118_182008_simple_network_J_no_E_sel_or_sparse_508_4_190389229945929338173247772455894457855_exported_output.hdf5
+  20220118_182008_simple_network_J_no_E_sel_or_sparse_508_5_190381987699593909270799961174479446706_exported_output.hdf5)
+declare -a replay_paths=(20220121_092901_simple_network_replay_J_no_E_sel_or_sparse_508_1_292858467349521524754550612646786140190_exported_output.hdf5
+  20220121_092901_simple_network_replay_J_no_E_sel_or_sparse_508_2_292856031083524211126165951995615849022_exported_output.hdf5
+  20220121_093116_simple_network_replay_J_no_E_sel_or_sparse_508_3_58903077015794512230144930010005966792_exported_output.hdf5
+  20220121_093350_simple_network_replay_J_no_E_sel_or_sparse_508_4_180896610651534755791212640623620136162_exported_output.hdf5
+  20220121_093350_simple_network_replay_J_no_E_sel_or_sparse_508_5_180868213693526393170135008944048708572_exported_output.hdf5)
+arraylength=${#run_paths[@]}
+
+for ((i=0; i<${arraylength}; i++))
+do
+  let "network_instance = $network_instance_start + $i"
+  sh process_simple_network_replay_frontera.sh $DATA_DIR/${run_paths[$i]} $DATA_DIR/${replay_paths[$i]} \
+    "$label"_"$network_instance"
+done

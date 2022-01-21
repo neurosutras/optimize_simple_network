@@ -1,0 +1,4 @@
+#!/bin/bash -l
+sh 20220121_J_no_theta_608_batch_submit_process_simple_network_replay_frontera.sh
+sh 20220121_J_no_gamma_708_batch_submit_process_simple_network_replay_frontera.sh
+sh 20220121_J_no_E_sel_or_sparse_508_batch_submit_process_simple_network_replay_frontera.sh
