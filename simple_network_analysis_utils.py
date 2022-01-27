@@ -2978,10 +2978,10 @@ def plot_decoded_trajectory_replay_data(decoded_pos_matrix_dict, bin_dur, templa
 
     fig, axes = plt.subplots(1, 4, figsize=(3.2 * 4., 3.9))  # , constrained_layout=True)
 
-    max_vel_var = np.max(list(decoded_velocity_var_instances_list_dict.values()))
-    max_path_len = np.max(list(decoded_path_len_instances_list_dict.values()))
-    max_vel_mean = np.max(list(decoded_velocity_mean_instances_list_dict.values()))
-    min_vel_mean = np.min(list(decoded_velocity_mean_instances_list_dict.values()))
+    max_vel_var = np.nanmax(list(decoded_velocity_var_instances_list_dict.values()))
+    max_path_len = np.nanmax(list(decoded_path_len_instances_list_dict.values()))
+    max_vel_mean = np.nanmax(list(decoded_velocity_mean_instances_list_dict.values()))
+    min_vel_mean = np.nanmin(list(decoded_velocity_mean_instances_list_dict.values()))
 
     num_instances = len(decoded_pos_matrix_dict_instances_list)
     for pop_name in pop_order:

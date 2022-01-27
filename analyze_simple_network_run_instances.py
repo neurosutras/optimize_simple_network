@@ -137,7 +137,7 @@ def main(cli, config_file_path, data_dir, export_data_file_path, example_trial, 
 
     current_time = time.time()
 
-    sequences = get_args_analyze_instances(context.data_file_name_list, data_dir, export_data_key, example_trial,
+    sequences = get_args_analyze_instances(context.template_data_file_name_list, data_dir, export_data_key, example_trial,
                                            example_instance, fine_binned_dt, coarse_binned_dt, context.filter_order,
                                            context.filter_label_dict, context.filter_color_dict,
                                            context.filter_xlim_dict, context.pop_order, context.label_dict,
@@ -171,7 +171,7 @@ def main(cli, config_file_path, data_dir, export_data_file_path, example_trial, 
         analyze_spatial_modulation_across_instances(modulation_depth_dict_list, delta_peak_locs_dict_list)
 
     print('analyze_simple_network_run_instances took %.1f s to analyze data from %i network instances from file' %
-          (time.time() - current_time, len(context.data_file_name_list)))
+          (time.time() - current_time, len(context.template_data_file_name_list)))
     sys.stdout.flush()
     current_time = time.time()
 
@@ -218,7 +218,7 @@ def main(cli, config_file_path, data_dir, export_data_file_path, example_trial, 
             for pop_name in delta_peak_locs_instances_dict:
                 subgroup.create_dataset(pop_name, data=delta_peak_locs_instances_dict[pop_name])
         print('analyze_simple_network_run_instances took %.1f s to export data from %i network instances (model: %s) to '
-              'file: %s' % (time.time() - current_time, len(context.data_file_name_list), model_key,
+              'file: %s' % (time.time() - current_time, len(context.template_data_file_name_list), model_key,
                             export_data_file_path))
         sys.stdout.flush()
 

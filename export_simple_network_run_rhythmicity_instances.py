@@ -41,7 +41,7 @@ def main(config_file_path, data_dir, export_data_file_path, export_data_key, mod
     group_key = 'simple_network_exported_run_data'
     shared_context_key = 'shared_context'
 
-    for data_file_name in context.data_file_name_list:
+    for data_file_name in context.template_data_file_name_list:
         data_file_path = data_dir + '/' + data_file_name
         if not os.path.isfile(data_file_path):
             raise IOError(
@@ -100,7 +100,7 @@ def main(config_file_path, data_dir, export_data_file_path, export_data_key, mod
 
         print('export_simple_network_run_rhythmicity_instances took %.1f s to process data from %i/%i trials from '
               '%i network instances' % (time.time() - current_time, (i + 1), len(full_spike_times_dict_list),
-                                        len(context.data_file_name_list)))
+                                        len(context.template_data_file_name_list)))
         sys.stdout.flush()
 
     if export:
