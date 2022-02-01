@@ -468,6 +468,12 @@ def analyze_network_output_run(network, model_id=None, export=False, plot=False)
             get_pop_activity_stats(binned_firing_rates_dict, input_t=binned_t_edges,
                                    threshold=context.active_rate_threshold)
 
+        zero_activity = False
+        for pop_name in mean_peak_rate_dict:
+            if mean_peak_rate_dict[pop_name] == 0.:
+                zero_activity = False
+                break
+
         fft_f_dict, fft_power_dict, filter_psd_f_dict, filter_psd_power_dict, filter_envelope_dict, \
         filter_envelope_ratio_dict, centroid_freq_dict, freq_tuning_index_dict = \
             get_pop_bandpass_filtered_signal_stats(buffered_pop_mean_rate_from_binned_spike_count_dict,
@@ -644,11 +650,20 @@ def analyze_network_output_run(network, model_id=None, export=False, plot=False)
         result['FF_ripple_envelope_ratio_run'] = filter_envelope_ratio_dict['Ripple']['FF']
         result['E_ripple_envelope_ratio_run'] = filter_envelope_ratio_dict['Ripple']['E']
         result['I_ripple_envelope_ratio_run'] = filter_envelope_ratio_dict['Ripple']['I']
+        result['E_fft_residuals'] = np.sum((fft_power_dict['E'] - fft_power_dict['FF']) ** 2.)
+        result['I_fft_residuals'] = np.sum((fft_power_dict['I'] - fft_power_dict['FF']) ** 2.)
 
         if any(voltages_exceed_threshold_list):
             if context.verbose > 0:
                 print('optimize_simple_network: analyze_network_output_run: pid: %i; model failed - mean membrane '
                       'voltage in some Izhi cells exceeds spike threshold' % os.getpid())
+                sys.stdout.flush()
+            result['failed'] = True
+
+        if zero_activity:
+            if context.verbose > 0:
+                print('optimize_simple_network: analyze_network_output_run: pid: %i; model failed - at least one'
+                      ' cell population was silent' % os.getpid())
                 sys.stdout.flush()
             result['failed'] = True
 
@@ -1153,12 +1168,12 @@ def get_objectives(features, model_id=None, export=False):
     :param export: bool
     :return: tuple of dict
     """
-    arrythmic_target = 'arrythmic_target' in context() and context.arrythmic_target
+    arrhythmic_target = 'arrhythmic_target' in context() and context.arrhythmic_target
     if context.comm.rank == 0:
         objectives = {}
         for objective_name in context.objective_names:
             if objective_name.find('tuning_index') != -1:
-                if not arrythmic_target and features[objective_name] >= context.target_val[objective_name]:
+                if not arrhythmic_target and features[objective_name] >= context.target_val[objective_name]:
                     objectives[objective_name] = 0.
                 else:
                     objectives[objective_name] = ((context.target_val[objective_name] - features[objective_name]) /
@@ -1176,7 +1191,7 @@ def get_objectives(features, model_id=None, export=False):
                 else:
                     objectives[objective_name] = ((replay_val - run_val) /
                                                   context.target_range[objective_name]) ** 2.
-            elif objective_name.find('envelope_ratio_run') != -1 and arrythmic_target:
+            elif objective_name.find('envelope_ratio_run') != -1 and arrhythmic_target:
                 pop_name, _, base_name = objective_name.partition('_')
                 this_pop_val = features[objective_name]
                 FF_val = features['FF_%s' % base_name]
@@ -1195,6 +1210,8 @@ def get_objectives(features, model_id=None, export=False):
                 FF_val = features['FF_frac_active_replay']
                 objectives[objective_name] = ((E_val - FF_val) /
                                               context.target_range[objective_name]) ** 2.
+            elif objective_name.find('fft_residuals') != -1:
+                objectives[objective_name] = features[objective_name]
             else:
                 objectives[objective_name] = ((context.target_val[objective_name] - features[objective_name]) /
                                               context.target_range[objective_name]) ** 2.

@@ -172,22 +172,14 @@ kwargs:
         g_unit: 0.0005275
       I:
         g_unit: 0.0005275
-  arrythmic_target: True
 objective_names:
 - E_mean_peak_rate_run
 - E_mean_min_rate_run
 - I_mean_active_rate_run
 - E_frac_active_run
 - I_frac_active_run
-- E_theta_envelope_ratio_run
-- I_theta_envelope_ratio_run
-- E_gamma_envelope_ratio_run
-- I_gamma_envelope_ratio_run
-- E_theta_tuning_index_run
-- I_theta_tuning_index_run
-- E_gamma_tuning_index_run
-- I_gamma_tuning_index_run
-# - E_frac_active_replay_residuals
+- E_fft_residuals
+- I_fft_residuals
 - E_frac_active_replay
 - E_mean_active_rate_replay
 optimization_title: simple_network_M
