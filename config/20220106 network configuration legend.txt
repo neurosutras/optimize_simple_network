@@ -64,3 +64,21 @@ L: both E_FF and E_E weights are structured, E cells are RS
  - 22102: 16-20
  - 23903: 21-25
  - 27537: 26-30
+
+ M: both E_FF and E_E weights are structured, rhythmicity objectives are replaced with fft_residuals compared to FF
+ 12, 1012: 20220201_215502_simple_network_M_M_305632527624934013682983358233538472844_PopulationAnnealing_optimization_history.hdf5
+ 20220128_additional_controls_best_params.yaml
+ - M: 1-5
+ 20220202_M_marder_group_params.yaml
+ - 28922: 6-10
+ - 26434: 11-15
+ - 29613: 16-20
+ - 28842: 21-25
+
+0: E_FF and E_E weights are structured, but E_E weights are scrambled
+14, 1014:
+
+P: E_FF and E_E weights are structured, inheriting delta_peak_weight value from J;
+    E_FF and E_E weights are scrambled, selectivity objectives are off
+15, 1015:
+

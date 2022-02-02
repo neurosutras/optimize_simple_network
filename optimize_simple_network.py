@@ -1030,7 +1030,8 @@ def compute_features_run(x, model_id=None, export=False):
         context.network.structure_connection_weights(structured_weight_params=context.structured_weight_params,
                                                      tuning_peak_locs=context.tuning_peak_locs,
                                                      wrap_around=context.track_wrap_around,
-                                                     tuning_duration=context.tuning_duration)
+                                                     tuning_duration=context.tuning_duration,
+                                                     weights_seed=context.weights_seed)
 
     if context.comm.rank == 0 and context.verbose > 0:
         print('optimize_simple_network: pid: %i; building network connections (run) took %.2f s' %
@@ -1128,7 +1129,8 @@ def compute_features_replay(x, ensemble_id=None, trial=None, model_id=None, expo
         context.network.structure_connection_weights(structured_weight_params=context.structured_weight_params,
                                                      tuning_peak_locs=context.tuning_peak_locs,
                                                      wrap_around=context.track_wrap_around,
-                                                     tuning_duration=context.tuning_duration)
+                                                     tuning_duration=context.tuning_duration,
+                                                     weights_seed=context.weights_seed)
 
     if context.comm.rank == 0 and context.verbose > 0:
         print('optimize_simple_network: pid: %i; building network connections (replay) took %.2f s' %

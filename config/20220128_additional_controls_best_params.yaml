@@ -45,3 +45,27 @@ J_reduced_rhythmicity:
   E_norm_syn_count: 9.352379E-01
   I_norm_syn_count: 1.815458E-01
   E_peak_delta_weight: 3.502084E+00
+M:
+  E_FF_mean_weight: 3.698789E-01
+  E_E_mean_weight: 9.044280E-01
+  E_I_mean_weight: 8.645350E-01
+  I_FF_mean_weight: 3.847066E-01
+  I_E_mean_weight: 1.626613E+00
+  I_I_mean_weight: 2.514498E+00
+  E_FF_weight_norm_sigma: 8.007148E-01
+  E_E_weight_norm_sigma: 2.469457E-01
+  E_I_weight_norm_sigma: 7.571559E-01
+  I_FF_weight_norm_sigma: 3.801296E-01
+  I_E_weight_norm_sigma: 1.699559E-01
+  I_I_weight_norm_sigma: 3.330926E-01
+  E_E_tau_offset: 1.986641E+01
+  E_I_tau_offset: 1.704838E+01
+  I_E_tau_offset: 1.349087E+01
+  I_I_tau_offset: 9.240854E+00
+  E_E_syn_proportion: 2.789059E-01
+  E_E_FF_syn_proportion: 9.220854E-01
+  I_E_syn_proportion: 1.970244E-01
+  I_E_FF_syn_proportion: 4.924878E-01
+  E_norm_syn_count: 1.776677E-01
+  I_norm_syn_count: 1.725959E-01
+  E_peak_delta_weight: 3.906932E+00

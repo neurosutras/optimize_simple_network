@@ -518,13 +518,14 @@ class SimpleNetwork(object):
         self.pc.barrier()
 
     def structure_connection_weights(self, structured_weight_params, tuning_peak_locs, wrap_around=True,
-                                     tuning_duration=None):
+                                     tuning_duration=None, weights_seed=None):
         """
 
         :param structured_weight_params: nested dict
         :param tuning_peak_locs: nested dict: {'pop_name': {'gid': float} }
         :param wrap_around: bool
         :param tuning_duration: float
+        :param weights_seed: list of int
         """
         rank = int(self.pc.id())
         for target_pop_name in (target_pop_name for target_pop_name in structured_weight_params
@@ -560,11 +561,19 @@ class SimpleNetwork(object):
                     if source_pop_name not in tuning_peak_locs:
                         raise RuntimeError('SimpleNetwork.structure_connection_weights: spatial tuning locations not '
                                            'found for source population: %s' % source_pop_name)
+                    if 'scramble_pop_names' in structured_weight_params[target_pop_name] and \
+                            source_pop_name in structured_weight_params[target_pop_name]['scramble_pop_names']:
+                        scramble = True
+                        this_weights_seed = weights_seed + [int.from_bytes(syn_type.encode(), 'big'),
+                                                            int.from_bytes(source_pop_name.encode(), 'big')]
+                    else:
+                        scramble = False
                     for target_gid in (target_gid for target_gid in self.ncdict[target_pop_name]
                                        if source_pop_name in self.ncdict[target_pop_name][target_gid]):
                         target_cell = self.cells[target_pop_name][target_gid]
                         this_syn = target_cell.syns[syn_type][source_pop_name]
                         this_target_loc = tuning_peak_locs[target_pop_name][target_gid]
+                        this_delta_weight_array = []
                         for source_gid in self.ncdict[target_pop_name][target_gid][source_pop_name]:
                             this_delta_loc = tuning_peak_locs[source_pop_name][source_gid] - this_target_loc
                             if wrap_around:
@@ -573,6 +582,12 @@ class SimpleNetwork(object):
                                 elif this_delta_loc < - tuning_duration / 2.:
                                     this_delta_loc += tuning_duration
                             this_delta_weight = this_tuning_f(this_delta_loc)
+                            this_delta_weight_array.append(this_delta_weight)
+                        if scramble:
+                            local_np_random = np.random.default_rng(seed=this_weights_seed+[target_gid])
+                            local_np_random.shuffle(this_delta_weight_array)
+                        for source_gid, this_delta_weight in \
+                                zip(self.ncdict[target_pop_name][target_gid][source_pop_name], this_delta_weight_array):
                             for this_nc in self.ncdict[target_pop_name][target_gid][source_pop_name][source_gid]:
                                 initial_weight = get_connection_param(syn_type, 'weight', syn=this_syn, nc=this_nc,
                                                                       syn_mech_names=self.syn_mech_names,

@@ -65,6 +65,9 @@ bounds:
   I_norm_syn_count: !!python/tuple
     - 0.1
     - 1.
+  E_peak_delta_weight: !!python/tuple
+    - 1.
+    - 5.0
 rel_bounds:
 feature_names:
 - E_mean_peak_rate_run
@@ -117,7 +120,7 @@ kwargs:
   run_trial: 0
   replay_trial_offset: 0
   num_replay_trials: 5
-  network_id: 808
+  network_id: 14
   network_instance: 0
   connectivity_type: uniform
   default_weight_distribution_type: normal
@@ -139,6 +142,15 @@ kwargs:
     FF: 0.25  # 0.3
   input_norm_tuning_widths:
     FF: 0.5
+  structured_weight_params:
+    E:  # target_pop_name
+      source_pop_names:
+        - FF
+        - E
+      tuning_type: additive
+      norm_tuning_width: 0.5
+      scramble_pop_names:
+        - E
   pop_cell_types:
     FF: input
     E: IB
@@ -164,7 +176,7 @@ kwargs:
         g_unit: 0.0005275
 objective_names:
 - E_mean_peak_rate_run
-# - E_mean_min_rate_run
+- E_mean_min_rate_run
 - I_mean_active_rate_run
 - E_frac_active_run
 - I_frac_active_run
@@ -185,7 +197,7 @@ objective_names:
 - E_mean_active_rate_replay
 # - E_ripple_envelope_score
 # - I_ripple_envelope_score
-optimization_title: simple_network_J_no_sel
+optimization_title: simple_network_O
 param_gen: PopulationAnnealing
 param_names:
 - E_FF_mean_weight
@@ -210,7 +222,7 @@ param_names:
 - I_E_FF_syn_proportion
 - E_norm_syn_count
 - I_norm_syn_count
-# - E_peak_delta_weight
+- E_peak_delta_weight
 target_range:
   E_mean_peak_rate_run: 0.1
   E_mean_min_rate_run: 0.1
@@ -265,6 +277,7 @@ x0:
   E_I_tau_offset: 2.664080E+00
   E_I_weight_norm_sigma: 5.416425E-01
   E_norm_syn_count: 4.863112E-01
+  E_peak_delta_weight: 3.754091E+00
   I_E_FF_syn_proportion: 4.980959E-01
   I_E_mean_weight: 1.665755E+00
   I_E_syn_proportion: 2.533030E-01

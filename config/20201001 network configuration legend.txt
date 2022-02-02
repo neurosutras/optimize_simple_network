@@ -4,5 +4,8 @@ J (8): both E_FF and E_E weights are structured
 J_reward (10): both E_FF and E_E weights are structured, reward location is over-represented by the E cell population
 K (9): only E_FF weights are structured
 L (11): both E_FF and E_E weights are structured, E cells are RS
-M (12): both E_FF and E_E weights are structured, rhythmicity objectives are off
+M (12): both E_FF and E_E weights are structured, rhythmicity objectives are replaced with fft_residuals compared to FF
 N (13): both E_FF and E_E weights are structured, structured weights are skewed to the past
+0 (14): E_FF and E_E weights are structured, but E_E weights are scrambled
+P (15): E_FF and E_E weights are structured, inheriting delta_peak_weight value from J;
+    E_FF and E_E weights are scrambled, selectivity objectives are off
