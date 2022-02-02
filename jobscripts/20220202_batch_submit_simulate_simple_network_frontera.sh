@@ -8,4 +8,4 @@ sh batch_submit_simulate_simple_network_frontera.sh config/simulate_simple_netwo
 sh batch_submit_simulate_simple_network_frontera.sh config/simulate_simple_network_M_config.yaml \
   M_29613 12 16 config/20220202_M_marder_group_params.yaml 29613
 sh batch_submit_simulate_simple_network_frontera.sh config/simulate_simple_network_M_config.yaml \
-  M_28842 12 16 config/20220202_M_marder_group_params.yaml 28842
+  M_28842 12 21 config/20220202_M_marder_group_params.yaml 28842
