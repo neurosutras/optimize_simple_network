@@ -76,9 +76,23 @@ L: both E_FF and E_E weights are structured, E cells are RS
  - 28842: 21-25
 
 0: E_FF and E_E weights are structured, but E_E weights are scrambled
-14, 1014:
+14, 1014: 20220202_174602_simple_network_O_O_95448771334732707606604288916923886577_PopulationAnnealing_optimization_history.hdf5
+20220128_additional_controls_best_params.yaml
+ - O: 1-5
+20220203_O_marder_group_params.yaml
+ - 29027: 6-10
+ - 27288: 11-15
+ - 18883: 16-20
+ - 21309: 21-25
 
 P: E_FF and E_E weights are structured, inheriting delta_peak_weight value from J;
     E_FF and E_E weights are scrambled, selectivity objectives are off
-15, 1015:
+15, 1015: 20220202_181736_simple_network_P_P_234847747151888959482301218061538034626_PopulationAnnealing_optimization_history.hdf5
+20220128_additional_controls_best_params.yaml
+ - P: 1-5
+20220203_P_marder_group_params.yaml
+ - 24612: 6-10
+ - 22746: 11-15
+ - 18307: 16-20
+ - 15131: 21-25
 
