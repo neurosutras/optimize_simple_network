@@ -31,7 +31,7 @@ cd $WORK2/optimize_simple_network
 for ((NETWORK_INSTANCE=$NETWORK_INSTANCE_START;NETWORK_INSTANCE<$NETWORK_INSTANCE_END;NETWORK_INSTANCE++))
 do
   export NETWORK_INSTANCE
-  ibrun -n 560 python3 simulate_simple_network.py --config-file-path=$CONFIG_FILE_PATH --verbose=1 \
+  echo ibrun -n 560 python3 simulate_simple_network.py --config-file-path=$CONFIG_FILE_PATH --verbose=1 \
       --procs_per_worker=112 --export --num_trials=5 --param_file_path=$PARAM_FILE_PATH --model_key=$MODEL_KEY \
       --network_id=$NETWORK_ID --network_instance=$NETWORK_INSTANCE --label="$LABEL"_"$NETWORK_INSTANCE" \
       --merge-output-files --output-dir=$SCRATCH/data/optimize_simple_network
