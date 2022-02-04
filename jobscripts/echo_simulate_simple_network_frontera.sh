@@ -17,10 +17,10 @@ sbatch <<EOT
 #SBATCH -J $JOB_NAME
 #SBATCH -o /scratch1/06441/aaronmil/logs/optimize_simple_network/$JOB_NAME.%j.o
 #SBATCH -e /scratch1/06441/aaronmil/logs/optimize_simple_network/$JOB_NAME.%j.e
-#SBATCH -p normal
-#SBATCH -N 10
-#SBATCH -n 560
-#SBATCH -t 1:00:00
+#SBATCH -p development
+#SBATCH -N 1
+#SBATCH -n 56
+#SBATCH -t 0:10:00
 #SBATCH --mail-user=neurosutras@gmail.com
 #SBATCH --mail-type=BEGIN,END,FAIL
 
