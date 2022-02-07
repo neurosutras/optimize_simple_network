@@ -1,0 +1,22 @@
+#!/bin/bash -l
+export DATA_DIR=$SCRATCH/data/optimize_simple_network
+export label=M_29613
+export network_instance_start=16
+declare -a run_paths=(20220203_192656_simple_network_M_29613_12_16_184061821858031881242576476534855117627_exported_output.hdf5
+20220203_192656_simple_network_M_29613_12_17_184188640000923588742540686755749561009_exported_output.hdf5
+20220203_192903_simple_network_M_29613_12_18_284566411894455728491688508598371810959_exported_output.hdf5
+20220203_194156_simple_network_M_29613_12_19_216917693157345886309597938029652080619_exported_output.hdf5
+20220203_194156_simple_network_M_29613_12_20_216650763970455828041289785328360365249_exported_output.hdf5)
+declare -a replay_paths=(20220203_225637_simple_network_replay_M_29613_12_16_284048023294810556008302787158499720533_exported_output.hdf5
+20220203_225944_simple_network_replay_M_29613_12_17_91819932136567178680593441850764500395_exported_output.hdf5
+20220203_231052_simple_network_replay_M_29613_12_18_280429956591151997597337676287696113679_exported_output.hdf5
+20220203_231235_simple_network_replay_M_29613_12_19_22123373768531015884801220836560936081_exported_output.hdf5
+20220203_232112_simple_network_replay_M_29613_12_20_91408726247353721435184620361357139122_exported_output.hdf5)
+arraylength=${#run_paths[@]}
+
+for ((i=0; i<${arraylength}; i++))
+do
+  let "network_instance = $network_instance_start + $i"
+  sh process_simple_network_replay_frontera.sh $DATA_DIR/${run_paths[$i]} $DATA_DIR/${replay_paths[$i]} \
+    "$label"_"$network_instance"
+done
