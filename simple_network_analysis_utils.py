@@ -1911,7 +1911,7 @@ def plot_rhythmicity_psd(fft_f, fft_power_mean_dict, fft_power_sem_dict=None, fr
     :param compressed_plot_format: bool
     """
     if compressed_plot_format:
-        fig, axes = plt.subplots(1, figsize=(3.7, 3.05))
+        fig, axes = plt.subplots(1, figsize=(3.2, 2.8))
     else:
         fig, axes = plt.subplots(1, figsize=(4., 3.5))
     freq_max_index = np.where(fft_f >= freq_max)[0][0]
@@ -2019,11 +2019,12 @@ def analyze_selectivity_input_output(binned_t_edges, firing_rate_matrix_dict, po
             predicted = np.zeros_like(binned_t_edges)
             for pre_pop in input_populations:
                 pre_start_gid = pop_gid_ranges[pre_pop][0]
-                for pre_gid in connectivity_dict[post_pop][post_gid][pre_pop]:
-                    this_rate = firing_rate_matrix_dict[pre_pop][pre_gid - pre_start_gid]
-                    this_weight = \
-                        connection_weights_dict[post_pop][pre_pop][post_gid - post_start_gid][pre_gid - pre_start_gid]
-                    predicted += this_rate * this_weight
+                if pre_pop in connectivity_dict[post_pop][post_gid]:
+                    for pre_gid in connectivity_dict[post_pop][post_gid][pre_pop]:
+                        this_rate = firing_rate_matrix_dict[pre_pop][pre_gid - pre_start_gid]
+                        this_weight = \
+                            connection_weights_dict[post_pop][pre_pop][post_gid - post_start_gid][pre_gid - pre_start_gid]
+                        predicted += this_rate * this_weight
             predicted_peak_index = np.argmax(predicted)
             peak_locs['predicted'][post_pop].append(binned_t_edges[predicted_peak_index])
             modulation_depth['predicted'][post_pop].append(get_modulation_depth(predicted))
@@ -2940,17 +2941,18 @@ def plot_decoded_trajectory_replay_data(decoded_pos_matrix_dict, bin_dur, templa
         decoded_pos_matrix_dict_instances_list = decoded_pos_matrix_dict
 
     all_decoded_pos_instances_list_dict = defaultdict(list)
-    decoded_velocity_var_instances_list_dict = defaultdict(list)
     decoded_path_len_instances_list_dict = defaultdict(list)
     decoded_velocity_mean_instances_list_dict = defaultdict(list)
+    decoded_max_step_instances_list_dict = defaultdict(list)
 
     for decoded_pos_matrix_dict in decoded_pos_matrix_dict_instances_list:
         all_decoded_pos_dict = dict()
         decoded_path_len_dict = defaultdict(list)
-        decoded_velocity_var_dict = defaultdict(list)
         decoded_velocity_mean_dict = defaultdict(list)
+        decoded_max_step_dict = defaultdict(list)
         for pop_name in decoded_pos_matrix_dict:
             this_decoded_pos_matrix = decoded_pos_matrix_dict[pop_name][:, :] / template_duration
+            trial_dur = this_decoded_pos_matrix.shape[1] * bin_dur / 1000.
             clean_indexes = ~np.isnan(this_decoded_pos_matrix)
             all_decoded_pos_dict[pop_name] = this_decoded_pos_matrix[clean_indexes]
             for trial in range(this_decoded_pos_matrix.shape[0]):
@@ -2962,26 +2964,25 @@ def plot_decoded_trajectory_replay_data(decoded_pos_matrix_dict, bin_dur, templa
                     this_trial_diff[np.where(this_trial_diff > 0.5)] -= 1.
                     this_path_len = np.sum(np.abs(this_trial_diff))
                     decoded_path_len_dict[pop_name].append(this_path_len)
-                    this_trial_velocity = this_trial_diff / (bin_dur / 1000.)
-                    this_trial_velocity_mean = np.mean(this_trial_velocity)
-                    decoded_velocity_mean_dict[pop_name].append(this_trial_velocity_mean)
-                    if len(clean_indexes) > 1:
-                        this_trial_velocity_var = np.var(this_trial_velocity)
-                        decoded_velocity_var_dict[pop_name].append(this_trial_velocity_var)
+                    this_trial_velocity = np.sum(this_trial_diff) / trial_dur
+                    decoded_velocity_mean_dict[pop_name].append(this_trial_velocity)
+                    if len(this_trial_diff) > 0:
+                        decoded_max_step_dict[pop_name].append(np.max(np.abs(this_trial_diff)))
             all_decoded_pos_instances_list_dict[pop_name].append(all_decoded_pos_dict[pop_name])
             decoded_path_len_instances_list_dict[pop_name].append(decoded_path_len_dict[pop_name])
-            decoded_velocity_var_instances_list_dict[pop_name].append(decoded_velocity_var_dict[pop_name])
             decoded_velocity_mean_instances_list_dict[pop_name].append(decoded_velocity_mean_dict[pop_name])
+            decoded_max_step_instances_list_dict[pop_name].append(decoded_max_step_dict[pop_name])
 
     if pop_order is None:
         pop_order = sorted(list(all_decoded_pos_instances_list_dict.keys()))
 
-    fig, axes = plt.subplots(1, 4, figsize=(3.2 * 4., 3.9))  # , constrained_layout=True)
+    fig, axes = plt.subplots(1, 5, figsize=(2.77 * 5, 3.2))  # , constrained_layout=True)
 
-    max_vel_var = np.nanmax(list(decoded_velocity_var_instances_list_dict.values()))
     max_path_len = np.nanmax(list(decoded_path_len_instances_list_dict.values()))
     max_vel_mean = np.nanmax(list(decoded_velocity_mean_instances_list_dict.values()))
     min_vel_mean = np.nanmin(list(decoded_velocity_mean_instances_list_dict.values()))
+    max_step_val = np.nanmax([np.nanmax(instance) for pop_name in decoded_max_step_instances_list_dict for instance in
+                              decoded_max_step_instances_list_dict[pop_name]])
 
     num_instances = len(decoded_pos_matrix_dict_instances_list)
     for pop_name in pop_order:
@@ -3007,20 +3008,20 @@ def plot_decoded_trajectory_replay_data(decoded_pos_matrix_dict, bin_dur, templa
                                         alpha=0.25, linewidth=0, color=color)
 
             hist_list = []
-            for decoded_velocity_var in decoded_velocity_var_instances_list_dict[pop_name]:
-                hist, edges = np.histogram(decoded_velocity_var, bins=np.linspace(0., max_vel_var, 21),
+            for decoded_max_step in decoded_max_step_instances_list_dict[pop_name]:
+                hist, edges = np.histogram(decoded_max_step, bins=np.linspace(0., max_step_val, 21),
                                            density=True)
                 bin_width = (edges[1] - edges[0])
                 hist *= bin_width
                 hist_list.append(hist)
             if num_instances == 1:
-                axes[3].plot(edges[1:] - bin_width / 2., hist_list[0], label=label, color=color)
+                axes[2].plot(edges[1:] - bin_width / 2., hist_list[0], label=label, color=color)
             else:
                 mean_hist = np.mean(hist_list, axis=0)
                 mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-                axes[3].plot(edges[1:] - bin_width / 2., mean_hist, label=label, color=color)
-                axes[3].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
-                                        alpha=0.25, linewidth=0, color=color)
+                axes[2].plot(edges[1:] - bin_width / 2., mean_hist, label=label, color=color)
+                axes[2].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                                     alpha=0.25, linewidth=0, color=color)
 
             hist_list = []
             for decoded_path_len in decoded_path_len_instances_list_dict[pop_name]:
@@ -3046,12 +3047,12 @@ def plot_decoded_trajectory_replay_data(decoded_pos_matrix_dict, bin_dur, templa
                 hist *= bin_width
                 hist_list.append(hist)
             if num_instances == 1:
-                axes[2].plot(edges[1:] - bin_width / 2., hist_list[0], label=label, color=color)
+                axes[3].plot(edges[1:] - bin_width / 2., hist_list[0], label=label, color=color)
             else:
                 mean_hist = np.mean(hist_list, axis=0)
                 mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-                axes[2].plot(edges[1:] - bin_width / 2., mean_hist, label=label, color=color)
-                axes[2].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                axes[3].plot(edges[1:] - bin_width / 2., mean_hist, label=label, color=color)
+                axes[3].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
                                         alpha=0.25, linewidth=0, color=color)
         else:
             hist_list = []
@@ -3061,29 +3062,29 @@ def plot_decoded_trajectory_replay_data(decoded_pos_matrix_dict, bin_dur, templa
                 hist *= bin_width
                 hist_list.append(hist)
             if num_instances == 1:
-                axes[0][0].plot(edges[1:] - bin_width / 2., hist_list[0], label=label)
+                axes[0].plot(edges[1:] - bin_width / 2., hist_list[0], label=label)
             else:
                 mean_hist = np.mean(hist_list, axis=0)
                 mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-                axes[0][0].plot(edges[1:] - bin_width / 2., mean_hist, label=label)
-                axes[0][0].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                axes[0].plot(edges[1:] - bin_width / 2., mean_hist, label=label)
+                axes[0].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
                                         alpha=0.25, linewidth=0)
 
             hist_list = []
-            for decoded_velocity_var in decoded_velocity_var_instances_list_dict[pop_name]:
-                hist, edges = np.histogram(decoded_velocity_var, bins=np.linspace(0., max_vel_var, 21),
+            for decoded_max_step in decoded_max_step_instances_list_dict[pop_name]:
+                hist, edges = np.histogram(decoded_max_step, bins=np.linspace(0., max_step_val, 21),
                                            density=True)
                 bin_width = (edges[1] - edges[0])
                 hist *= bin_width
                 hist_list.append(hist)
             if num_instances == 1:
-                axes[3].plot(edges[1:] - bin_width / 2., hist_list[0], label=label)
+                axes[2].plot(edges[1:] - bin_width / 2., hist_list[0], label=label)
             else:
                 mean_hist = np.mean(hist_list, axis=0)
                 mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-                axes[3].plot(edges[1:] - bin_width / 2., mean_hist, label=label)
-                axes[3].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
-                                        alpha=0.25, linewidth=0)
+                axes[2].plot(edges[1:] - bin_width / 2., mean_hist, label=label)
+                axes[2].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                                     alpha=0.25, linewidth=0)
 
             hist_list = []
             for decoded_path_len in decoded_path_len_instances_list_dict[pop_name]:
@@ -3109,27 +3110,30 @@ def plot_decoded_trajectory_replay_data(decoded_pos_matrix_dict, bin_dur, templa
                 hist *= bin_width
                 hist_list.append(hist)
             if num_instances == 1:
-                axes[2].plot(edges[1:] - bin_width / 2., hist_list[0], label=label)
+                axes[3].plot(edges[1:] - bin_width / 2., hist_list[0], label=label)
             else:
                 mean_hist = np.mean(hist_list, axis=0)
                 mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-                axes[2].plot(edges[1:] - bin_width / 2., mean_hist, label=label)
-                axes[2].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                axes[3].plot(edges[1:] - bin_width / 2., mean_hist, label=label)
+                axes[3].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
                                         alpha=0.25, linewidth=0)
 
     axes[1].set_xlim((0., max_path_len))
     axes[1].set_ylim((0., axes[1].get_ylim()[1]))
-    axes[1].set_xlabel('Fraction of track length')
+    axes[1].set_xlabel('Fraction of track')
     axes[1].set_ylabel('Probability')
     axes[1].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
-    axes[1].set_title('Offline sequence length', y=1.05, fontsize=mpl.rcParams['font.size'])
+    axes[1].set_title('Sequence length', y=1.05, fontsize=mpl.rcParams['font.size'])
 
-    axes[3].set_xlim((0., max_vel_var))
-    axes[3].set_ylim((0., axes[3].get_ylim()[1]))
-    axes[3].set_xlabel('Variance\n((Fraction of\ntrack length/s)^2)')
-    axes[3].set_ylabel('Probability')
-    axes[3].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
-    axes[3].set_title('Variance of offline\nsequence velocity', y=1.05, fontsize=mpl.rcParams['font.size'])
+    # axes[2].set_xlim((0., max_vel_var))
+    axes[2].set_xlim((0., max_step_val))
+    axes[2].set_ylim((0., axes[2].get_ylim()[1]))
+    axes[2].set_xlabel('Fraction of track')
+    # axes[2].set_xlabel('Variance\n((Fraction of\ntrack length/s)^2)')
+    axes[2].set_ylabel('Probability')
+    axes[2].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
+    # axes[2].set_title('Variance of offline\nsequence velocity', y=1.05, fontsize=mpl.rcParams['font.size'])
+    axes[2].set_title('Maximum step size', y=1.05, fontsize=mpl.rcParams['font.size'])
 
     axes[0].set_xlim((0., 1.))
     axes[0].set_ylim((0., max(axes[0].get_ylim()[1], 0.2)))
@@ -3138,15 +3142,15 @@ def plot_decoded_trajectory_replay_data(decoded_pos_matrix_dict, bin_dur, templa
     axes[0].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
     axes[0].set_title('Decoded positions', y=1.05, fontsize=mpl.rcParams['font.size'])
 
-    axes[2].set_xlim((min_vel_mean, max_vel_mean))
-    axes[2].set_ylim((0., axes[2].get_ylim()[1]))
-    axes[2].set_xlabel('Velocity\n(Fraction of track length/s)')
-    axes[2].set_ylabel('Probability')
-    axes[2].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
-    axes[2].set_title('Offline sequence velocity', y=1.05, fontsize=mpl.rcParams['font.size'])
+    axes[3].set_xlim((min_vel_mean, max_vel_mean))
+    axes[3].set_ylim((0., axes[3].get_ylim()[1]))
+    axes[3].set_xlabel('Velocity\n(Fraction of track/s)')
+    axes[3].set_ylabel('Probability')
+    axes[3].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
+    axes[3].set_title('Sequence velocity', y=1.05, fontsize=mpl.rcParams['font.size'])
 
     clean_axes(axes)
-    fig.tight_layout(w_pad=0.2)
+    fig.tight_layout(w_pad=0.25)
     # fig.set_constrained_layout_pads(hspace=0.15, wspace=0.1)
     fig.show()
 

@@ -1,11 +1,17 @@
 #!/bin/bash -l
 export DATE=$(date +%Y%m%d_%H%M%S)
-export LABEL=simple_network_"$2"_"$3"_heldout
-export JOB_NAME=simulate_"$LABEL"_"$DATE"
 export CONFIG_FILE_PATH="$1"
-export NETWORK_INSTANCE="$3"
-export PARAM_FILE_PATH="$4"
-export MODEL_KEY="$5"
+export MODEL_LABEL="$2"
+export NETWORK_ID="$3"
+export NETWORK_INSTANCE_START="$4"
+export PARAM_FILE_PATH="$5"
+export MODEL_KEY="$6"
+export LABEL=simple_network_"$MODEL_LABEL"_"$NETWORK_ID"_heldout
+export JOB_NAME=simulate_"$LABEL"_"$DATE"
+
+let "NETWORK_INSTANCE_END = $NETWORK_INSTANCE_START + 5"
+export NETWORK_INSTANCE_END
+
 sbatch <<EOT
 #!/bin/bash -l
 #SBATCH -J $JOB_NAME
@@ -20,10 +26,14 @@ sbatch <<EOT
 
 set -x
 
-cd $WORK/optimize_simple_network
+cd $WORK2/optimize_simple_network
 
-ibrun -n 560 python3 simulate_simple_network.py --config-file-path=$CONFIG_FILE_PATH --verbose=1 \
-    --procs_per_worker=112 --export --num_trials=5 --param_file_path=$PARAM_FILE_PATH --model_key=$MODEL_KEY \
-    --network_instance=$NETWORK_INSTANCE --label=$LABEL --merge-output-files \
-    --output-dir=$SCRATCH/data/optimize_simple_network --trial_offset=5
+for ((NETWORK_INSTANCE=$NETWORK_INSTANCE_START;NETWORK_INSTANCE<$NETWORK_INSTANCE_END;NETWORK_INSTANCE++))
+do
+  export NETWORK_INSTANCE
+  ibrun -n 560 python3 simulate_simple_network.py --config-file-path=$CONFIG_FILE_PATH --verbose=1 \
+      --procs_per_worker=112 --export --num_trials=5 --param_file_path=$PARAM_FILE_PATH --model_key=$MODEL_KEY \
+      --network_id=$NETWORK_ID --network_instance="\$NETWORK_INSTANCE" --label="$LABEL"_"\$NETWORK_INSTANCE" \
+      --merge-output-files --output-dir=$SCRATCH/data/optimize_simple_network --trial_offset=5
+done
 EOT

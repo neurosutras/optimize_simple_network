@@ -137,9 +137,9 @@ def main(cli, config_file_path, data_dir, export_data_file_path, example_trial, 
 
     current_time = time.time()
 
-    sequences = get_args_analyze_instances(context.template_data_file_name_list, data_dir, export_data_key, example_trial,
-                                           example_instance, fine_binned_dt, coarse_binned_dt, context.filter_order,
-                                           context.filter_label_dict, context.filter_color_dict,
+    sequences = get_args_analyze_instances(context.template_data_file_name_list, data_dir, export_data_key,
+                                           example_trial, example_instance, fine_binned_dt, coarse_binned_dt,
+                                           context.filter_order, context.filter_label_dict, context.filter_color_dict,
                                            context.filter_xlim_dict, context.pop_order, context.label_dict,
                                            context.color_dict, plot, verbose)
 
@@ -187,36 +187,46 @@ def main(cli, config_file_path, data_dir, export_data_file_path, example_trial, 
                 group.create_dataset('fft_f_nested_gamma', data=fft_f_nested_gamma)
             group = get_h5py_group(f, [model_key], create=True)
 
-            subgroup = group.create_group('fft_power')
-            fft_power_mean_list_dict = {}
-            for fft_power_mean_dict in fft_power_mean_dict_list:
-                for pop_name in fft_power_mean_dict:
-                    if pop_name not in fft_power_mean_list_dict:
-                        fft_power_mean_list_dict[pop_name] = []
-                    fft_power_mean_list_dict[pop_name].append(fft_power_mean_dict[pop_name])
-            for pop_name in fft_power_mean_list_dict:
-                subgroup.create_dataset(pop_name, data=np.array(fft_power_mean_list_dict[pop_name]))
+            if 'fft_power' not in group:
+                subgroup = group.create_group('fft_power')
+                fft_power_mean_list_dict = {}
+                for this_fft_power_mean_dict in fft_power_mean_dict_list:
+                    for pop_name in this_fft_power_mean_dict:
+                        if pop_name not in fft_power_mean_list_dict:
+                            fft_power_mean_list_dict[pop_name] = []
+                        fft_power_mean_list_dict[pop_name].append(this_fft_power_mean_dict[pop_name])
+                for pop_name in fft_power_mean_list_dict:
+                    subgroup.create_dataset(pop_name, data=np.array(fft_power_mean_list_dict[pop_name]))
 
-            subgroup = group.create_group('fft_power_nested_gamma')
-            fft_power_nested_gamma_mean_list_dict = {}
-            for fft_power_nested_gamma_mean_dict in fft_power_nested_gamma_mean_dict_list:
-                for pop_name in fft_power_nested_gamma_mean_dict:
-                    if pop_name not in fft_power_nested_gamma_mean_list_dict:
-                        fft_power_nested_gamma_mean_list_dict[pop_name] = []
-                    fft_power_nested_gamma_mean_list_dict[pop_name].append(fft_power_nested_gamma_mean_dict[pop_name])
-            for pop_name in fft_power_nested_gamma_mean_list_dict:
-                subgroup.create_dataset(pop_name, data=np.array(fft_power_nested_gamma_mean_list_dict[pop_name]))
+            if 'fft_power_nested_gamma' not in group:
+                subgroup = group.create_group('fft_power_nested_gamma')
+                fft_power_nested_gamma_mean_list_dict = {}
+                for this_fft_power_nested_gamma_mean_dict in fft_power_nested_gamma_mean_dict_list:
+                    for pop_name in this_fft_power_nested_gamma_mean_dict:
+                        if pop_name not in fft_power_nested_gamma_mean_list_dict:
+                            fft_power_nested_gamma_mean_list_dict[pop_name] = []
+                        fft_power_nested_gamma_mean_list_dict[pop_name].append(
+                            this_fft_power_nested_gamma_mean_dict[pop_name])
+                for pop_name in fft_power_nested_gamma_mean_list_dict:
+                    subgroup.create_dataset(pop_name, data=np.array(fft_power_nested_gamma_mean_list_dict[pop_name]))
 
-            subgroup = group.create_group('spatial_modulation_depth')
-            for condition in modulation_depth_instances_dict:
-                subgroup.create_group(condition)
-                for pop_name in modulation_depth_instances_dict[condition]:
-                    subgroup[condition].create_dataset(pop_name,
-                                                       data=modulation_depth_instances_dict[condition][pop_name])
+            if 'spatial_modulation_depth' not in group:
+                subgroup = group.create_group('spatial_modulation_depth')
+                for condition in modulation_depth_instances_dict:
+                    subgroup.create_group(condition)
+                    for pop_name in modulation_depth_instances_dict[condition]:
+                        subgroup[condition].create_dataset(pop_name,
+                                                           data=modulation_depth_instances_dict[condition][pop_name])
 
-            subgroup = group.create_group('delta_peak_locs')
-            for pop_name in delta_peak_locs_instances_dict:
-                subgroup.create_dataset(pop_name, data=delta_peak_locs_instances_dict[pop_name])
+            if 'fraction_active_run' not in group:
+                subgroup = group.create_group('fraction_active_run')
+                for pop_name in pop_fraction_active_mean_dict:
+                    subgroup.create_dataset(pop_name, data=pop_fraction_active_mean_dict[pop_name])
+
+            if 'delta_peak_locs' not in group:
+                subgroup = group.create_group('delta_peak_locs')
+                for pop_name in delta_peak_locs_instances_dict:
+                    subgroup.create_dataset(pop_name, data=delta_peak_locs_instances_dict[pop_name])
         print('analyze_simple_network_run_instances took %.1f s to export data from %i network instances (model: %s) to '
               'file: %s' % (time.time() - current_time, len(context.template_data_file_name_list), model_key,
                             export_data_file_path))
@@ -237,7 +247,7 @@ def main(cli, config_file_path, data_dir, export_data_file_path, example_trial, 
         plot_rhythmicity_psd(fft_f, fft_power_mean_dict, fft_power_sem_dict, pop_order=context.pop_order,
                          label_dict=context.label_dict, color_dict=context.color_dict)
         if fft_f_nested_gamma is not None:
-            plot_rhythmicity_psd(fft_f_nested_gamma, fft_power_nested_gamma_mean_dict, fft_power_sem_dict,
+            plot_rhythmicity_psd(fft_f_nested_gamma, fft_power_nested_gamma_mean_dict, fft_power_nested_gamma_sem_dict,
                                  pop_order=context.pop_order, label_dict=context.label_dict,
                                  color_dict=context.color_dict)
         plt.show()

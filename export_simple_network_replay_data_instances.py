@@ -82,6 +82,7 @@ def main(config_file_path, data_dir, export_data_file_path, export_data_key, mod
     decoded_pos_list_dict = {}
     decoded_velocity_mean_list_dict = {}
     decoded_path_len_list_dict = {}
+    decoded_max_step_list_dict = {}
 
     for decoded_pos_matrix_dict in decoded_pos_matrix_dict_list:
         for pop_name in decoded_pos_matrix_dict:
@@ -89,11 +90,14 @@ def main(config_file_path, data_dir, export_data_file_path, export_data_key, mod
                 decoded_pos_list_dict[pop_name] = []
                 decoded_velocity_mean_list_dict[pop_name] = []
                 decoded_path_len_list_dict[pop_name] = []
+                decoded_max_step_list_dict[pop_name] = []
             this_decoded_pos_matrix = decoded_pos_matrix_dict[pop_name][:, :] / template_duration
+            trial_dur = this_decoded_pos_matrix.shape[1] * decode_window_dur / 1000.
             clean_indexes = ~np.isnan(this_decoded_pos_matrix)
             decoded_pos_list_dict[pop_name].append(this_decoded_pos_matrix[clean_indexes])
             this_velocity_mean_list = []
             this_path_len_list = []
+            this_max_step_list = []
             for trial in range(this_decoded_pos_matrix.shape[0]):
                 this_trial_pos = this_decoded_pos_matrix[trial, :]
                 clean_indexes = ~np.isnan(this_trial_pos)
@@ -103,11 +107,13 @@ def main(config_file_path, data_dir, export_data_file_path, export_data_key, mod
                     this_trial_diff[np.where(this_trial_diff > 0.5)] -= 1.
                     this_path_len = np.sum(np.abs(this_trial_diff))
                     this_path_len_list.append(this_path_len)
-                    this_trial_velocity = this_trial_diff / (decode_window_dur / 1000.)
-                    this_trial_velocity_mean = np.mean(this_trial_velocity)
-                    this_velocity_mean_list.append(this_trial_velocity_mean)
+                    this_trial_velocity = np.sum(this_trial_diff) / trial_dur
+                    this_velocity_mean_list.append(this_trial_velocity)
+                if len(this_trial_diff) > 0:
+                    this_max_step_list.append(np.max(np.abs(this_trial_diff)))
             decoded_path_len_list_dict[pop_name].append(this_path_len_list)
             decoded_velocity_mean_list_dict[pop_name].append(this_velocity_mean_list)
+            decoded_max_step_list_dict[pop_name].append(this_max_step_list)
 
     if export:
         if export_data_file_path is None or not os.path.isfile(export_data_file_path):
@@ -119,24 +125,34 @@ def main(config_file_path, data_dir, export_data_file_path, export_data_key, mod
                 group.create_dataset('replay_fft_f', data=fft_f)
 
             group = get_h5py_group(f, [model_key], create=True)
-            subgroup = group.create_group('replay_fft_power')
-            for pop_name in fft_power_instance_dict:
-                subgroup.create_dataset(pop_name, data=np.array(fft_power_instance_dict[pop_name]))
-            subgroup = group.create_group('replay_decoded_pos')
-            for pop_name in decoded_pos_list_dict:
-                subgroup.create_group(pop_name)
-                for i, instance in enumerate(decoded_pos_list_dict[pop_name]):
-                    subgroup[pop_name].create_dataset(str(i), data=np.array(instance))
-            subgroup = group.create_group('replay_decoded_path_len')
-            for pop_name in decoded_path_len_list_dict:
-                subgroup.create_group(pop_name)
-                for i, instance in enumerate(decoded_path_len_list_dict[pop_name]):
-                    subgroup[pop_name].create_dataset(str(i), data=np.array(instance))
-            subgroup = group.create_group('replay_decoded_velocity')
-            for pop_name in decoded_velocity_mean_list_dict:
-                subgroup.create_group(pop_name)
-                for i, instance in enumerate(decoded_velocity_mean_list_dict[pop_name]):
-                    subgroup[pop_name].create_dataset(str(i), data=np.array(instance))
+            if 'replay_fft_power' not in group:
+                subgroup = group.create_group('replay_fft_power')
+                for pop_name in fft_power_instance_dict:
+                    subgroup.create_dataset(pop_name, data=np.array(fft_power_instance_dict[pop_name]))
+            if 'replay_decoded_pos' not in group:
+                subgroup = group.create_group('replay_decoded_pos')
+                for pop_name in decoded_pos_list_dict:
+                    subgroup.create_group(pop_name)
+                    for i, instance in enumerate(decoded_pos_list_dict[pop_name]):
+                        subgroup[pop_name].create_dataset(str(i), data=np.array(instance))
+            if 'replay_decoded_path_len' not in group:
+                subgroup = group.create_group('replay_decoded_path_len')
+                for pop_name in decoded_path_len_list_dict:
+                    subgroup.create_group(pop_name)
+                    for i, instance in enumerate(decoded_path_len_list_dict[pop_name]):
+                        subgroup[pop_name].create_dataset(str(i), data=np.array(instance))
+            if 'replay_decoded_velocity' not in group:
+                subgroup = group.create_group('replay_decoded_velocity')
+                for pop_name in decoded_velocity_mean_list_dict:
+                    subgroup.create_group(pop_name)
+                    for i, instance in enumerate(decoded_velocity_mean_list_dict[pop_name]):
+                        subgroup[pop_name].create_dataset(str(i), data=np.array(instance))
+            if 'replay_max_step' not in group:
+                subgroup = group.create_group('replay_max_step')
+                for pop_name in decoded_max_step_list_dict:
+                    subgroup.create_group(pop_name)
+                    for i, instance in enumerate(decoded_max_step_list_dict[pop_name]):
+                        subgroup[pop_name].create_dataset(str(i), data=np.array(instance))
 
     if interactive:
         context.update(locals())

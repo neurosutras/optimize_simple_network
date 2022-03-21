@@ -64,8 +64,7 @@ def main(config_file_path, data_dir, export_data_key, verbose, debug):
         fft_power_mean_dict[pop_name] = np.mean(fft_power_mean_dict[pop_name], axis=0)
 
     plot_rhythmicity_psd(fft_f, fft_power_mean_dict, fft_power_sem_dict, pop_order=context.pop_order,
-                         label_dict=context.label_dict, color_dict=context.color_dict, compressed_plot_format=True,
-                         title='Offline rhythmicity')
+                         label_dict=context.label_dict, color_dict=context.color_dict, compressed_plot_format=True)
     plt.show()
 
     context.update(locals())
