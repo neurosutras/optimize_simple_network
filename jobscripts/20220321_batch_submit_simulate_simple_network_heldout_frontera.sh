@@ -1,20 +1,20 @@
 #!/bin/bash -l
-sh batch_submit_simulate_simple_network_heldout_frontera.sh config/simulate_simple_network_J_config.yaml \
+sh simulate_simple_network_heldout_frontera.sh config/simulate_simple_network_J_config.yaml \
   J_25866 8 6 config/20220111_J_marder_group_params.yaml 25866
-sh batch_submit_simulate_simple_network_heldout_frontera.sh config/simulate_simple_network_J_config.yaml \
+sh simulate_simple_network_heldout_frontera.sh config/simulate_simple_network_J_config.yaml \
   J_26467 8 11 config/20220111_J_marder_group_params.yaml 26467
-sh batch_submit_simulate_simple_network_heldout_frontera.sh config/simulate_simple_network_J_config.yaml \
+sh simulate_simple_network_heldout_frontera.sh config/simulate_simple_network_J_config.yaml \
   J_29427 8 16 config/20220111_J_marder_group_params.yaml 29427
-sh batch_submit_simulate_simple_network_heldout_frontera.sh config/simulate_simple_network_J_config.yaml \
+sh simulate_simple_network_heldout_frontera.sh config/simulate_simple_network_J_config.yaml \
   J_29623 8 21 config/20220111_J_marder_group_params.yaml 29623
 
-sh batch_submit_simulate_simple_network_heldout_frontera.sh config/simulate_simple_network_K_config.yaml \
+sh simulate_simple_network_heldout_frontera.sh config/simulate_simple_network_K_config.yaml \
   K_9626 9 6 config/20220111_K_marder_group_params.yaml 9626
-sh batch_submit_simulate_simple_network_heldout_frontera.sh config/simulate_simple_network_K_config.yaml \
+sh simulate_simple_network_heldout_frontera.sh config/simulate_simple_network_K_config.yaml \
   K_12596 9 11 config/20220111_K_marder_group_params.yaml 12596
-sh batch_submit_simulate_simple_network_heldout_frontera.sh config/simulate_simple_network_K_config.yaml \
+sh simulate_simple_network_heldout_frontera.sh config/simulate_simple_network_K_config.yaml \
   K_16954 9 16 config/20220111_K_marder_group_params.yaml 16954
-sh batch_submit_simulate_simple_network_heldout_frontera.sh config/simulate_simple_network_K_config.yaml \
+sh simulate_simple_network_heldout_frontera.sh config/simulate_simple_network_K_config.yaml \
   K_27171 9 21 config/20220111_K_marder_group_params.yaml 27171
 
 sh simulate_simple_network_heldout_frontera.sh config/simulate_simple_network_O_config.yaml \
