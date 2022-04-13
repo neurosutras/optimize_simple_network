@@ -1,6 +1,7 @@
 import click
 from nested.utils import read_from_yaml, Context
 from simple_network_analysis_utils import *
+from scipy.stats import pearsonr
 
 context = Context()
 
@@ -65,18 +66,25 @@ def main(config_file_path, data_dir, export_data_file_path, export_data_key, mod
         decoded_pos_matrix_dict = load_decoded_data(data_file_path, export_data_key)
         decoded_pos_matrix_dict_list.append(decoded_pos_matrix_dict)
 
+    filter_band = [4., 10.]
+    sampling_rate = 1000. / decode_window_dur
+    pad = True
+    verbose = True
+
+    theta_sos_filter = get_butter_bandpass_filter(filter_band, sampling_rate, order=15)
+
     decoded_pos_error_list_dict = {}
-    sequence_len_list_dict = {}
+    theta_seq_score_dict = {}
 
     for decoded_pos_matrix_dict in decoded_pos_matrix_dict_list:
         for pop_name in decoded_pos_matrix_dict:
             if pop_name not in decoded_pos_error_list_dict:
                 decoded_pos_error_list_dict[pop_name] = []
-                sequence_len_list_dict[pop_name] = []
+                theta_seq_score_dict[pop_name] = []
             this_decoded_pos_matrix = decoded_pos_matrix_dict[pop_name][:, :] / decode_duration
             num_trials = this_decoded_pos_matrix.shape[0]
             this_decoded_pos_error_list = []
-            this_sequence_len_list = []
+            this_theta_seq_score_list = []
             for trial in range(num_trials):
                 this_trial_pos = this_decoded_pos_matrix[trial, :]
                 this_trial_error = np.subtract(actual_position / decode_duration, this_trial_pos)
@@ -91,29 +99,34 @@ def main(config_file_path, data_dir, export_data_file_path, export_data_key, mod
                         this_trial_error[i] = this_trial_error[j]
                 this_trial_error[np.where(this_trial_error < -0.5)] += 1.
                 this_trial_error[np.where(this_trial_error > 0.5)] -= 1.
-                analytic_signal = hilbert(this_trial_error)
-                amplitude_envelope = np.abs(analytic_signal)
 
+                output_signal, filtered_signal, _, _ = \
+                    get_bandpass_filtered_signal_stats(this_trial_error, actual_position, theta_sos_filter, filter_band,
+                                                       output_t=actual_position, pad=pad)
+                r, p = pearsonr(filtered_signal, output_signal - np.mean(output_signal))
+                this_theta_seq_score_list.append(r**2.)
                 this_decoded_pos_error_list.append(np.abs(this_trial_error))
-                this_sequence_len_list.append(2. * amplitude_envelope)
             decoded_pos_error_list_dict[pop_name].append(this_decoded_pos_error_list)
-            sequence_len_list_dict[pop_name].append(this_sequence_len_list)
+            theta_seq_score_dict[pop_name].append(this_theta_seq_score_list)
     if export:
         if export_data_file_path is None or not os.path.isfile(export_data_file_path):
             raise IOError('export_simple_network_decoded_run_instances: invalid export_data_file_path: %s' %
                           export_data_file_path)
         with h5py.File(export_data_file_path, 'a') as f:
             group = get_h5py_group(f, [model_key], create=True)
-            subgroup = group.create_group('decoded_pos_error')
-            for pop_name in decoded_pos_error_list_dict:
-                subgroup.create_group(pop_name)
-                for i, instance in enumerate(decoded_pos_error_list_dict[pop_name]):
-                    subgroup[pop_name].create_dataset(str(i), data=np.array(instance))
-            subgroup = group.create_group('theta_sequence_len')
-            for pop_name in sequence_len_list_dict:
-                subgroup.create_group(pop_name)
-                for i, instance in enumerate(sequence_len_list_dict[pop_name]):
-                    subgroup[pop_name].create_dataset(str(i), data=np.array(instance))
+            if 'decoded_pos_error' not in group:
+                subgroup = group.create_group('decoded_pos_error')
+                for pop_name in decoded_pos_error_list_dict:
+                    subgroup.create_group(pop_name)
+                    for i, instance in enumerate(decoded_pos_error_list_dict[pop_name]):
+                        subgroup[pop_name].create_dataset(str(i), data=np.array(instance))
+
+            if 'theta_sequence_score' not in group:
+                subgroup = group.create_group('theta_sequence_score')
+                for pop_name in theta_seq_score_dict:
+                    subgroup.create_group(pop_name)
+                    for i, instance in enumerate(theta_seq_score_dict[pop_name]):
+                        subgroup[pop_name].create_dataset(str(i), data=np.array(instance))
 
     if interactive:
         context.update(locals())

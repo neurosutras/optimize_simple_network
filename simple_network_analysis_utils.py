@@ -2,6 +2,7 @@ from nested.utils import *
 from scipy.signal import butter, sosfiltfilt, sosfreqz, hilbert, periodogram, savgol_filter
 from scipy.ndimage import gaussian_filter1d
 from collections import namedtuple, defaultdict
+from numbers import Number
 
 mpl.rcParams['font.size'] = 16.
 mpl.rcParams['font.sans-serif'] = 'Arial'
@@ -2924,6 +2925,74 @@ def load_decoded_data(decode_data_file_path, export_data_key):
     return decoded_pos_matrix_dict
 
 
+def analyze_decoded_trajectory_replay_data(decoded_pos_matrix_dict_list, bin_dur, template_duration,
+                                           path_len_criterion=1., max_step_criterion=0.35,
+                                           fraction_run_velocity_criterion=0.5):
+    """
+
+    :param decoded_pos_matrix_dict_list: list of dict: {pop_name: array (num_trials, num_bins)
+    :param bin_dur: float (ms)
+    :param template_duration: float (ms)
+    :param path_len_criterion: float (fraction of template)
+    :param max_step_criterion: flaat (fraction of template)
+    :param fraction_run_velocity_criterion: float (fraction of template velocity)
+    :return: tuple of dicts
+    """
+    all_decoded_pos_instances_list_dict = defaultdict(list)
+    decoded_path_len_instances_list_dict = defaultdict(list)
+    decoded_velocity_instances_list_dict = defaultdict(list)
+    decoded_max_step_instances_list_dict = defaultdict(list)
+    met_criterion_fraction_instances_list_dict = defaultdict(list)
+
+    for decoded_pos_matrix_dict in decoded_pos_matrix_dict_list:
+        for pop_name in decoded_pos_matrix_dict:
+            this_decoded_pos_matrix = decoded_pos_matrix_dict[pop_name][:, :] / template_duration
+            trial_dur = this_decoded_pos_matrix.shape[1] * bin_dur / 1000.
+            clean_indexes = ~np.isnan(this_decoded_pos_matrix)
+            all_decoded_pos_array = this_decoded_pos_matrix[clean_indexes]
+            decoded_path_len_list = []
+            decoded_velocity_list = []
+            decoded_max_step_list = []
+            excluded_count = 0
+            for trial in range(this_decoded_pos_matrix.shape[0]):
+                excluded = False
+                this_trial_pos = this_decoded_pos_matrix[trial, :]
+                clean_indexes = ~np.isnan(this_trial_pos)
+                if len(clean_indexes) > 0:
+                    this_trial_diff = np.diff(this_trial_pos[clean_indexes])
+                    this_trial_diff[np.where(this_trial_diff < -0.5)] += 1.
+                    this_trial_diff[np.where(this_trial_diff > 0.5)] -= 1.
+                    this_path_len = np.sum(np.abs(this_trial_diff))
+                    decoded_path_len_list.append(this_path_len)
+                    if this_path_len > path_len_criterion:
+                        excluded = True
+                    if len(clean_indexes) < len(this_trial_pos):
+                        excluded = True
+                    this_trial_velocity = np.sum(this_trial_diff) / trial_dur
+                    decoded_velocity_list.append(this_trial_velocity)
+                    if np.abs(this_trial_velocity) < 1. / (template_duration / 1000.) * fraction_run_velocity_criterion:
+                        excluded = True
+                    if len(this_trial_diff) > 0:
+                        this_max_step = np.max(np.abs(this_trial_diff))
+                        if this_max_step > max_step_criterion:
+                            excluded = True
+                        decoded_max_step_list.append(this_max_step)
+                else:
+                    excluded = True
+                if excluded:
+                    excluded_count += 1
+            all_decoded_pos_instances_list_dict[pop_name].append(all_decoded_pos_array)
+            decoded_path_len_instances_list_dict[pop_name].append(decoded_path_len_list)
+            decoded_velocity_instances_list_dict[pop_name].append(decoded_velocity_list)
+            decoded_max_step_instances_list_dict[pop_name].append(decoded_max_step_list)
+            met_criterion_fraction_instances_list_dict[pop_name].append(
+                1. - excluded_count / this_decoded_pos_matrix.shape[0])
+
+    return all_decoded_pos_instances_list_dict, decoded_path_len_instances_list_dict, \
+           decoded_velocity_instances_list_dict, decoded_max_step_instances_list_dict, \
+           met_criterion_fraction_instances_list_dict
+
+
 def plot_decoded_trajectory_replay_data(decoded_pos_matrix_dict, bin_dur, template_duration, pop_order=None,
                                         label_dict=None, color_dict=None):
     """
@@ -2940,49 +3009,23 @@ def plot_decoded_trajectory_replay_data(decoded_pos_matrix_dict, bin_dur, templa
     else:
         decoded_pos_matrix_dict_instances_list = decoded_pos_matrix_dict
 
-    all_decoded_pos_instances_list_dict = defaultdict(list)
-    decoded_path_len_instances_list_dict = defaultdict(list)
-    decoded_velocity_mean_instances_list_dict = defaultdict(list)
-    decoded_max_step_instances_list_dict = defaultdict(list)
-
-    for decoded_pos_matrix_dict in decoded_pos_matrix_dict_instances_list:
-        all_decoded_pos_dict = dict()
-        decoded_path_len_dict = defaultdict(list)
-        decoded_velocity_mean_dict = defaultdict(list)
-        decoded_max_step_dict = defaultdict(list)
-        for pop_name in decoded_pos_matrix_dict:
-            this_decoded_pos_matrix = decoded_pos_matrix_dict[pop_name][:, :] / template_duration
-            trial_dur = this_decoded_pos_matrix.shape[1] * bin_dur / 1000.
-            clean_indexes = ~np.isnan(this_decoded_pos_matrix)
-            all_decoded_pos_dict[pop_name] = this_decoded_pos_matrix[clean_indexes]
-            for trial in range(this_decoded_pos_matrix.shape[0]):
-                this_trial_pos = this_decoded_pos_matrix[trial, :]
-                clean_indexes = ~np.isnan(this_trial_pos)
-                if len(clean_indexes) > 0:
-                    this_trial_diff = np.diff(this_trial_pos[clean_indexes])
-                    this_trial_diff[np.where(this_trial_diff < -0.5)] += 1.
-                    this_trial_diff[np.where(this_trial_diff > 0.5)] -= 1.
-                    this_path_len = np.sum(np.abs(this_trial_diff))
-                    decoded_path_len_dict[pop_name].append(this_path_len)
-                    this_trial_velocity = np.sum(this_trial_diff) / trial_dur
-                    decoded_velocity_mean_dict[pop_name].append(this_trial_velocity)
-                    if len(this_trial_diff) > 0:
-                        decoded_max_step_dict[pop_name].append(np.max(np.abs(this_trial_diff)))
-            all_decoded_pos_instances_list_dict[pop_name].append(all_decoded_pos_dict[pop_name])
-            decoded_path_len_instances_list_dict[pop_name].append(decoded_path_len_dict[pop_name])
-            decoded_velocity_mean_instances_list_dict[pop_name].append(decoded_velocity_mean_dict[pop_name])
-            decoded_max_step_instances_list_dict[pop_name].append(decoded_max_step_dict[pop_name])
+    all_decoded_pos_instances_list_dict, decoded_path_len_instances_list_dict, \
+    decoded_velocity_instances_list_dict, decoded_max_step_instances_list_dict, \
+    met_criterion_fraction_instances_list_dict = \
+        analyze_decoded_trajectory_replay_data(decoded_pos_matrix_dict_instances_list, bin_dur, template_duration)
 
     if pop_order is None:
         pop_order = sorted(list(all_decoded_pos_instances_list_dict.keys()))
 
     fig, axes = plt.subplots(1, 5, figsize=(2.77 * 5, 3.2))  # , constrained_layout=True)
+    flat_axes = axes.flatten()
 
     max_path_len = np.nanmax(list(decoded_path_len_instances_list_dict.values()))
-    max_vel_mean = np.nanmax(list(decoded_velocity_mean_instances_list_dict.values()))
-    min_vel_mean = np.nanmin(list(decoded_velocity_mean_instances_list_dict.values()))
+    max_vel_mean = np.nanmax(list(decoded_velocity_instances_list_dict.values()))
+    min_vel_mean = np.nanmin(list(decoded_velocity_instances_list_dict.values()))
     max_step_val = np.nanmax([np.nanmax(instance) for pop_name in decoded_max_step_instances_list_dict for instance in
                               decoded_max_step_instances_list_dict[pop_name]])
+    max_sequence_fraction = np.max(list(met_criterion_fraction_instances_list_dict.values()))
 
     num_instances = len(decoded_pos_matrix_dict_instances_list)
     for pop_name in pop_order:
@@ -2992,164 +3035,135 @@ def plot_decoded_trajectory_replay_data(decoded_pos_matrix_dict, bin_dur, templa
             label = pop_name
         if color_dict is not None:
             color = color_dict[pop_name]
-            hist_list = []
-            for all_decoded_pos in all_decoded_pos_instances_list_dict[pop_name]:
-                hist, edges = np.histogram(all_decoded_pos, bins=np.linspace(0., 1., 21), density=True)
-                bin_width = (edges[1] - edges[0])
-                hist *= bin_width
-                hist_list.append(hist)
-            if num_instances == 1:
-                axes[0].plot(edges[1:] - bin_width / 2., hist_list[0], label=label, color=color)
-            else:
-                mean_hist = np.mean(hist_list, axis=0)
-                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-                axes[0].plot(edges[1:] - bin_width / 2., mean_hist, label=label, color=color)
-                axes[0].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
-                                        alpha=0.25, linewidth=0, color=color)
-
-            hist_list = []
-            for decoded_max_step in decoded_max_step_instances_list_dict[pop_name]:
-                hist, edges = np.histogram(decoded_max_step, bins=np.linspace(0., max_step_val, 21),
-                                           density=True)
-                bin_width = (edges[1] - edges[0])
-                hist *= bin_width
-                hist_list.append(hist)
-            if num_instances == 1:
-                axes[2].plot(edges[1:] - bin_width / 2., hist_list[0], label=label, color=color)
-            else:
-                mean_hist = np.mean(hist_list, axis=0)
-                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-                axes[2].plot(edges[1:] - bin_width / 2., mean_hist, label=label, color=color)
-                axes[2].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
-                                     alpha=0.25, linewidth=0, color=color)
-
-            hist_list = []
-            for decoded_path_len in decoded_path_len_instances_list_dict[pop_name]:
-                hist, edges = np.histogram(decoded_path_len, bins=np.linspace(0., max_path_len, 21),
-                                           density=True)
-                bin_width = (edges[1] - edges[0])
-                hist *= bin_width
-                hist_list.append(hist)
-            if num_instances == 1:
-                axes[1].plot(edges[1:] - bin_width / 2., hist_list[0], label=label, color=color)
-            else:
-                mean_hist = np.mean(hist_list, axis=0)
-                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-                axes[1].plot(edges[1:] - bin_width / 2., mean_hist, label=label, color=color)
-                axes[1].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
-                                        alpha=0.25, linewidth=0, color=color)
-
-            hist_list = []
-            for decoded_velocity_mean in decoded_velocity_mean_instances_list_dict[pop_name]:
-                hist, edges = np.histogram(decoded_velocity_mean, bins=np.linspace(min_vel_mean, max_vel_mean, 21),
-                                           density=True)
-                bin_width = (edges[1] - edges[0])
-                hist *= bin_width
-                hist_list.append(hist)
-            if num_instances == 1:
-                axes[3].plot(edges[1:] - bin_width / 2., hist_list[0], label=label, color=color)
-            else:
-                mean_hist = np.mean(hist_list, axis=0)
-                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-                axes[3].plot(edges[1:] - bin_width / 2., mean_hist, label=label, color=color)
-                axes[3].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
-                                        alpha=0.25, linewidth=0, color=color)
         else:
-            hist_list = []
-            for all_decoded_pos in all_decoded_pos_instances_list_dict[pop_name]:
-                hist, edges = np.histogram(all_decoded_pos, bins=np.linspace(0., 1., 21), density=True)
-                bin_width = (edges[1] - edges[0])
-                hist *= bin_width
-                hist_list.append(hist)
-            if num_instances == 1:
-                axes[0].plot(edges[1:] - bin_width / 2., hist_list[0], label=label)
-            else:
-                mean_hist = np.mean(hist_list, axis=0)
-                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-                axes[0].plot(edges[1:] - bin_width / 2., mean_hist, label=label)
-                axes[0].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
-                                        alpha=0.25, linewidth=0)
+            color = None
 
-            hist_list = []
-            for decoded_max_step in decoded_max_step_instances_list_dict[pop_name]:
-                hist, edges = np.histogram(decoded_max_step, bins=np.linspace(0., max_step_val, 21),
-                                           density=True)
-                bin_width = (edges[1] - edges[0])
-                hist *= bin_width
-                hist_list.append(hist)
-            if num_instances == 1:
-                axes[2].plot(edges[1:] - bin_width / 2., hist_list[0], label=label)
-            else:
-                mean_hist = np.mean(hist_list, axis=0)
-                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-                axes[2].plot(edges[1:] - bin_width / 2., mean_hist, label=label)
-                axes[2].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
-                                     alpha=0.25, linewidth=0)
+        axis = 0
+        hist_list = []
+        for all_decoded_pos in all_decoded_pos_instances_list_dict[pop_name]:
+            hist, edges = np.histogram(all_decoded_pos, bins=np.linspace(0., 1., 21), density=True)
+            bin_width = (edges[1] - edges[0])
+            hist *= bin_width
+            hist_list.append(hist)
+        if num_instances == 1:
+            flat_axes[axis].plot(edges[1:] - bin_width / 2., hist_list[0], label=label, color=color)
+        else:
+            mean_hist = np.mean(hist_list, axis=0)
+            mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
+            flat_axes[axis].plot(edges[1:] - bin_width / 2., mean_hist, label=label, color=color)
+            flat_axes[axis].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                                    alpha=0.25, linewidth=0, color=color)
 
-            hist_list = []
-            for decoded_path_len in decoded_path_len_instances_list_dict[pop_name]:
-                hist, edges = np.histogram(decoded_path_len, bins=np.linspace(0., max_path_len, 21),
-                                           density=True)
-                bin_width = (edges[1] - edges[0])
-                hist *= bin_width
-                hist_list.append(hist)
-            if num_instances == 1:
-                axes[1].plot(edges[1:] - bin_width / 2., hist_list[0], label=label)
-            else:
-                mean_hist = np.mean(hist_list, axis=0)
-                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-                axes[1].plot(edges[1:] - bin_width / 2., mean_hist, label=label)
-                axes[1].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
-                                        alpha=0.25, linewidth=0)
+        axis += 1
+        hist_list = []
+        for decoded_path_len in decoded_path_len_instances_list_dict[pop_name]:
+            hist, edges = np.histogram(decoded_path_len, bins=np.linspace(0., max_path_len, 21),
+                                       density=True)
+            bin_width = (edges[1] - edges[0])
+            hist *= bin_width
+            hist_list.append(hist)
+        if num_instances == 1:
+            flat_axes[axis].plot(edges[1:] - bin_width / 2., hist_list[0], label=label, color=color)
+        else:
+            mean_hist = np.mean(hist_list, axis=0)
+            mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
+            flat_axes[axis].plot(edges[1:] - bin_width / 2., mean_hist, label=label, color=color)
+            flat_axes[axis].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                                    alpha=0.25, linewidth=0, color=color)
+        axis += 1
+        hist_list = []
+        for decoded_velocity in decoded_velocity_instances_list_dict[pop_name]:
+            hist, edges = np.histogram(decoded_velocity, bins=np.linspace(min_vel_mean, max_vel_mean, 21),
+                                       density=True)
+            bin_width = (edges[1] - edges[0])
+            hist *= bin_width
+            hist_list.append(hist)
+        if num_instances == 1:
+            flat_axes[axis].plot(edges[1:] - bin_width / 2., hist_list[0], label=label, color=color)
+        else:
+            mean_hist = np.mean(hist_list, axis=0)
+            mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
+            flat_axes[axis].plot(edges[1:] - bin_width / 2., mean_hist, label=label, color=color)
+            flat_axes[axis].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                                    alpha=0.25, linewidth=0, color=color)
+        """
+        axis += 1
+        hist_list = []
+        for decoded_max_step in decoded_max_step_instances_list_dict[pop_name]:
+            hist, edges = np.histogram(decoded_max_step, bins=np.linspace(0., max_step_val, 21),
+                                       density=True)
+            bin_width = (edges[1] - edges[0])
+            hist *= bin_width
+            hist_list.append(hist)
+        if num_instances == 1:
+            flat_axes[axis].plot(edges[1:] - bin_width / 2., hist_list[0], label=label, color=color)
+        else:
+            mean_hist = np.mean(hist_list, axis=0)
+            mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
+            flat_axes[axis].plot(edges[1:] - bin_width / 2., mean_hist, label=label, color=color)
+            flat_axes[axis].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
+                                         alpha=0.25, linewidth=0, color=color)
+        """
 
-            hist_list = []
-            for decoded_velocity_mean in decoded_velocity_mean_instances_list_dict[pop_name]:
-                hist, edges = np.histogram(decoded_velocity_mean, bins=np.linspace(min_vel_mean, max_vel_mean, 21),
-                                           density=True)
-                bin_width = (edges[1] - edges[0])
-                hist *= bin_width
-                hist_list.append(hist)
-            if num_instances == 1:
-                axes[3].plot(edges[1:] - bin_width / 2., hist_list[0], label=label)
-            else:
-                mean_hist = np.mean(hist_list, axis=0)
-                mean_sem = np.std(hist_list, axis=0) / np.sqrt(num_instances)
-                axes[3].plot(edges[1:] - bin_width / 2., mean_hist, label=label)
-                axes[3].fill_between(edges[1:] - bin_width / 2., mean_hist + mean_sem, mean_hist - mean_sem,
-                                        alpha=0.25, linewidth=0)
+    axis += 1
+    pos_start = 0
+    xlabels = []
+    for pop_name in pop_order:
+        if label_dict is not None:
+            label = label_dict[pop_name]
+        else:
+            label = pop_name
+        xlabels.append(label)
 
-    axes[1].set_xlim((0., max_path_len))
-    axes[1].set_ylim((0., axes[1].get_ylim()[1]))
-    axes[1].set_xlabel('Fraction of track')
-    axes[1].set_ylabel('Probability')
-    axes[1].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
-    axes[1].set_title('Sequence length', y=1.05, fontsize=mpl.rcParams['font.size'])
+        bp = flat_axes[axis].boxplot(met_criterion_fraction_instances_list_dict[pop_name],
+                                     positions=[pos_start], patch_artist=True, showfliers=False)
+        if color_dict[pop_name] is not None:
+            for element in ['boxes', 'whiskers', 'fliers', 'medians', 'caps']:
+                plt.setp(bp[element], color=color_dict[pop_name])
+        for patch in bp['boxes']:
+            patch.set(facecolor='white')
+        pos_start += 1
+    flat_axes[axis].set_xticks(range(len(pop_order)))
+    flat_axes[axis].set_xticklabels(xlabels)
+    flat_axes[axis].set_ylabel('Fraction of events')
+    flat_axes[axis].set_ylim(0., max(flat_axes[axis].get_ylim()[1] * 1.1, 0.5))
+    flat_axes[axis].set_title('Continuous sequences', y=1.05, fontsize=mpl.rcParams['font.size'])
 
-    # axes[2].set_xlim((0., max_vel_var))
-    axes[2].set_xlim((0., max_step_val))
-    axes[2].set_ylim((0., axes[2].get_ylim()[1]))
-    axes[2].set_xlabel('Fraction of track')
-    # axes[2].set_xlabel('Variance\n((Fraction of\ntrack length/s)^2)')
-    axes[2].set_ylabel('Probability')
-    axes[2].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
-    # axes[2].set_title('Variance of offline\nsequence velocity', y=1.05, fontsize=mpl.rcParams['font.size'])
-    axes[2].set_title('Maximum step size', y=1.05, fontsize=mpl.rcParams['font.size'])
+    axis = 0
+    flat_axes[axis].set_xlim((0., 1.))
+    flat_axes[axis].set_ylim((0., max(flat_axes[axis].get_ylim()[1], 0.2)))
+    flat_axes[axis].set_xlabel('Normalized position')
+    flat_axes[axis].set_ylabel('Fraction of events')
+    flat_axes[axis].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
+    flat_axes[axis].set_title('Decoded positions', y=1.05, fontsize=mpl.rcParams['font.size'])
 
-    axes[0].set_xlim((0., 1.))
-    axes[0].set_ylim((0., max(axes[0].get_ylim()[1], 0.2)))
-    axes[0].set_xlabel('Normalized position')
-    axes[0].set_ylabel('Probability')
-    axes[0].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
-    axes[0].set_title('Decoded positions', y=1.05, fontsize=mpl.rcParams['font.size'])
+    axis += 1
+    flat_axes[axis].set_xlim((0., max_path_len))
+    flat_axes[axis].set_ylim((0., flat_axes[axis].get_ylim()[1]))
+    flat_axes[axis].set_xlabel('Fraction of track')
+    flat_axes[axis].set_ylabel('Fraction of events')
+    flat_axes[axis].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
+    flat_axes[axis].set_title('Sequence length', y=1.05, fontsize=mpl.rcParams['font.size'])
 
-    axes[3].set_xlim((min_vel_mean, max_vel_mean))
-    axes[3].set_ylim((0., axes[3].get_ylim()[1]))
-    axes[3].set_xlabel('Velocity\n(Fraction of track/s)')
-    axes[3].set_ylabel('Probability')
-    axes[3].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
-    axes[3].set_title('Sequence velocity', y=1.05, fontsize=mpl.rcParams['font.size'])
+    """
+    axis += 1
+    flat_axes[axis].set_xlim((0., max_step_val))
+    flat_axes[axis].set_ylim((0., flat_axes[axis].get_ylim()[1]))
+    flat_axes[axis].set_xlabel('Fraction of track')
+    flat_axes[axis].set_ylabel('Fraction of events')
+    flat_axes[axis].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
+    flat_axes[axis].set_title('Maximum step size', y=1.05, fontsize=mpl.rcParams['font.size'])
+    """
 
-    clean_axes(axes)
+    axis += 1
+    flat_axes[axis].set_xlim((min_vel_mean, max_vel_mean))
+    flat_axes[axis].set_ylim((0., flat_axes[axis].get_ylim()[1]))
+    flat_axes[axis].set_xlabel('Velocity\n(Fraction of track/s)')
+    flat_axes[axis].set_ylabel('Fraction of events')
+    flat_axes[axis].legend(loc='best', frameon=False, framealpha=0.5, handlelength=1)
+    flat_axes[axis].set_title('Sequence velocity', y=1.05, fontsize=mpl.rcParams['font.size'])
+
+    clean_axes(flat_axes)
     fig.tight_layout(w_pad=0.25)
     # fig.set_constrained_layout_pads(hspace=0.15, wspace=0.1)
     fig.show()
@@ -3173,3 +3187,61 @@ def get_sorted_gid_dict_from_tuning_peak_locs(gid_order_dict, tuning_peak_locs):
             sorted_gid_dict[pop_name] = np.copy(gid_order_dict[pop_name])
 
     return sorted_gid_dict
+
+
+def scattered_boxplot(ax, x, notch=None, sym=None, vert=None, whis=None, positions=None, widths=None, patch_artist=None, bootstrap=None, usermedians=None, conf_intervals=None, meanline=None, showmeans=None, showcaps=None, showbox=None,
+                      showfliers="unif",
+                      hide_points_within_whiskers=False,
+                      boxprops=None, labels=None, flierprops=None, medianprops=None, meanprops=None, capprops=None, whiskerprops=None, manage_ticks=True, autorange=False, zorder=None, *, data=None):
+    if showfliers=="classic":
+        classic_fliers=True
+    else:
+        classic_fliers=False
+    ax.boxplot(x, notch=notch, sym=sym, vert=vert, whis=whis, positions=positions, widths=widths, patch_artist=patch_artist, bootstrap=bootstrap, usermedians=usermedians, conf_intervals=conf_intervals, meanline=meanline, showmeans=showmeans, showcaps=showcaps, showbox=showbox,
+               showfliers=classic_fliers,
+               boxprops=boxprops, labels=labels, flierprops=flierprops, medianprops=medianprops, meanprops=meanprops, capprops=capprops, whiskerprops=whiskerprops, manage_ticks=manage_ticks, autorange=autorange, zorder=zorder,data=data)
+    N=len(x)
+    datashape_message = ("List of boxplot statistics and `{0}` "
+                             "values must have same the length")
+    # check position
+    if positions is None:
+        positions = list(range(1, N + 1))
+    elif len(positions) != N:
+        raise ValueError(datashape_message.format("positions"))
+
+    positions = np.array(positions)
+    if len(positions) > 0 and not isinstance(positions[0], Number):
+        raise TypeError("positions should be an iterable of numbers")
+
+    # width
+    if widths is None:
+        widths = [np.clip(0.15 * np.ptp(positions), 0.15, 0.5)] * N
+    elif np.isscalar(widths):
+        widths = [widths] * N
+    elif len(widths) != N:
+        raise ValueError(datashape_message.format("widths"))
+
+    if hide_points_within_whiskers:
+        import matplotlib.cbook as cbook
+        from matplotlib import rcParams
+        if whis is None:
+            whis = rcParams['boxplot.whiskers']
+        if bootstrap is None:
+            bootstrap = rcParams['boxplot.bootstrap']
+        bxpstats = cbook.boxplot_stats(x, whis=whis, bootstrap=bootstrap,
+                                       labels=labels, autorange=autorange)
+    for i in range(N):
+        if hide_points_within_whiskers:
+            xi=bxpstats[i]['fliers']
+        else:
+            xi=x[i]
+        if showfliers=="unif":
+            jitter=np.random.uniform(-widths[i]*0.5,widths[i]*0.5,size=np.size(xi))
+        elif showfliers=="normal":
+            jitter=np.random.normal(loc=0.0, scale=widths[i]*0.1,size=np.size(xi))
+        elif showfliers==False or showfliers=="classic":
+            return
+        else:
+            raise NotImplementedError("showfliers='"+str(showfliers)+"' is not implemented. You can choose from 'unif', 'normal', 'classic' and False")
+
+        ax.scatter(positions[i]+jitter,xi,alpha=0.2,marker="o", facecolors='none', edgecolors="k")

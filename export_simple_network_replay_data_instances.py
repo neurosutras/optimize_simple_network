@@ -79,43 +79,12 @@ def main(config_file_path, data_dir, export_data_file_path, export_data_key, mod
                 fft_power_instance_dict[pop_name] = []
             fft_power_instance_dict[pop_name].append(np.mean(fft_power_matrix_dict[pop_name], axis=0))
 
-    decoded_pos_list_dict = {}
-    decoded_velocity_mean_list_dict = {}
-    decoded_path_len_list_dict = {}
-    decoded_max_step_list_dict = {}
-
-    for decoded_pos_matrix_dict in decoded_pos_matrix_dict_list:
-        for pop_name in decoded_pos_matrix_dict:
-            if pop_name not in decoded_pos_list_dict:
-                decoded_pos_list_dict[pop_name] = []
-                decoded_velocity_mean_list_dict[pop_name] = []
-                decoded_path_len_list_dict[pop_name] = []
-                decoded_max_step_list_dict[pop_name] = []
-            this_decoded_pos_matrix = decoded_pos_matrix_dict[pop_name][:, :] / template_duration
-            trial_dur = this_decoded_pos_matrix.shape[1] * decode_window_dur / 1000.
-            clean_indexes = ~np.isnan(this_decoded_pos_matrix)
-            decoded_pos_list_dict[pop_name].append(this_decoded_pos_matrix[clean_indexes])
-            this_velocity_mean_list = []
-            this_path_len_list = []
-            this_max_step_list = []
-            for trial in range(this_decoded_pos_matrix.shape[0]):
-                this_trial_pos = this_decoded_pos_matrix[trial, :]
-                clean_indexes = ~np.isnan(this_trial_pos)
-                if len(clean_indexes) > 0:
-                    this_trial_diff = np.diff(this_trial_pos[clean_indexes])
-                    this_trial_diff[np.where(this_trial_diff < -0.5)] += 1.
-                    this_trial_diff[np.where(this_trial_diff > 0.5)] -= 1.
-                    this_path_len = np.sum(np.abs(this_trial_diff))
-                    this_path_len_list.append(this_path_len)
-                    this_trial_velocity = np.sum(this_trial_diff) / trial_dur
-                    this_velocity_mean_list.append(this_trial_velocity)
-                if len(this_trial_diff) > 0:
-                    this_max_step_list.append(np.max(np.abs(this_trial_diff)))
-            decoded_path_len_list_dict[pop_name].append(this_path_len_list)
-            decoded_velocity_mean_list_dict[pop_name].append(this_velocity_mean_list)
-            decoded_max_step_list_dict[pop_name].append(this_max_step_list)
+    decoded_pos_list_dict, decoded_path_len_list_dict, decoded_velocity_mean_list_dict, decoded_max_step_list_dict, \
+    sequence_fraction_list_dict = \
+        analyze_decoded_trajectory_replay_data(decoded_pos_matrix_dict_list, decode_window_dur, template_duration)
 
     if export:
+        start_time = time.time()
         if export_data_file_path is None or not os.path.isfile(export_data_file_path):
             raise IOError('export_simple_network_replay_data_instances: invalid export_data_file_path: %s' %
                           export_data_file_path)
@@ -153,6 +122,13 @@ def main(config_file_path, data_dir, export_data_file_path, export_data_key, mod
                     subgroup.create_group(pop_name)
                     for i, instance in enumerate(decoded_max_step_list_dict[pop_name]):
                         subgroup[pop_name].create_dataset(str(i), data=np.array(instance))
+            if 'replay_sequence_fraction' not in group:
+                subgroup = group.create_group('replay_sequence_fraction')
+                for pop_name in sequence_fraction_list_dict:
+                    subgroup.create_dataset(pop_name, data=np.array(sequence_fraction_list_dict[pop_name]))
+        print('Exporting data for model_key: %s to file_path: %s took %.1f s' % (model_key, export_data_file_path,
+                                                                                 time.time() - start_time))
+        sys.stdout.flush()
 
     if interactive:
         context.update(locals())

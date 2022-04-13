@@ -1,3 +1,4 @@
+import numpy as np
 from nested.parallel import *
 from nested.optimize_utils import *
 from simple_network_analysis_utils import *
@@ -491,7 +492,7 @@ def decode_single_trial(decode_spike_times_dict, trial_key, decode_bin_dur, deco
         if compressed_plot_format:
             fig, axes = plt.subplots(2, len(pop_order), figsize=(2.2 * len(pop_order), 4.5))
         else:
-            fig, axes = plt.subplots(2, len(pop_order), figsize=(4. * len(pop_order), 7.))
+            fig, axes = plt.subplots(2, len(pop_order), figsize=(2.7 * len(pop_order), 5.2))
         if decode_duration > 1000.:
             this_binned_t_edges = decode_binned_t_edges / 1000.
         else:
@@ -504,14 +505,8 @@ def decode_single_trial(decode_spike_times_dict, trial_key, decode_bin_dur, deco
             p_pos = p_pos_dict[pop_name]
             axes[1][col].pcolormesh(decoded_x_mesh, decoded_y_mesh, p_pos, vmin=0., edgecolors='face', cmap=this_cmap,
                                     rasterized=True, antialiased=True)
-            if decode_duration > 1000.:
-                axes[1][col].set_xlabel('Time (s)')
-            else:
-                axes[1][col].set_xlabel('Time (ms)')
-            axes[1][col].set_ylim((1., 0.))
             axes[1][col].set_xlim((this_binned_t_edges[0], this_binned_t_edges[-1]))
-            if not compressed_plot_format:
-                axes[1][col].set_ylabel('Decoded position')
+            axes[1][col].set_ylim((1., 0.))
 
             for i, gid in enumerate(sorted_gid_dict[pop_name]):
                 this_spike_times = decode_spike_times_dict[pop_name][gid]
@@ -521,19 +516,25 @@ def decode_single_trial(decode_spike_times_dict, trial_key, decode_bin_dur, deco
                 else:
                     axes[0][col].scatter(this_spike_times, np.ones_like(this_spike_times) * i + 0.5, c='k',
                                          s=0.01, rasterized=True)
-            # axes[0][col].set_xlabel('Time (s)')
+
             axes[0][col].set_ylim((len(sorted_gid_dict[pop_name]), 0))
             axes[0][col].set_xlim((this_binned_t_edges[0], this_binned_t_edges[-1]))
-            if not compressed_plot_format:
-                axes[0][col].set_ylabel('Sorted Cell ID')
+
+            if decode_duration > 1000.:
+                axes[1][col].set_xlabel('Time (s)')
+                axes[0][col].set_xticks(np.arange(this_binned_t_edges[0], this_binned_t_edges[-1], 1.))
+                axes[1][col].set_xticks(np.arange(this_binned_t_edges[0], this_binned_t_edges[-1], 1.))
+            else:
+                axes[1][col].set_xlabel('Time (ms)')
+
             if label_dict is not None:
                 label = label_dict[pop_name]
             else:
                 label = pop_name
             axes[0][col].set_title(label, fontsize=mpl.rcParams['font.size'])
-        if compressed_plot_format:
-            axes[0][0].set_ylabel('Sorted Cell ID')
-            axes[1][0].set_ylabel('Decoded position')
+
+        axes[0][0].set_ylabel('Sorted Cell ID')
+        axes[1][0].set_ylabel('Decoded position')
         fig.suptitle('Trial # %s' % trial_key, y=0.99, fontsize=mpl.rcParams['font.size'])
         fig.tight_layout()
         if compressed_plot_format:
@@ -577,6 +578,7 @@ def decode_data(decode_data_file_path, decode_trial_keys, decode_group_key, expo
                 plot_list.append(True)
             else:
                 plot_list.append(False)
+
     sequences = [[decode_data_file_path] * num_trials, decode_trial_keys, [decode_group_key] * num_trials,
                  [export_data_key] * num_trials, [decode_bin_dur] * num_trials, [decode_duration] * num_trials,
                  [template_bin_dur] * num_trials, [template_duration] * num_trials, [temp_export] * num_trials,

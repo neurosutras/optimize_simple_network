@@ -1,0 +1,27 @@
+data_file_name_list:
+  - 20220321_171058_simple_network_O_27288_14_heldout_11_267750540549576627565163824655020855648_exported_output.hdf5
+  - 20220321_171137_simple_network_O_27288_14_heldout_12_298693648470688788466866927521164431712_exported_output.hdf5
+  - 20220321_171216_simple_network_O_27288_14_heldout_13_329128889609015262393496491093836697952_exported_output.hdf5
+  - 20220321_171254_simple_network_O_27288_14_heldout_14_19502078331597647481400942911971660128_exported_output.hdf5
+  - 20220321_171330_simple_network_O_27288_14_heldout_15_47298367233576751145829817309522039136_exported_output.hdf5
+pop_order:
+  - FF
+  - E
+  - I
+color_dict:
+  FF: darkgrey
+  E: r
+  I: b
+filter_order:
+  - Theta
+  - Gamma
+filter_color_dict:
+  Theta: g
+  Gamma: purple
+filter_xlim_dict:
+  Theta:
+    - 500.
+    - 2000
+  Gamma:
+    - 500.
+    - 1000.

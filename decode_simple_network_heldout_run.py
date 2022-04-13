@@ -22,6 +22,7 @@ context = decode_simple_network_replay.context
 @click.option("--decode-window-dur", type=float, default=20.)
 @click.option("--step-dur", type=float, default=20.)
 @click.option("--output-dir", type=str, default='data')
+@click.option("--compressed-plot-format", is_flag=True)
 @click.option("--interactive", is_flag=True)
 @click.option("--verbose", type=int, default=2)
 @click.option("--export", is_flag=True)
@@ -30,7 +31,7 @@ context = decode_simple_network_replay.context
 @click.pass_context
 def main(cli, template_data_file_path, decode_data_file_path, template_group_key, decode_group_key, export_data_key,
          plot_n_trials, plot_trials, config_file_path, template_window_dur, decode_window_dur, step_dur, output_dir,
-         interactive, verbose, export, plot, debug):
+         compressed_plot_format, interactive, verbose, export, plot, debug):
     """
 
     :param cli: contains unrecognized args as list of str
@@ -46,6 +47,7 @@ def main(cli, template_data_file_path, decode_data_file_path, template_group_key
     :param decode_window_dur: float
     :param step_dur: float
     :param output_dir: str (path to dir)
+    :param compressed_plot_format: bool
     :param interactive: bool
     :param verbose: int
     :param export: bool
@@ -118,7 +120,8 @@ def main(cli, template_data_file_path, decode_data_file_path, template_group_key
                         context.export_data_key, context.decode_window_dur, context.decode_duration,
                         context.template_window_dur, context.template_duration, export=context.export,
                         pop_order=context.pop_order, label_dict=context.label_dict, disp=context.disp,
-                        plot=context.plot, plot_trial_keys=context.plot_decode_trial_keys)
+                        plot=context.plot, plot_trial_keys=context.plot_decode_trial_keys,
+                        compressed_plot_format=compressed_plot_format)
     else:
         decoded_pos_matrix_dict = load_decoded_data(context.decode_data_file_path, context.export_data_key)
         if plot and context.plot_n_trials > 0:
@@ -127,7 +130,8 @@ def main(cli, template_data_file_path, decode_data_file_path, template_group_key
                                   context.decode_duration, context.template_window_dur, context.template_duration,
                                   export=False, temp_export=False, pop_order=context.pop_order,
                                   label_dict=context.label_dict, disp=context.disp, plot=True,
-                                  plot_trial_keys=context.plot_decode_trial_keys)
+                                  plot_trial_keys=context.plot_decode_trial_keys,
+                                  compressed_plot_format=compressed_plot_format)
     if plot:
         actual_position = np.arange(0., context.decode_duration, context.decode_window_dur) + \
                           context.decode_window_dur / 2.
