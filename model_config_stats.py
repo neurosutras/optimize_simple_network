@@ -1,3 +1,4 @@
+import numpy as np
 from simple_network_analysis_utils import *
 from scipy.stats import kstest
 from scipy.stats import mannwhitneyu, wilcoxon, ttest_rel, ttest_ind, ttest_1samp
@@ -117,11 +118,22 @@ control_model_key = 'J'
 for band in psd_area_instance_dict[control_model_key]:
     within_count = 0
     within_label_list, within_stat_list, within_p_val_list = [], [], []
+    mean_std_str_dict = defaultdict(dict)
     for model_key in ordered_model_key_list:
         if model_key not in psd_area_instance_dict:
             continue
         for control_pop_name in ['FF']:
+            mean_std_str_dict[model_key][control_pop_name] = \
+                '%s: %s; %s; mean: %.5f, sd: %.5f' % \
+                (band, model_key, control_pop_name,
+                 np.mean(psd_area_instance_dict[model_key][band][control_pop_name]),
+                 np.std(psd_area_instance_dict[model_key][band][control_pop_name]))
             for pop_name in ['E', 'I']:
+                mean_std_str_dict[model_key][pop_name] = \
+                    '%s: %s; %s; mean: %.5f, sd: %.5f' % \
+                    (band, model_key, pop_name,
+                     np.mean(psd_area_instance_dict[model_key][band][pop_name]),
+                     np.std(psd_area_instance_dict[model_key][band][pop_name]))
                 within_count += 1
                 this_label = '%s; %s < %s' % (model_key, pop_name, control_pop_name)
                 this_stat, this_p_val = ttest_rel(psd_area_instance_dict[model_key][band][pop_name],
@@ -150,15 +162,30 @@ for band in psd_area_instance_dict[control_model_key]:
         print('%s;  t-stat: %.5f; corrected p: %.5f' % (this_label, this_stat, this_pval))
     for this_label, this_stat, this_pval in zip(across_label_list, across_stat_list, across_p_val_list):
         print('%s;  t-stat: %.5f; corrected p: %.5f' % (this_label, this_stat, this_pval))
+    print('\n')
+    for model_key in mean_std_str_dict:
+        for pop_name in mean_std_str_dict[model_key]:
+            print(mean_std_str_dict[model_key][pop_name])
 
 within_count = 0
 within_label_list, within_stat_list, within_p_val_list = [], [], []
+mean_std_str_dict = defaultdict(dict)
 band = 'Theta'
 for model_key in ordered_model_key_list:
     if model_key not in nested_gamma_psd_area_instance_dict:
         continue
     for control_pop_name in ['FF']:
+        mean_std_str_dict[model_key][control_pop_name] = \
+            '%s; %s; mean: %.5f, sd: %.5f' % \
+            (model_key, control_pop_name,
+             np.mean(nested_gamma_psd_area_instance_dict[model_key][band][control_pop_name]),
+             np.std(nested_gamma_psd_area_instance_dict[model_key][band][control_pop_name]))
         for pop_name in ['E', 'I']:
+            mean_std_str_dict[model_key][pop_name] = \
+                '%s; %s; mean: %.5f, sd: %.5f' % \
+                (model_key, pop_name,
+                 np.mean(nested_gamma_psd_area_instance_dict[model_key][band][pop_name]),
+                 np.std(nested_gamma_psd_area_instance_dict[model_key][band][pop_name]))
             within_count += 1
             this_label = '%s; %s < %s' % (model_key, pop_name, control_pop_name)
             this_stat, this_p_val = ttest_rel(nested_gamma_psd_area_instance_dict[model_key][band][pop_name], \
@@ -172,13 +199,28 @@ rejected, corrected_p_val_list = fdrcorrection(within_p_val_list)
 print('\ntheta_nested_gamma_psd_area; %i comparisons:' % (len(corrected_p_val_list)))
 for this_label, this_stat, this_pval in zip(within_label_list, within_stat_list, corrected_p_val_list):
     print('%s;  t-stat: %.5f; corrected p: %.5f' % (this_label, this_stat, this_pval))
+print('\n')
+for model_key in mean_std_str_dict:
+    for pop_name in mean_std_str_dict[model_key]:
+        print(mean_std_str_dict[model_key][pop_name])
 
 within_count = 0
 within_label_list, within_stat_list, within_p_val_list = [], [], []
+mean_std_str_dict = defaultdict(lambda: defaultdict(dict))
 for model_key in ordered_model_key_list:
     if model_key not in spatial_mod_depth_instances_dict:
         continue
     for pop_name in ['E', 'I']:
+        mean_std_str_dict[model_key][pop_name]['actual'] = \
+            'actual: %s; %s; mean: %.5f, sd: %.5f' % \
+            (model_key, pop_name,
+             np.mean(spatial_mod_depth_instances_dict[model_key]['actual'][pop_name]),
+             np.std(spatial_mod_depth_instances_dict[model_key]['actual'][pop_name]))
+        mean_std_str_dict[model_key][pop_name]['predicted'] = \
+            'predicted: %s; %s; mean: %.5f, sd: %.5f' % \
+            (model_key, pop_name,
+             np.mean(spatial_mod_depth_instances_dict[model_key]['predicted'][pop_name]),
+             np.std(spatial_mod_depth_instances_dict[model_key]['predicted'][pop_name]))
         within_count += 1
         this_label = '%s; %s; actual < predicted' % (model_key, pop_name)
         this_stat, this_p_val = ttest_rel(spatial_mod_depth_instances_dict[model_key]['actual'][pop_name], \
@@ -191,13 +233,24 @@ rejected, corrected_p_val_list = fdrcorrection(within_p_val_list)
 print('\nspatial_mod_depth; %i comparisons:' % (len(corrected_p_val_list)))
 for this_label, this_stat, this_pval in zip(within_label_list, within_stat_list, corrected_p_val_list):
     print('%s;  t-stat: %.5f; corrected p: %.5f' % (this_label, this_stat, this_pval))
+print('\n')
+for model_key in mean_std_str_dict:
+    for pop_name in mean_std_str_dict[model_key]:
+        for category in mean_std_str_dict[model_key][pop_name]:
+            print(mean_std_str_dict[model_key][pop_name][category])
 
 within_count = 0
 within_label_list, within_stat_list, within_p_val_list = [], [], []
+mean_std_str_dict = defaultdict(dict)
 for model_key in ordered_model_key_list:
     if model_key not in delta_peak_locs_instances_dict:
         continue
     for pop_name in ['E', 'I']:
+        mean_std_str_dict[model_key][pop_name] = \
+            '%s; %s; mean: %.5f, sd: %.5f' % \
+            (model_key, pop_name,
+             np.mean(delta_peak_locs_instances_dict[model_key][pop_name]),
+             np.std(delta_peak_locs_instances_dict[model_key][pop_name]))
         within_count += 1
         this_label = '%s; %s == 0' % (model_key, pop_name)
         this_stat, this_p_val = ttest_1samp(delta_peak_locs_instances_dict[model_key][pop_name], 0.)
@@ -208,14 +261,29 @@ rejected, corrected_p_val_list = fdrcorrection(within_p_val_list)
 print('\ndelta_peak_locs; %i comparisons:' % (len(corrected_p_val_list)))
 for this_label, this_stat, this_pval in zip(within_label_list, within_stat_list, corrected_p_val_list):
     print('%s;  t-stat: %.5f; corrected p: %.5f' % (this_label, this_stat, this_pval))
+print('\n')
+for model_key in mean_std_str_dict:
+    for pop_name in mean_std_str_dict[model_key]:
+        print(mean_std_str_dict[model_key][pop_name])
 
 within_count = 0
 within_label_list, within_stat_list, within_p_val_list = [], [], []
+mean_std_str_dict = defaultdict(dict)
 for model_key in ordered_model_key_list:
     if model_key not in run_decoded_pos_error_instance_dict:
         continue
     for control_pop_name in ['FF']:
+        mean_std_str_dict[model_key][control_pop_name] = \
+            '%s; %s; mean: %.5f, sd: %.5f' % \
+            (model_key, control_pop_name,
+             np.mean(run_decoded_pos_error_instance_dict[model_key][control_pop_name]),
+             np.std(run_decoded_pos_error_instance_dict[model_key][control_pop_name]))
         for pop_name in ['E', 'I']:
+            mean_std_str_dict[model_key][pop_name] = \
+                '%s; %s; mean: %.5f, sd: %.5f' % \
+                (model_key, pop_name,
+                 np.mean(run_decoded_pos_error_instance_dict[model_key][pop_name]),
+                 np.std(run_decoded_pos_error_instance_dict[model_key][pop_name]))
             within_count += 1
             this_label = '%s; %s < %s' % (model_key, pop_name, control_pop_name)
             this_stat, this_p_val = ttest_rel(run_decoded_pos_error_instance_dict[model_key][pop_name], \
@@ -244,14 +312,29 @@ for this_label, this_stat, this_pval in zip(within_label_list, within_stat_list,
     print('%s;  t-stat: %.5f; corrected p: %.5f' % (this_label, this_stat, this_pval))
 for this_label, this_stat, this_pval in zip(across_label_list, across_stat_list, across_p_val_list):
     print('%s;  t-stat: %.5f; corrected p: %.5f' % (this_label, this_stat, this_pval))
+print('\n')
+for model_key in mean_std_str_dict:
+    for pop_name in mean_std_str_dict[model_key]:
+        print(mean_std_str_dict[model_key][pop_name])
 
 within_count = 0
 within_label_list, within_stat_list, within_p_val_list = [], [], []
+mean_std_str_dict = defaultdict(dict)
 for model_key in ordered_model_key_list:
     if model_key not in theta_sequence_score_instances_dict:
         continue
     for control_pop_name in ['FF']:
+        mean_std_str_dict[model_key][control_pop_name] = \
+            '%s; %s; mean: %.5f, sd: %.5f' % \
+            (model_key, control_pop_name,
+             np.mean(theta_sequence_score_instances_dict[model_key][control_pop_name]),
+             np.std(theta_sequence_score_instances_dict[model_key][control_pop_name]))
         for pop_name in ['E', 'I']:
+            mean_std_str_dict[model_key][pop_name] = \
+                '%s; %s; mean: %.5f, sd: %.5f' % \
+                (model_key, pop_name,
+                 np.mean(theta_sequence_score_instances_dict[model_key][pop_name]),
+                 np.std(theta_sequence_score_instances_dict[model_key][pop_name]))
             within_count += 1
             this_label = '%s; %s < %s' % (model_key, pop_name, control_pop_name)
             this_stat, this_p_val = ttest_rel(theta_sequence_score_instances_dict[model_key][pop_name], \
@@ -280,6 +363,10 @@ for this_label, this_stat, this_pval in zip(within_label_list, within_stat_list,
     print('%s;  t-stat: %.5f; corrected p: %.5f' % (this_label, this_stat, this_pval))
 for this_label, this_stat, this_pval in zip(across_label_list, across_stat_list, across_p_val_list):
     print('%s;  t-stat: %.5f; corrected p: %.5f' % (this_label, this_stat, this_pval))
+print('\n')
+for model_key in mean_std_str_dict:
+    for pop_name in mean_std_str_dict[model_key]:
+        print(mean_std_str_dict[model_key][pop_name])
 
 within_count = 0
 within_label_list, within_stat_list, within_p_val_list = [], [], []
@@ -290,7 +377,7 @@ for model_key in ordered_model_key_list:
         for pop_name in ['E', 'I']:
             within_count += 1
             this_label = '%s; %s == %s' % (model_key, pop_name, control_pop_name)
-            this_stat, this_p_val = kstest(replay_decoded_pos_instance_dict[model_key][pop_name], \
+            this_stat, this_p_val = kstest(replay_decoded_pos_instance_dict[model_key][pop_name],
                                            replay_decoded_pos_instance_dict[model_key][control_pop_name])
             within_stat_list.append(this_stat)
             within_p_val_list.append(this_p_val)
@@ -302,7 +389,7 @@ for model_key in ordered_model_key_list:
     if model_key != control_model_key:
         for pop_name in ['E', 'I']:
             this_label = '%s; %s; %s == %s' % (model_key, pop_name, model_key, control_model_key)
-            this_stat, this_p_val = kstest(replay_decoded_pos_instance_dict[model_key][pop_name], \
+            this_stat, this_p_val = kstest(replay_decoded_pos_instance_dict[model_key][pop_name],
                                            replay_decoded_pos_instance_dict[control_model_key][pop_name])
             across_stat_list.append(this_stat)
             across_p_val_list.append(this_p_val)
@@ -388,11 +475,22 @@ for this_label, this_stat, this_pval in zip(across_label_list, across_stat_list,
 
 within_count = 0
 within_label_list, within_stat_list, within_p_val_list = [], [], []
+mean_std_str_dict = defaultdict(dict)
 for model_key in ordered_model_key_list:
     if model_key not in offline_sequence_fraction_instances_dict:
         continue
     for control_pop_name in ['FF']:
+        mean_std_str_dict[model_key][control_pop_name] = \
+            '%s; %s; mean: %.5f, sd: %.5f' % \
+            (model_key, control_pop_name,
+             np.mean(offline_sequence_fraction_instances_dict[model_key][control_pop_name]),
+             np.std(offline_sequence_fraction_instances_dict[model_key][control_pop_name]))
         for pop_name in ['E', 'I']:
+            mean_std_str_dict[model_key][pop_name] = \
+                '%s; %s; mean: %.5f, sd: %.5f' % \
+                (model_key, pop_name,
+                 np.mean(offline_sequence_fraction_instances_dict[model_key][pop_name]),
+                 np.std(offline_sequence_fraction_instances_dict[model_key][pop_name]))
             within_count += 1
             this_label = '%s; %s < %s' % (model_key, pop_name, control_pop_name)
             this_stat, this_p_val = ttest_rel(offline_sequence_fraction_instances_dict[model_key][pop_name], \
@@ -421,6 +519,10 @@ for this_label, this_stat, this_pval in zip(within_label_list, within_stat_list,
     print('%s;  t-stat: %.5f; corrected p: %.5f' % (this_label, this_stat, this_pval))
 for this_label, this_stat, this_pval in zip(across_label_list, across_stat_list, across_p_val_list):
     print('%s;  t-stat: %.5f; corrected p: %.5f' % (this_label, this_stat, this_pval))
+print('\n')
+for model_key in mean_std_str_dict:
+    for pop_name in mean_std_str_dict[model_key]:
+        print(mean_std_str_dict[model_key][pop_name])
 
 """
 

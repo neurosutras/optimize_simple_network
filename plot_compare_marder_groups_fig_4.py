@@ -177,7 +177,10 @@ for group_key in ordered_group_keys:
         result = stats.ttest_ind(theta_sequence_score_marder_group_dict[group_key]['E'],
                                     theta_sequence_score_marder_group_dict[control_group_key]['E'])
         print('unpaired t-test:', ylabel, '%s vs %s' % (group_key, control_group_key), result,
-              'corrected pvalue=%s' % (result.pvalue * num_comparisons))
+              'corrected pvalue=%.5f' % (min(1., result.pvalue * num_comparisons)))
+print('\n')
+for vals, group_key in zip(data, ordered_group_keys):
+    print('%s; mean: %.5f, sd: %.5f' % (group_key, np.mean(vals), np.std(vals)))
 scattered_boxplot(flat_axes[axis], data, showfliers='unif')
 flat_axes[axis].plot(flat_axes[axis].get_xlim(),
                      np.ones(2) * np.mean(theta_sequence_score_marder_group_dict[control_group_key]['FF']),

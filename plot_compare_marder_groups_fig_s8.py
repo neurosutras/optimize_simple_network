@@ -109,7 +109,10 @@ for group_key in ordered_group_keys:
         result = stats.ttest_ind(spatial_mod_depth_marder_group_dict[group_key]['E'],
                                     spatial_mod_depth_marder_group_dict[control_group_key]['E'])
         print('unpaired t-test:', ylabel, '%s vs %s' % (group_key, control_group_key), result,
-              'corrected pvalue=%s' % (result.pvalue * num_comparisons))
+              'corrected pvalue=%.5f' % (min(1., result.pvalue * num_comparisons)))
+print('\n')
+for vals, group_key in zip(data, ordered_group_keys):
+    print('%s; mean: %.5f, sd: %.5f' % (group_key, np.mean(vals), np.std(vals)))
 scattered_boxplot(flat_axes[axis], data, showfliers='unif')
 flat_axes[axis].set_xticklabels(xticklabels, rotation=45, ha='right', rotation_mode='anchor')
 flat_axes[axis].set_ylim(0., 1.1*flat_axes[axis].get_ylim()[1])
@@ -124,12 +127,15 @@ for group_key in ordered_group_keys:
         result = stats.ttest_ind(fraction_active_run_marder_group_dict[group_key]['E'],
                                     fraction_active_run_marder_group_dict[control_group_key]['E'])
         print('unpaired t-test:', ylabel, '%s vs %s' % (group_key, control_group_key), result,
-              'corrected pvalue=%s' % (result.pvalue * num_comparisons))
+              'corrected pvalue=%.5f' % (min(1., result.pvalue * num_comparisons)))
 scattered_boxplot(flat_axes[axis], data, showfliers='unif')
 flat_axes[axis].set_xticklabels(xticklabels, rotation=45, ha='right', rotation_mode='anchor')
 flat_axes[axis].set_ylim(0., 1.1*flat_axes[axis].get_ylim()[1])
 flat_axes[axis].set_ylabel(ylabel)
 axis += 1
+print('\n')
+for vals, group_key in zip(data, ordered_group_keys):
+    print('%s; mean: %.5f, sd: %.5f' % (group_key, np.mean(vals), np.std(vals)))
 
 data = [rhythmicity_marder_group_dict[group_key]['Gamma']['E'] for group_key in ordered_group_keys]
 ylabel = 'Gamma rhythmicity'
@@ -139,7 +145,7 @@ for group_key in ordered_group_keys:
         result = stats.ttest_ind(rhythmicity_marder_group_dict[group_key]['Gamma']['E'],
                                     rhythmicity_marder_group_dict[control_group_key]['Gamma']['E'])
         print('unpaired t-test:', ylabel, '%s vs %s' % (group_key, control_group_key), result,
-              'corrected pvalue=%s' % (result.pvalue * num_comparisons))
+              'corrected pvalue=%.5f' % (min(1., result.pvalue * num_comparisons)))
 scattered_boxplot(flat_axes[axis], data, showfliers='unif')
 flat_axes[axis].plot(flat_axes[axis].get_xlim(),
                      np.ones(2) * np.mean(rhythmicity_marder_group_dict[control_group_key]['Gamma']['FF']),
@@ -148,6 +154,9 @@ flat_axes[axis].set_yscale('log')
 flat_axes[axis].set_xticklabels(xticklabels, rotation=45, ha='right', rotation_mode='anchor')
 flat_axes[axis].set_ylabel(ylabel)
 axis += 1
+print('\n')
+for vals, group_key in zip(data, ordered_group_keys):
+    print('%s; mean: %.5f, sd: %.5f' % (group_key, np.mean(vals), np.std(vals)))
 
 data = [rhythmicity_marder_group_dict[group_key]['Theta']['E'] for group_key in ordered_group_keys]
 ylabel = 'Theta rhythmicity'
@@ -157,7 +166,7 @@ for group_key in ordered_group_keys:
         result = stats.ttest_ind(rhythmicity_marder_group_dict[group_key]['Theta']['E'],
                                     rhythmicity_marder_group_dict[control_group_key]['Theta']['E'])
         print('unpaired t-test:', ylabel, '%s vs %s' % (group_key, control_group_key), result,
-              'corrected pvalue=%s' % (result.pvalue * num_comparisons))
+              'corrected pvalue=%.5f' % (min(1., result.pvalue * num_comparisons)))
 scattered_boxplot(flat_axes[axis], data, showfliers='unif')
 flat_axes[axis].plot(flat_axes[axis].get_xlim(),
                      np.ones(2) * np.mean(rhythmicity_marder_group_dict[control_group_key]['Theta']['FF']),
@@ -166,6 +175,9 @@ flat_axes[axis].set_yscale('log')
 flat_axes[axis].set_xticklabels(xticklabels, rotation=45, ha='right', rotation_mode='anchor')
 flat_axes[axis].set_ylabel(ylabel)
 axis += 1
+print('\n')
+for vals, group_key in zip(data, ordered_group_keys):
+    print('%s; mean: %.5f, sd: %.5f' % (group_key, np.mean(vals), np.std(vals)))
 
 data = [offline_sequence_fraction_marder_group_dict[group_key]['E'] for group_key in ordered_group_keys]
 ylabel = 'Offline sequences\n(fraction of events)'
@@ -175,7 +187,7 @@ for group_key in ordered_group_keys:
         result = stats.ttest_ind(offline_sequence_fraction_marder_group_dict[group_key]['E'],
                                     offline_sequence_fraction_marder_group_dict[control_group_key]['E'])
         print('unpaired t-test:', ylabel, '%s vs %s' % (group_key, control_group_key), result,
-              'corrected pvalue=%s' % (result.pvalue * num_comparisons))
+              'corrected pvalue=%.5f' % (min(1., result.pvalue * num_comparisons)))
 scattered_boxplot(flat_axes[axis], data, showfliers='unif')
 flat_axes[axis].plot(flat_axes[axis].get_xlim(),
                      np.ones(2) * np.mean(offline_sequence_fraction_marder_group_dict[control_group_key]['FF']),
@@ -184,6 +196,9 @@ flat_axes[axis].set_xticklabels(xticklabels, rotation=45, ha='right', rotation_m
 flat_axes[axis].set_ylim(0., 1.1*flat_axes[axis].get_ylim()[1])
 flat_axes[axis].set_ylabel(ylabel)
 axis += 1
+print('\n')
+for vals, group_key in zip(data, ordered_group_keys):
+    print('%s; mean: %.5f, sd: %.5f' % (group_key, np.mean(vals), np.std(vals)))
 
 fig.tight_layout(h_pad=1.)
 fig.show()
